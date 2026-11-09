@@ -1,0 +1,68 @@
+# golangci-lint v2. The layering rules encode CLAUDE.md hard rules 1 and 7; they apply to
+# packages that don't exist yet, so they hold from the first line of each package.
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - depguard
+    - errorlint
+    - forbidigo
+    - gosec
+    - misspell
+  settings:
+    errcheck:
+      # Writing CLI output to stdout/stderr; HTTP response writes stay checked.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    depguard:
+      rules:
+        # Rule 1: only internal/store/... does filesystem, inotify, git or SQLite I/O.
+        io-only-in-store:
+          files:
+            - "**/internal/**"
+            - "!**/internal/store/**"
+          deny:
+            - pkg: database/sql
+              desc: "SQLite access lives in internal/store/sql (CLAUDE.md rule 1)"
+            - pkg: modernc.org/sqlite
+              desc: "SQLite access lives in internal/store/sql (CLAUDE.md rule 1)"
+            - pkg: github.com/go-git/go-git
+              desc: "git I/O lives in internal/store/git, used through gitvault (rule 1, ADR-0016)"
+            - pkg: github.com/fsnotify/fsnotify
+              desc: "inotify lives in internal/store/watch (CLAUDE.md rule 1)"
+            - pkg: golang.org/x/sys/unix
+              desc: "*at syscalls are allowed only in internal/store/fs (ADR-0006)"
+        # http is handlers + middleware only.
+        http-no-store:
+          files:
+            - "**/internal/http/**"
+          deny:
+            - pkg: github.com/joaoheytor/PostelMD/internal/store
+              desc: "handlers call internal/service, never the store (CLAUDE.md rule 1)"
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.(Getenv|LookupEnv|Environ)$
+          msg: "read settings through internal/config (CLAUDE.md rule 7)"
+        - pattern: ^os\.(Open|OpenFile|OpenRoot|Create|CreateTemp|ReadFile|WriteFile|ReadDir|Stat|Lstat)$
+          msg: "filesystem I/O goes through internal/store (os.Root confinement, CLAUDE.md rule 1)"
+        - pattern: ^os\.(Remove|RemoveAll|Rename|Link|Symlink|Mkdir|MkdirAll|MkdirTemp|Chmod|Chown|Chtimes|Truncate)$
+          msg: "filesystem I/O goes through internal/store (os.Root confinement, CLAUDE.md rule 1)"
+  exclusions:
+    rules:
+      - path: internal/config/
+        linters: [forbidigo]
+      - path: internal/store/
+        linters: [forbidigo]
+        text: "filesystem I/O"
+      - path: _test\.go$
+        linters: [forbidigo]
+        text: "filesystem I/O"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

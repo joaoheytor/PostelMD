@@ -16,9 +16,10 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         changes the cosign identity that users pin, ADR-0015);
       - **before the first `@postelmd/plugin-api` publish (v0.4):** register the npm org;
       - **before 1.0:** reserve a domain and run a trademark search.
-- [ ] Repository settings per `docs/ci-cd.md` §2 (rulesets, Actions permissions, private
-      vulnerability reporting, secret scanning, CODEOWNERS, templates)
-- [ ] Repo bootstrap: Go module, Vite + TS app, Makefile (`make ci` = local parity), `ci.yaml`
+- [x] Repository settings per `docs/ci-cd.md` §2 (rulesets, Actions permissions, private
+      vulnerability reporting, secret scanning, CODEOWNERS, templates). Required checks are
+      added once CI has reported on a PR.
+- [x] Repo bootstrap: Go module, Vite + TS app, Makefile (`make ci` = local parity), `ci.yaml`
       v0.0 jobs, CodeQL, Scorecard, Renovate
 - [ ] **DCO enforcement:** install the DCO GitHub App, make it a required status check on
       `main`, and verify it with one unsigned test PR
@@ -54,7 +55,7 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
 - [ ] **Spike: go-git capabilities.** Pin the go-git version; confirm fast-forward pull, push,
       blob-level staging from in-memory bytes and reachable-object enumeration; evaluate
       three-way merge (go-git v6, or our own text merge). Record the result in ADR-0016.
-- [ ] **Spike: confinement primitives** (ADR-0006). `os.Root` (Go 1.25) plus the `x/sys/unix`
+- [ ] **Spike: confinement primitives** (ADR-0006). `os.Root` (Go 1.25+ API) plus the `x/sys/unix`
       `*at` exception: `renameat2(RENAME_NOREPLACE)`, `openat2(RESOLVE_NO_SYMLINKS |
       RESOLVE_BENEATH)`, and a go-git `billy.Filesystem` adapter over the vault root; fuzzed
       against symlink swaps.

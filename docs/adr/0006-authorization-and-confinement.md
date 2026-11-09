@@ -23,8 +23,8 @@ sensitive paths from listings is not the same as denying access to them.
 - Permissions are re-checked on every request and on every SSE event delivery (ADR-0018).
 
 ### Confinement
-- The store opens each vault as an `*os.Root` (**Go 1.25+**, which adds `Rename`, `Link`,
-  `MkdirAll` and `RemoveAll`). Every file operation goes through it, which blocks `..`,
+- The store opens each vault as an `*os.Root` (needs **Go 1.25+**, which adds `Rename`, `Link`,
+  `MkdirAll` and `RemoveAll`; the project builds with the latest supported Go, ADR-0001). Every file operation goes through it, which blocks `..`,
   absolute paths and symlink escapes at the OS level.
 - `os.Root` has no no-replace rename and **follows symlinks that stay inside the root**. So
   `internal/store/fs` is the one place allowed to call `x/sys/unix` directory-fd syscalls on

@@ -9,3 +9,9 @@
 **/.DS_Store
 /.idea/
 /.vscode/
+
+# Build outputs and dependencies
+/bin/
+/web/node_modules/
+/web/dist/
+/coverage/

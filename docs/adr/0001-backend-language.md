@@ -21,6 +21,10 @@ requirement, then the DevOps/SRE audience. Every round ranked Go > TS > Rust.
 - **Frontend:** TypeScript, Vite and CodeMirror 6. A framework-free `core/` holds state. The UI
   shell framework will be chosen by a spike and recorded in a later ADR, and must never
   leak into the plugin API.
+- **Go version policy:** build with the **latest supported Go release** (Go supports the two
+  newest majors). `go.mod` sets the language version and pins the `toolchain` patch; Renovate
+  bumps patches, and the project moves to a new major within a month of its release. Currently
+  Go 1.27. Minimum feature needs, such as `os.Root` (ADR-0006), are stated where they're used.
 - **API contract:** OpenAPI. Go handlers and TS types are generated or checked against it.
 
 ## Consequences

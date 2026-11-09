@@ -58,9 +58,9 @@ explicitly wherever a job checks out code.
 | `pr-title` | Conventional Commit format for the PR title (types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`; `!` or `BREAKING CHANGE` for breaking changes); runs only on `pull_request` | v0.0 |
 | `changelog` | `feat`, `fix`, `perf`, breaking, and security-fix PRs must add an entry under `## [Unreleased]` in `CHANGELOG.md`, unless labelled `skip-changelog`; also checks the Keep a Changelog structure | v0.0 |
 | `lint` | `golangci-lint` (with depguard/forbidigo rules for the layering and no-`os.Getenv`), `eslint`, `tsc --noEmit`, file-size check (300 warn / 500 fail), `actionlint`, `shellcheck`, `yamllint` | v0.0 |
-| `test-go` | `go test -race ./...`, short fuzz runs (`-fuzztime=30s` per target) | v0.0 |
+| `test-go` | `go test -race ./...` and the build; short fuzz runs (`-fuzztime=30s` per target) once fuzz targets exist | v0.0 |
 | `test-web` | Vitest for `web/src/core` and `packages/plugin-api` | v0.0 |
-| `scenarios` | The failure-scenario suite (fault injection, real temp dirs) | v0.0 |
+| `scenarios` | The failure-scenario suite (fault injection, real temp dirs); enabled with the first `internal/store` package | v0.0 |
 | `vuln` | `govulncheck`, `npm audit --omit=dev` | v0.0 |
 | `e2e` | Playwright smoke tests against the built binary | v0.1 |
 | `image` | Multi-arch build (`linux/amd64`, `linux/arm64`) with buildx; Trivy (threshold per ADR-0015); size check (< 40 MB); `docker run` smoke test, including the duplicate-writer refusal; **not pushed** | v0.1 |

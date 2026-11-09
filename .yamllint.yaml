@@ -1,0 +1,16 @@
+extends: default
+
+ignore: |
+  web/node_modules/
+  web/dist/
+
+rules:
+  document-start: disable
+  line-length:
+    max: 140
+    level: warning
+  truthy:
+    # GitHub Actions uses the `on:` key.
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1

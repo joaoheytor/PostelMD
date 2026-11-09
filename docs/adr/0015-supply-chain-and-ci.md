@@ -11,6 +11,11 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 ## Decision
 - **Dependencies**
   - No new dependency without an ADR line explaining why.
+  - **Development-only tooling** (not shipped, so no runtime ADR needed): TypeScript, Vite,
+    Vitest, ESLint with `typescript-eslint`, golangci-lint, actionlint, shellcheck and yamllint.
+    `govulncheck` is a Go `tool` dependency in `go.mod`, so local runs and CI use the same
+    version. Dev-only advisories are tracked but don't block CI; the gate is what ships
+    (`npm audit --omit=dev`, `govulncheck`, Trivy).
   - Go modules + `govulncheck`. npm with a lockfile; `npm ci --ignore-scripts`; no hand
     vendoring.
   - Renovate covers Go, npm, GitHub Actions (SHA-pinned) and base image digests. Patch updates
