@@ -88,7 +88,7 @@ administrative commands are split:
 |---|---|---|
 | **Online** (delegate to the running server) | `backup`, `reindex`, `reset-admin`, `keys rotate`, `vault lock/unlock`, `plugin disable/import-revocations` | Connect to the admin socket `/data/.postelmd/admin.sock` (mode 0600, owned by the app user). Being able to open the socket is the authentication: you can only do it from inside the container (`docker exec postelmd /postelmd …`, `kubectl exec`) or as the same Unix user. Every call is audit-logged as `actor: cli`. |
 | **Online or offline** | Same as above | If no server holds the instance lock, the command takes the lock and runs directly (offline). |
-| **Offline only** | `restore`, database-only rollback (ADR-0015) | Refuse if the instance lock is held. |
+| **Offline only** | `restore`, `db rollback` (database-only rollback, ADR-0015) | Refuse if the instance lock is held. |
 | **Stateless** | `healthcheck`, `version` | Only read HTTP or nothing. |
 
 ### Shutdown

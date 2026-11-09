@@ -59,6 +59,13 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   pass. Any ambiguity (for example several identical template files) gives every new path a new
   ID and tombstones the old IDs. Open tabs on a tombstoned ID see `410` with a "file moved or
   deleted externally" dialog;
+- across **brief absences**: editors and sync tools replace files by rename, so one scan can
+  miss a file that is about to come back. A path absent in one reconcile pass is only
+  **suspected missing**. It is tombstoned, or its ID moved by the rename match above, only if
+  a **second pass** at least 10 s later (scheduled for the suspects, not the full interval)
+  still finds it absent and no intent names it. If it is back, the suspicion is dropped and the
+  ID kept (with a generation bump if the content changed). While suspected, a save to it gets
+  `412` and the client keeps its draft;
 - after a crash during a **content write**: the save intent (§5) decides, never a hash
   comparison alone. The generation bump, new hash and outbox row commit in the transaction
   that clears the intent, *after* the rename is durable;
@@ -339,6 +346,13 @@ recovery, and asserts the table's outcome. A committed SQLite transaction counts
     It never touches another tab's draft.
   - On open, if drafts from other editing sessions (closed tabs, crashed browsers) exist for the
     file, the recovery dialog lists all of them.
+  - **Orphaned drafts.** On vault load, the client lists every local draft for that vault
+    whose `esid` no live tab holds and that wasn't opened yet: drafts of closed tabs, of files
+    tombstoned or moved since (`410`), and of files the user can no longer open. Each can be
+    opened beside the current version, saved as a new file, exported or discarded.
+    **PostelMD never deletes a draft without asking**; the only exceptions are in ADR-0018
+    (suspension and revocation). The client asks the browser for persistent storage
+    (`navigator.storage.persist()`) so eviction under storage pressure is unlikely.
   - Tabs coordinate over a `BroadcastChannel`: only one tab at a time edits a file, and the
     others follow read-only with a "take over editing" button. Offline tabs can't coordinate,
     so their drafts stay separate and surface in the recovery dialog.

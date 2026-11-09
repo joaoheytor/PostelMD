@@ -66,6 +66,28 @@ off by default and a single shared token.
     verification and decryption;
   - re-encryption of credentials runs in the background, after which old keys can be retired;
   - rotating `session` revokes all sessions.
+- **Crash safety of rotation and retirement** (CLAUDE.md rule 14). Both hold the instance
+  backup barrier (ADR-0017) and write a durable intent first (op ID, purpose, key ID, phase).
+  - **Rotate:** write the new key to a temp file in `keys/`, `fsync`, rename it to
+    `<purpose>/<key-id>.key` (no-clobber), `fsync` the directory; then, in one transaction,
+    make it the active key (and revoke all sessions for `session`) and clear the intent.
+
+    | Key file | Active key in the DB | Action |
+    |---|---|---|
+    | Absent | Old | Not applied: remove any temp, drop the intent |
+    | Present, parses, ID matches | Old | Roll forward: activate it in one transaction with clearing the intent |
+    | Present | New | Applied: drop the intent |
+    | Anything else (absent while the DB names it, unreadable) | | Interference: refuse to start, naming the key; the admin restores the key ring from a backup |
+  - **Re-encryption** needs no intent: each record is re-wrapped in its own transaction, and a
+    query for records still carrying the old key ID is the progress, so it resumes after a
+    crash.
+  - **Retire:** in one transaction, check that **no** record, token or webhook references the
+    key and mark it retired; only then delete its file and `fsync` the directory. Recovery:
+    retired with the file present → delete it; retired and absent → drop the intent; not
+    retired → drop the intent (nothing was touched). A key is never deleted while anything
+    references it.
+  - Keys supplied from outside (a K8s Secret or `_FILE`) are read-only to PostelMD: they are
+    rotated by changing the Secret, and startup refuses if the active key ID is missing.
 - **Persistence:** keys are never regenerated on restart. They are included in encrypted
   backups unless supplied from outside (ADR-0017).
 - **Loss:** losing `credentials` makes the stored remote credentials unrecoverable. Users

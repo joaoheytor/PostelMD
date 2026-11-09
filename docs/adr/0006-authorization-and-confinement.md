@@ -56,7 +56,9 @@ target.
 ### Reserved paths
 One function, `store.IsReserved(relPath)`, is applied by the store to **every** operation:
 read, write, create, upload, move (both source and destination), delete, folder ops, search
-results, history and diff, reconciliation, indexing and plugin vault access.
+results, history and diff, reconciliation, the watcher, indexing, the commit-scan and staging
+(a reserved path is never put in a commit), pull (a target tree containing one is refused;
+ADR-0016) and plugin vault access.
 
 | Reserved (case-insensitive, any depth) | Reason |
 |---|---|
