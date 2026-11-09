@@ -8,7 +8,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: help ci build test test-go test-web lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci build test test-go test-web fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -25,6 +25,9 @@ test-go:
 
 test-web: web-deps
 	cd web && npm test
+
+fuzz: ## Every Go fuzz target for FUZZTIME (default 30s)
+	scripts/fuzz.sh
 
 lint: lint-go lint-web lint-repo ## All linters and the file-size check
 

@@ -38,6 +38,21 @@ sensitive paths from listings is not the same as denying access to them.
 - Symlinks inside vaults are not followed by any operation: they are listed as "unsupported"
   entries and are not readable through the API.
 
+### Confinement spike results (2026-11-09, Go 1.27.3, Linux 6.18)
+Implemented in `internal/store/fs` (`ReadFile`, `RenameNoReplace`), with tests and a fuzz
+target.
+
+| Question | Finding | Consequence |
+|---|---|---|
+| Does `os.Root` follow symlinks? | Yes, for any symlink that stays inside the root (`link-inside`, `dirlink/note.md` were read). It blocks escapes. | `os.Root` alone can't enforce "symlinks are never followed". The store uses `openat2` instead. |
+| Does `Root.Rename` overwrite? | **Yes, silently.** | Never used for moves; ADR-0003 moves use `renameat2(RENAME_NOREPLACE)`. |
+| `openat2(RESOLVE_BENEATH \| RESOLVE_NO_SYMLINKS \| RESOLVE_NO_MAGICLINKS)` | Rejects a symlink in **any** component, including the last (`ELOOP`), and every escape (`EXDEV`). Don't add `O_NOFOLLOW`: with `O_PATH` it returns the symlink itself. | The single resolution primitive for every vault path. `OpenRoot` probes it and fails fast on kernels < 5.6. |
+| Symlink-swap race (directory atomically exchanged with an escaping symlink in a tight loop) | ~330,000 reads and ~38,000 renames across runs: **0 escapes**. A naive `filepath.Join` + `os.ReadFile` under the same attack leaks within milliseconds (negative control, kept as a test). | The fd-relative design holds; the race tests stay as permanent regression tests. |
+| Fuzzing `ReadFile` with arbitrary paths | 828,302 executions in 30 s, no read outside the vault. | Runs on every PR (`make fuzz`, 30 s per target). |
+| `renameat2(RENAME_NOREPLACE)` by filesystem | ext4 and tmpfs: supported. **9p** (WSL `/mnt/c`, the Docker Desktop bind-mount family): **`EINVAL` (unsupported)**. On 9p, `link()`, `openat2` and `flock` work. | `RenameNoReplace` returns `ErrNoReplaceUnsupported` and changes nothing. Files then use the ADR-0003 `link`+`unlink` fallback; folder moves need the `rename-checked` mechanism (issue #6). Filesystem detection: issue #24. |
+| Non-Linux | Not implemented: `OpenRoot` returns `errors.ErrUnsupported`. The code still compiles for macOS and Windows. | The server runs on Linux (including Docker Desktop's VM). The portable `O_NOFOLLOW` walk arrives with personal mode (issue #34). |
+| go-git `billy.Filesystem` adapter | Not evaluated here; it depends on go-git's API. | Moved to the go-git capabilities spike. |
+
 ### Reserved paths
 One function, `store.IsReserved(relPath)`, is applied by the store to **every** operation:
 read, write, create, upload, move (both source and destination), delete, folder ops, search
