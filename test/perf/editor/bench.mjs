@@ -78,13 +78,14 @@ for (let i = 0; i < SAMPLES + 2; i++) {
 await browser.close();
 server.close();
 
-const summary = (xs) => ({ p95: pct(xs.map((s) => s.p95), 0.95), median: pct(xs.map((s) => s.p95), 0.5), procP95: pct(xs.map((s) => s.procP95), 0.95) });
+// PRD procedure: each figure is the median over sessions of the session p95.
+const summary = (xs) => ({ paint: pct(xs.map((s) => s.p95), 0.5), processing: pct(xs.map((s) => s.procP95), 0.5) });
 const result = {
   runner: { cpus: os.cpus().length, model: os.cpus()[0]?.model ?? "", os: `${os.platform()} ${os.release()}`, browser: browser.version() },
   samples,
   control: summary(samples.control),
   editor: summary(samples.editor),
 };
-result.ratio = result.editor.p95 / result.control.p95;
+result.ratio = result.editor.paint / result.control.paint;
 await writeFile(process.env.RESULT ?? "result.json", JSON.stringify(result, null, 2));
 console.log(JSON.stringify({ runner: result.runner, control: result.control, editor: result.editor, ratio: result.ratio.toFixed(3) }));
