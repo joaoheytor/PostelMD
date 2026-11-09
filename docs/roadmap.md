@@ -62,7 +62,11 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         an open intent included, a restore onto an empty volume that starts in **quarantine**
         (a user **or admin** suspended after the backup can't log in; only the recovery
         identity can); snapshot-only backup refused on a multi-volume layout;
-      - **upgrade:** startup repair or a worker running before any request still closes
+      - **keys:** a crash at each step of rotation and retirement; a key is never deleted
+        while a record references it;
+      - **upgrade:** a crash at each step of the pre-migrate snapshot and of
+        `postelmd db rollback` (a stale WAL is never replayed into the restored file);
+        startup repair or a worker running before any request still closes
         database-only rollback eligibility;
       - **outbox:** overflow by kind (commit obligations survive, clients get `resync`);
       - **single writer:** a second process on the same `/data` refuses to start;

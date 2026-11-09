@@ -16,7 +16,7 @@ holds identity, ACLs and a **rebuildable** index. One image serves `docker run`,
 
 ```
 cmd/postelmd/          main + subcommands (serve, healthcheck, backup, restore, reindex,
-                       reset-admin, keys, vault, plugin); online ones go through admin.sock
+                       reset-admin, keys, vault, plugin, db); online ones go through admin.sock
 internal/
   http/                handlers + middleware ONLY (no filesystem, no SQL)
   service/             business logic, authorization checks

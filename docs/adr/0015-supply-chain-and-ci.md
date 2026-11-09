@@ -115,6 +115,33 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   - Before migrating, the app writes an automatic `VACUUM INTO` snapshot to
     `/data/.postelmd/pre-migrate-<from>-<to>.db`. An interrupted upgrade is safe, because each
     migration is atomic and re-running it resumes.
+  - **Snapshot crash safety.** The migration intent can't live in the database being migrated,
+    so it is a sidecar file, `/data/.postelmd/migrate.intent` (`from`, `to`, snapshot path),
+    written and `fsync`ed first. The snapshot goes to `<name>.tmp`, is `fsync`ed and verified
+    (`PRAGMA integrity_check`, schema version = `from`), then renamed into place and the
+    directory `fsync`ed. Migrations start only after that. On startup, with the intent present:
+
+    | Schema version | Snapshot | Action |
+    |---|---|---|
+    | `from` | Absent (a temp at most) | Not applied: remove the temp, take the snapshot again |
+    | `from` | Present | Snapshot done: verify it again, then migrate |
+    | Between `from` and `to` | Present | Resume the remaining migrations |
+    | `to` | Present | Done: write the `post_migration_started` marker if missing, remove the intent |
+    | Anything else | | Interference: refuse to start; the admin uses the runbook |
+  - **Database-only rollback** is an offline command (`postelmd db rollback`), run under the
+    instance lock, never by hand-copying files:
+    1. refuse unless the snapshot passes `PRAGMA integrity_check` and has schema version
+       `from`, and **neither** `post_migration_started` marker exists;
+    2. write a rollback intent (sidecar, `fsync`ed);
+    3. **move** `app.db`, `app.db-wal` and `app.db-shm` into `rollback-<timestamp>/` (never
+       delete them). A stale WAL left next to the restored file would be replayed into it and
+       corrupt it;
+    4. copy the snapshot to `app.db.tmp`, `fsync`, rename it to `app.db`, `fsync` the directory;
+    5. remove the intent.
+
+    Re-running the command after a crash continues from the intent: if `app.db` is absent and
+    `rollback-<timestamp>/` holds the moved files, it continues at step 4; if `app.db` already
+    matches the snapshot's hash, it removes the intent.
   - **Rollback has two forms, chosen by whether the new version ever accepted writes:**
     - **Database-only rollback** (stop, restore the pre-migration snapshot, start the previous
       version) is allowed **only if the upgraded instance never started post-migration
