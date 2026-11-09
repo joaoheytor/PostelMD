@@ -105,7 +105,9 @@ side effect):
   ADR-0003 §1 is documented as before.
 
 ### Git
-- `/data` is a git repository. The editor shows the uncommitted changes, and the user
+- The vault is the git repository: the working tree is `/data/vaults/notes`, and its git
+  metadata is `/data/vaults/notes/.git` (the repository setup adopts or creates). `/data`
+  itself is never a repository. The editor shows the uncommitted changes, and the user
   commits them with a message. Optionally, an auto-commit runs after a quiet window.
 - A commit is built from bytes (#39), its objects are durable before the ref moves (#56),
   and the ref is moved with git's lockfile protocol (#54). After a crash, the branch is the
