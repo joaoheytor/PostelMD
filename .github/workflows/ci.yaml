@@ -7,6 +7,7 @@ on:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [main]
+  workflow_dispatch: # manual re-runs (a startup failure can't be retried)
 
 permissions: {}
 
@@ -168,7 +169,7 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           # pr-title and changelog only run on pull_request.
-          ALLOWED_SKIPS: ${{ github.event_name == 'push' && 'pr-title changelog' || '' }}
+          ALLOWED_SKIPS: ${{ github.event_name != 'pull_request' && 'pr-title changelog' || '' }}
         run: |
           fail=0
           for job in $(printf '%s' "$NEEDS" | jq -r 'keys[]'); do
