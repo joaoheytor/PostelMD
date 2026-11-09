@@ -38,6 +38,7 @@ Everything else consumes their interfaces.
 | `store/git` | go-git adapter. go-git touches only `.git/`; commits are built from supplied bytes and worktree changes go through `store/fs` (ADR-0016 spike results) |
 | `store/sql` | SQLite repositories (sqlc), migrations, outbox, intent log |
 | `store/lock` | Instance lock (`flock`), vault and file locks with fixed lock ordering |
+| `store/auditfile` | The `file:` audit sink: an append-only JSON-lines file on a separate volume (§9). Filesystem I/O, so it lives under `store`. |
 | `vault` | Vault lifecycle and states, including maintenance mode |
 | `sync` | Debouncing of watcher hints, the reconciler, the per-vault event bus, SSE fan-out with replay and per-event authorization |
 | `gitvault` | The git state machine (ADR-0016): auto-commit batching, pull/push policy, crash repair |
@@ -46,6 +47,8 @@ Everything else consumes their interfaces.
 | `auth` | Providers (`local`, `oidc`, `trusted-header`), sessions, the account lifecycle (ADR-0018) |
 | `keys` | Key ring: purposes, versions, rotation, envelope encryption (ADR-0005) |
 | `setup` | First-run lock and setup token |
+| `audit` | The only way to record a security-relevant action (CLAUDE.md rule 15): writes the event to the DB (through `store/sql`) **and** to the external sink: `stdout` via `slog`, `file:` via `store/auditfile`, `webhook` via `egress`. Never receives note content or secret values. |
+| `egress` | The single outbound HTTP client (§11, CLAUDE.md rule 13): IP policy with pinned DNS, approved exceptions per purpose, re-checked redirects, timeouts and size caps. Installed as go-git's `http`/`https` transport (#40). Network I/O only, so it isn't under `store`. |
 | `plugins` | Manifests, signature and integrity checks, approvals bound to capabilities, revocation list |
 | `config` | Flags > env (`_FILE`) > `config.yaml` > defaults. **The single documented exception to the boundary rule:** it reads `config.yaml` and `_FILE` secrets during bootstrap, before the store exists. |
 

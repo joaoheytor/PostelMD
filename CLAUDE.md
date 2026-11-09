@@ -20,7 +20,10 @@ cmd/postelmd/          main + subcommands (serve, healthcheck, backup, restore, 
 internal/
   http/                handlers + middleware ONLY (no filesystem, no SQL)
   service/             business logic, authorization checks
-  store/{fs,watch,git,sql,lock}/   the ONLY packages that do filesystem/inotify/git/SQLite I/O
+  store/{fs,watch,git,sql,lock,auditfile}/   the ONLY packages that do filesystem/inotify/
+                       git/SQLite I/O
+  audit/               security-relevant events: DB + external sink (rule 15)
+  egress/              the single outbound HTTP client (rule 13)
   vault/ sync/ gitvault/ secrets/ index/ auth/ keys/ plugins/ config/ setup/
 web/
   src/core/            framework-free: doc store, save queue, sync engine, plugin host
