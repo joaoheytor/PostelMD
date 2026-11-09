@@ -54,11 +54,12 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       These become permanent regression tests.
 - [ ] **Spike: go-git capabilities.** Pin the go-git version; confirm fast-forward pull, push,
       blob-level staging from in-memory bytes and reachable-object enumeration; evaluate
-      three-way merge (go-git v6, or our own text merge). Record the result in ADR-0016.
-- [ ] **Spike: confinement primitives** (ADR-0006). `os.Root` (Go 1.25+ API) plus the `x/sys/unix`
-      `*at` exception: `renameat2(RENAME_NOREPLACE)`, `openat2(RESOLVE_NO_SYMLINKS |
-      RESOLVE_BENEATH)`, and a go-git `billy.Filesystem` adapter over the vault root; fuzzed
-      against symlink swaps.
+      three-way merge (go-git v6, or our own text merge); build the `billy.Filesystem` adapter
+      over `internal/store/fs` (moved here from the confinement spike). Record the result in
+      ADR-0016.
+- [x] **Spike: confinement primitives** (ADR-0006, results recorded there). `openat2` +
+      `renameat2(RENAME_NOREPLACE)` in `internal/store/fs`; 0 escapes under a symlink-swap race
+      (with a negative control); fuzzed; 9p lacks `RENAME_NOREPLACE`.
 - [ ] Spike: UI shell framework (Svelte 5 vs Lit), recorded as an ADR
 - [ ] Spike: CodeMirror 6 + markdown-it in a Worker, measured with the PRD procedure
 

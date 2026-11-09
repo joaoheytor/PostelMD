@@ -117,6 +117,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make test-go build
+      - name: Short fuzz runs
+        run: make fuzz
+        env:
+          FUZZTIME: 30s
 
   test-web:
     runs-on: ubuntu-24.04
