@@ -21,7 +21,9 @@ on the next save. inotify is unreliable in some environments:
     lock first. So it never acts on the middle of a structural operation, a save or a git
     operation.
   - It **skips every path named by an open or flagged intent** (save, structural, restore or
-    git), and the reserved paths (ADR-0006). Those paths belong to their intent's recovery
+    git), and the reserved paths (ADR-0006).
+  - **Absence is confirmed by two passes** before a tombstone or an ID transfer
+    (ADR-0003 §2, "brief absences"). Those paths belong to their intent's recovery
     table, or to the user's decision, until the intent is cleared.
 - **Startup order.** Each step finishes before the next starts; nothing serves requests or
   mutates a vault before intent recovery has run:

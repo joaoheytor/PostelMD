@@ -79,7 +79,9 @@ ADR-0005 defines how people get in. This ADR defines how access changes and ends
   - if drafts exist, the UI asks "Keep unsaved drafts on this device?";
   - the default is **delete**, after offering to save them first;
   - suspension or revocation wipes the local namespace on the next load.
-- Drafts older than 30 days are purged.
+- Drafts are **never purged automatically by age**. Drafts older than 30 days are flagged in
+  the orphaned-drafts list (ADR-0003 §7), and the user decides; logout, suspension and
+  revocation above are the only cases that remove drafts.
 - A "shared computer" checkbox at login disables draft persistence (memory only).
 
 ### Trusted-header and OIDC sessions

@@ -35,16 +35,25 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         fallback on a filesystem without `RENAME_NOREPLACE`; a crash at each step of a
         **restore from trash**, and a restore racing the purge (exactly one wins);
         a commit message containing a token is rejected before the commit is written;
+      - **reconcile:** a file replaced by rename between two scans keeps its ID (absence needs
+        two passes); a file really deleted is tombstoned on the second pass;
+      - **reserved paths:** a reserved path is never watched, staged or committed, and a pulled
+        commit containing one is refused;
       - **startup:** recovery runs before the reconciler, workers and HTTP; the reconciler never
         tombstones or re-IDs a path named by an open or flagged intent, and applies only under
         the vault lock;
+      - **drafts:** orphaned drafts (closed tab, tombstoned file) are listed on vault load and
+        never deleted without the user's choice;
       - **save:** a crash at every step of a save (each reaching its recovery-table row), a
         lost response retried with the old `If-Match` (`200`, no new generation), the startup
         temp sweep, `EXDEV` and `fsync` errors (no fallback, no retried `fsync`), ABA
         delete+recreate, a stale response vs a newer edit, two offline tab drafts,
         an ambiguous external rename, an external write in the rename window (shows what is
         and isn't detected);
-      - **git:** a crash at each step of commit and **fast-forward pull** (finish and abort both
+      - **git:** a pull where a blocked file was also changed remotely (kept, copied to
+        recovery, listed as a conflict; the same outcome after a crash mid-pull); a crash
+        between two per-author commits of one batch (attribution kept); a crash at each step
+        of commit and **fast-forward pull** (finish and abort both
         reach a verified state, and bytes matching neither blob go to recovery), plus merge after
         the spike (the intent recovery must never discard), and commit-gate byte binding with a writer racing the stage;
       - **secrets:** first push to an empty remote, a push to a changed remote, an imported

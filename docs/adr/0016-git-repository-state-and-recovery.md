@@ -43,8 +43,17 @@ or switches branches by itself.
   mostly text. Until the spike passes, we don't promise divergent merges. When they exist, a
   merge commit is **reported** to the user ("merged N remote commits"), never silent.
 - Before any pull, dirty eligible files are auto-committed. Files blocked by findings are
-  stashed by PostelMD into `.postelmd/recovery/` (not `git stash`) and restored after the pull.
-  A restore that would overwrite a changed file becomes a conflict.
+  **copied** (never moved) into `.postelmd/recovery/<intent-id>/` and named in the pull's
+  intent; they stay in the working tree the whole time.
+- **One conflict rule**, the same for a normal pull and for crash recovery: for each path the
+  pull changes, if the working-tree bytes equal the pre-blob, write the target blob; if they
+  already equal the target blob, leave them. **Otherwise the file is never overwritten**: it
+  keeps its bytes, a copy is in recovery, and the path is listed as a conflict (keep mine,
+  take theirs, or merge in the UI). HEAD still moves to the target, so the file simply shows
+  as modified against the new HEAD.
+- A target tree that contains a **reserved path** (ADR-0006), for example `.postelmd-trash/`
+  pushed from a misconfigured clone, is refused before anything is written: the vault stays
+  `behind` with a clear error.
 - Conflicts are never auto-resolved by overwriting.
 
 ### Push
@@ -77,16 +86,16 @@ or switches branches by itself.
     - a **fast-forward pull** (the only pull in v0.1) has no merge state. It is recovered
       deterministically:
       - Pre-state is always **reconstructible**: a pull requires the index to equal HEAD
-        (eligible changes are auto-committed first; blocked files are moved to recovery and
+        (eligible changes are auto-committed first; blocked files are copied to recovery and
         recorded in the intent). So the pre-state is exactly the `pre-HEAD` tree plus the
-        recorded recovery files.
-      - **Finish (default):** for each path in the diff between `pre-HEAD` and the target, if
-        the working-tree bytes equal the pre-blob or the target blob, write the target blob.
-        Then set the index and HEAD to the target and restore the recovery files.
+        recorded recovery copies.
+      - **Finish (default):** apply the pull's conflict rule above to each path in the diff
+        between `pre-HEAD` and the target, then set the index and HEAD to the target.
       - **Abort** (user choice, or if the target commit is missing locally): the same, writing
         pre-blobs and setting HEAD and the index to `pre-HEAD`.
-      - Any path whose bytes match **neither** blob (an external write during the crash
-        window) is copied to recovery and listed as a conflict. It is never overwritten.
+      - Any path whose bytes match **neither** blob (a blocked file, or an external write
+        during the crash window) follows the same conflict rule: copied to recovery, listed
+        as a conflict, never overwritten.
     - a **merge** (post-spike; see the pull policy) goes to `conflicted`, keeping the merge
       state. Before any merge, the intent records the pre-index **as a tree object** written to
       the object database, so an abort can rebuild it exactly (a hash alone can't). An abort
@@ -136,6 +145,11 @@ tested against the real git binary (`git fsck --strict`).
 ### Attribution
 - Auto-commits are **per author**: the auto-committer groups changed files by the last
   PostelMD user who saved each file, and creates one commit per author in the batch.
+  - Each per-author commit is **its own operation with its own intent** (its paths, their
+    blob hashes, `pre-HEAD` and the planned commit), cleared when its ref update is durable.
+    A crash leaves at most one open intent; recovery handles it as any commit, and the authors
+    not yet committed are still dirty, so the next batch picks them up. The last saver of
+    each file is recorded in the database with the save, so attribution survives a crash.
   - Author: the user's name and verified email (or `user@<instance>` if none).
   - Committer: `PostelMD <postelmd@<instance>>`.
 - A file edited by several users inside one quiet window is committed under its last editor,

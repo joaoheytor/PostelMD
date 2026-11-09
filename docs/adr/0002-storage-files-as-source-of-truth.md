@@ -18,7 +18,11 @@ fast search.
     reindex` rebuilds it from the files.
 - A single writer process owns `/data`, enforced by the instance lock (ADR-0014). No external
   database in v1.
-- `.postelmd/` is excluded from the tree, watcher, index and git.
+- Reserved paths (`.git/`, `.postelmd*`, Syncthing internals; ADR-0006) are filtered by
+  `store.IsReserved` in **every** component that enumerates or writes vault paths: the tree,
+  watcher, reconciler, index, commit-scan, staging, pull and backups. `.git/info/exclude`
+  also lists them, but only as defence in depth: an external git or a hand-edited exclude
+  file can't be trusted, and auto-commit builds trees from bytes without consulting it.
 
 ## Consequences
 - Positive: no lock-in; simple backups (files + one SQLite file); `docker run` needs no extra
