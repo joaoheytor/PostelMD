@@ -11,9 +11,13 @@ on:
 
 permissions: {}
 
+# Only new commits cancel an in-progress PR run: the cancelled run's failing `required`
+# then belongs to the superseded commit. Label and title edits queue instead (a queued run
+# that is replaced never starts, so it leaves no check), so the head commit never carries a
+# stale `required` failure (docs/ci-cd.md).
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 env:
   GOLANGCI_LINT_VERSION: v2.15.0
