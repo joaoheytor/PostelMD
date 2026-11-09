@@ -25,6 +25,7 @@ func newRepo(t *testing.T) (*Repo, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = g.Close() })
 	return g, dir
 }
 

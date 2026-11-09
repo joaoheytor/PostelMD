@@ -37,3 +37,6 @@ func (r *Root) Mkdir(string) error { return errors.ErrUnsupported }
 
 // SyncDir is unsupported on this platform.
 func (r *Root) SyncDir(string) error { return errors.ErrUnsupported }
+
+// Remove is unsupported on this platform.
+func (r *Root) Remove(string) error { return errors.ErrUnsupported }

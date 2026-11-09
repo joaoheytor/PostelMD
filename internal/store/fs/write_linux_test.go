@@ -74,3 +74,23 @@ func TestMkdirAndSyncDir(t *testing.T) {
 		t.Fatalf("SyncDir on a symlink = %v, want ErrSymlink", err)
 	}
 }
+
+func TestRemove(t *testing.T) {
+	r, vault := newVault(t)
+	mustDo(t, r.Remove("dir/note.md"))
+	if _, err := os.Lstat(filepath.Join(vault, "dir", "note.md")); !errors.Is(err, iofs.ErrNotExist) {
+		t.Fatalf("file still present: %v", err)
+	}
+	if err := r.Remove("dir/note.md"); !errors.Is(err, iofs.ErrNotExist) {
+		t.Fatalf("second Remove = %v, want ErrNotExist", err)
+	}
+	if err := r.Remove("dirlink/note.md"); !errors.Is(err, ErrSymlink) {
+		t.Fatalf("Remove through a symlinked parent = %v, want ErrSymlink", err)
+	}
+	if err := r.Remove("dir"); err == nil {
+		t.Fatal("Remove removed a directory")
+	}
+	// Removing a symlink removes the link, never its target.
+	mustDo(t, r.Remove("link-outside"))
+	wantContent("secret", "SECRET")(t, filepath.Dir(vault))
+}

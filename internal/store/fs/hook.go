@@ -5,7 +5,7 @@ type OpKind int
 
 // The steps a Root reports to its Hook. Writes and directory changes are durable only after
 // the matching sync (ADR-0003 §5): file data after OpSyncFile on that file, directory entries
-// after OpSyncDir on that directory.
+// after OpSyncDir on that directory (OpRemove too).
 const (
 	OpCreate          OpKind = iota + 1 // Path created exclusively with Data (not yet synced)
 	OpSyncFile                          // fsync of Path's data
@@ -13,11 +13,12 @@ const (
 	OpRenameNoReplace                   // Path renamed to To, failing if To exists
 	OpMkdir                             // directory Path created
 	OpSyncDir                           // fsync of directory Path's entries
+	OpRemove                            // file Path unlinked
 )
 
 var opNames = map[OpKind]string{
 	OpCreate: "create", OpSyncFile: "sync-file", OpRename: "rename",
-	OpRenameNoReplace: "rename-noreplace", OpMkdir: "mkdir", OpSyncDir: "sync-dir",
+	OpRenameNoReplace: "rename-noreplace", OpMkdir: "mkdir", OpSyncDir: "sync-dir", OpRemove: "remove",
 }
 
 func (k OpKind) String() string { return opNames[k] }
