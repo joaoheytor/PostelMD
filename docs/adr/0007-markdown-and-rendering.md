@@ -60,6 +60,16 @@ edited by Playwright in headless Chromium at 4× CPU throttling: 150 keystrokes 
   (software rendering at 4× throttling), so an absolute keystroke-to-paint budget measures
   the runner, not PostelMD. The PRD budget is now relative to the `<textarea>` control, and
   it also caps our own keydown processing time.
+- **CSP noise from sanitizing (found by the runner-noise spike, #33):** from Chromium 158,
+  parsing an inline handler (`<img onerror=…>`) into DOMPurify's inert `DOMParser` document
+  raises a `script-src-attr` CSP violation (blocked, attributed to the sanitizer's
+  `parseFromString`). Nothing runs: the document is inert, CSP blocks it, and DOMPurify strips
+  the attribute, so the live preview kept **0** `on*` attributes. Chromium 153 didn't report
+  it. Consequences:
+  - "zero CSP violations" checks must use benign content;
+  - hostile HTML is covered by a dedicated XSS test that asserts no `on*` attribute, `javascript:`
+    URL or script survives into the preview and nothing executes (with a canary handler);
+  - any CSP violation reporting (`report-to`) must expect and aggregate these.
 - Build: Vite only bundles the Worker when it is imported as `./worker.ts?worker&url`.
   Wrapping `new URL(…, import.meta.url)` in the policy call made Vite inline the TypeScript
   source as a `data:` URL instead.

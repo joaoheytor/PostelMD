@@ -37,4 +37,7 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
 
-ignore ./web/node_modules
+ignore (
+	./web/node_modules
+	./test/perf/editor/node_modules
+)

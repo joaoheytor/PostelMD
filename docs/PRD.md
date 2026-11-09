@@ -94,7 +94,7 @@ Changing these requires an ADR.
 ### Performance budgets
 | Metric | Budget |
 |---|---|
-| Typing in the editor (10k-line note, preview open) | Keydown JS processing < 4 ms p95, **and** keystroke-to-paint p95 no more than 10% above a plain `<textarea>` control on the same runner (ADR-0007 spike) |
+| Typing in the editor (10k-line note, preview open) | Keydown JS processing < 4 ms, **and** keystroke-to-paint no more than 10% above a plain `<textarea>` control on the same runner (editor/control ratio ≤ 1.10). Both per-session p95, aggregated as below. Measured on 10 runners (#33): 0.7–1.0 ms, ratio 0.78–0.90 |
 | Autosave | Debounced 1–2 s after the last keystroke, plus on blur/navigation. **Never per keystroke.** |
 | Preview render | Off the main thread (Worker), debounced; **skipped when the preview is hidden** |
 | Word and character stats | Computed lazily or idle, not on every change |
@@ -108,12 +108,28 @@ Changing these requires an ADR.
   Playwright-pinned version) with 4× CPU throttling for the client;
 - data: synthetic vault generator, 10k notes, median 4 KB, p99 200 KB, one 10k-line note,
   5 vaults, 5 concurrent users (k6);
-- each figure is the p95 of ≥ 30 samples after warm-up;
+- a **sample** is one fresh session; its figure is the p95 over that session's events. Each
+  reported figure is the **median over ≥ 30 sessions**, after 2 warm-up rounds, with the
+  compared modes alternating. (The p95 of the session p95s was dominated by a few slow
+  sessions: the editor/control ratio then varied 0.73–1.67 between runners, against 0.78–0.90
+  for the median.);
 - browser timings use the Event Timing API. Absolute paint latency in headless CI reflects the
   runner (software rendering), so editor budgets are relative to a control measured in the
   same run.
 
-A budget regression of more than 10% fails the PR (from v0.2).
+**Regression gate (from v0.2).** Absolute budgets fail the PR as stated above. Regressions
+are measured **paired**: the base commit and the PR are built and benchmarked on the same
+runner, alternating sessions, so differences between runners cancel out. The PR fails if its
+keydown processing exceeds the base by more than max(15%, 0.3 ms), or its editor/control ratio
+exceeds the base by more than 0.10. Server budgets get the same paired rule when the k6
+benchmark exists (v0.1).
+
+Why paired, with these tolerances (runner-noise spike, #33, `perf-noise.yaml`): one run landed
+on four CPU models (AMD EPYC 9V74, 7763 and 9V45, Intel Xeon 8370C). Between runners, keydown
+processing varied with a coefficient of variation (CV) of 10% and the ratio of medians about
+5%; within one runner, sessions varied 5–14%. Event Timing reports durations in 8 ms steps,
+so a single step is a 12–16% change at these values. A flat 10% rule across runners would
+flake.
 
 ### Limits
 | Limit | Default |

@@ -55,7 +55,9 @@ uses constructable stylesheets (`adoptedStyleSheets`) instead. CSP allows those,
    root in the shell, and it is how CodeMirror's styles, and themes added by plugins, comply
    with `style-src 'self'`. We use neither a style nonce nor `unsafe-inline`.
 4. The CSP gains `style-src 'self'`, with no `unsafe-inline` and no nonces. A Playwright smoke
-   test fails if any CSP or Trusted Types violation is reported (`securitypolicyviolation`).
+   test fails if any CSP or Trusted Types violation is reported (`securitypolicyviolation`)
+   while rendering **benign** content. Hostile HTML makes the sanitizer's own parsing report
+   violations in recent Chromium, so it is covered by the XSS test in ADR-0007 instead.
 5. Components get state only through a `StoreController` (a Lit `ReactiveController` over a
    `core` store). Its subscription is a `Disposable`, released in `hostDisconnected`
    (CLAUDE.md rule 8). `core` and `@postelmd/plugin-api` never import `lit`; ESLint enforces
