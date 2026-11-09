@@ -54,12 +54,24 @@ docker logs postelmd   # one-time setup URL
   | `/assets/*` (static files needed by the setup page) | Served |
   | HTML navigation to any other path | `303` redirect to `/setup` |
   | Any other `/api/*` path | `503` |
-  | `/metrics` | `503` |
+  | `/metrics` | `404` (as after setup without a token; see Metrics below) |
 
 - A single-use **setup token** (expires after 30 min) is printed to stdout and logs only.
 - **Headless bootstrap:** `POSTELMD_ADMIN_USER` + `POSTELMD_ADMIN_PASSWORD_FILE` create the admin
   and skip the token.
 - `postelmd reset-admin` prints a new setup token for the existing admin.
+- **Before an admin exists**, an expired or lost setup token is replaced in two ways: every
+  start prints a fresh one, and `postelmd reset-admin` prints a fresh one too (online or
+  offline). Each new token invalidates the previous one. Both need container or volume
+  access, which is the same trust as reading the logs.
+- **Metrics.** `/metrics` exposes operational detail, so it is never open on the main
+  listener:
+  - on the main listener it requires `Authorization: Bearer <token>`
+    (`POSTELMD_METRICS_TOKEN_FILE`, compared in constant time), and returns `404` when no
+    token is configured;
+  - or `POSTELMD_METRICS_LISTEN` (for example `:9090`) serves only `/metrics` on a separate
+    port without a token, for in-cluster scraping behind a NetworkPolicy (the Helm chart's
+    default). `docker run` exposes only the main port, so it isn't reachable by default.
 - **There is no option to run without authentication** (ADR-0005).
 
 ### Transport
@@ -89,7 +101,7 @@ administrative commands are split:
 | **Online** (delegate to the running server) | `backup`, `reindex`, `reset-admin`, `keys rotate`, `vault lock/unlock`, `plugin disable/import-revocations` | Connect to the admin socket `/data/.postelmd/admin.sock` (mode 0600, owned by the app user). Being able to open the socket is the authentication: you can only do it from inside the container (`docker exec postelmd /postelmd …`, `kubectl exec`) or as the same Unix user. Every call is audit-logged as `actor: cli`. |
 | **Online or offline** | Same as above | If no server holds the instance lock, the command takes the lock and runs directly (offline). |
 | **Offline only** | `restore`, `db rollback` (database-only rollback, ADR-0015) | Refuse if the instance lock is held. |
-| **Stateless** | `healthcheck`, `version` | Only read HTTP or nothing. |
+| **Stateless** | `healthcheck`, `version`, `audit verify` | Only read HTTP, a given file (with the `audit` key), or nothing. |
 
 ### Shutdown
 The shutdown sequence and its deadlines are in architecture §8. There are no log or debug HTTP

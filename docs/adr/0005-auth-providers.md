@@ -14,7 +14,11 @@ off by default and a single shared token.
     - passwords hashed with argon2id, with parameters sized for small nodes (~64 MB, 1–2
       passes);
     - WebAuthn passkeys (go-webauthn); optional TOTP;
-    - login rate limit and lockout;
+    - **login backoff, never a lockout.** A hard lockout lets anyone lock out the admin by
+      guessing. After 5 failures, each further attempt for that account waits twice as long
+      (1 s, doubling, capped at 15 min), and a per-source-IP limit applies on top. A success
+      resets it. Passkey logins aren't slowed by password failures, so the real user can
+      always get in with a passkey;
     - **no open signup**: users join through admin-issued invite links.
   - **`oidc`** (optional): Authorization Code + PKCE (coreos/go-oidc). Tested against Pocket ID,
     Authentik, Keycloak and tsidp. A groups claim can map to the instance-admin role. **Admin status
@@ -58,6 +62,8 @@ off by default and a single shared token.
   | `session` | HMAC for session and CSRF tokens |
   | `credentials` | AES-256-GCM encryption at rest for git remote tokens, SSH keys and OIDC client secrets |
   | `webhook` | Signing outbound webhooks (post-MVP) |
+  | `fingerprint` | HMAC for secret-finding fingerprints (ADR-0010) |
+  | `audit` | HMAC chain of the `file:` audit sink (architecture §9) |
 
   The `credentials` key wraps per-record data keys (envelope encryption).
 - **Versioning:** every key has an ID. Ciphertexts and tokens carry the key ID.

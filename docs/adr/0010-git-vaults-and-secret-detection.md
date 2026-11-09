@@ -26,6 +26,12 @@ state, concurrency and recovery are specified in ADR-0016.
     credentials need re-confirmation") when the steward is suspended or deleted, loses the
     owner role, or leaves the vault. Another owner must re-confirm or replace them.
   - Background jobs never use a suspended credential.
+  - **Least privilege:** a steward token needs only repository contents, read and write. A
+    GitHub classic token whose `X-OAuth-Scopes` include `workflow` is refused on the first
+    authenticated request; for other providers and fine-grained tokens, the setup screen and
+    docs say which scopes to leave out. Owner-only control files (ADR-0006) cover the editor
+    side.
+  - Remote URLs, schemes and SSH host keys follow the egress policy (architecture §11).
 - History and diff per file; "restore this version" creates a new commit.
 
 ### Secret detection: four gates
@@ -67,6 +73,9 @@ state, concurrency and recovery are specified in ADR-0016.
    - **Metadata is scanned too.** Every outgoing commit's message, author and committer
      fields, and every annotated tag message being pushed, are scanned (cached by object hash).
      A token in a commit message blocks the push like one in a file.
+   - **Names are scanned too:** every path in the reachable trees and every ref name being
+     pushed (a file called `AKIA….txt` or a branch named after a token leaks it as surely as
+     content does).
    - This needs **no baseline**: it works the same for a first push, an empty remote, a new
      branch or a changed remote. Thanks to the cache, steady-state pushes only scan new blobs.
    - Changing the ruleset version invalidates the cache, so the next push rescans everything.
@@ -81,9 +90,16 @@ state, concurrency and recovery are specified in ADR-0016.
      commits already on the remote).
 
 ### Findings
-- **Identity:** `sha256(ruleID + secretValue)`, a *fingerprint*. The secret value itself is
-  never stored or logged; only the fingerprint, rule, file ID, line and commit are stored. The
-  same secret in several places is one finding with several locations.
+- **Identity:** a *fingerprint*, `HMAC-SHA256(fingerprint key, ruleID ‖ secretValue)`, using
+  the instance's `fingerprint` key (ADR-0005). A plain hash would let anyone holding a
+  fingerprint test guesses offline against short or structured secrets. The secret value
+  itself is never stored or logged; only the fingerprint, rule, file ID, line and commit are
+  stored. The same secret in several places is one finding with several locations.
+  - Fingerprints never leave the instance: exports (the allow-list file, findings exports)
+    carry only the rule and path.
+  - The `fingerprint` key is rotated only after a compromise. Rotation re-fingerprints by
+    rescanning, and owners re-approve acknowledgements that can't be carried over by
+    `(rule, location)`.
 - **States:** `open` → `resolved` (no longer present in the working tree or the outgoing range)
   | `acknowledged` (a false positive, or the credential has been rotated).
 - **Authority:**
@@ -93,10 +109,13 @@ state, concurrency and recovery are specified in ADR-0016.
   - instance admins may acknowledge in any vault;
   - acknowledgements are audit-logged (who, when, reason, fingerprint).
 - **Allow-list authority lives in the database, not in the repository.**
-  - Approved allow-list entries (fingerprints and path globs) are stored in SQLite, with the
-    approving owner, the reason and the time.
+  - Approved allow-list entries are stored in SQLite, with the approving owner, the reason and
+    the time. An entry is a **fingerprint**, optionally limited to a path glob. A path glob
+    **never suppresses a fingerprint nobody approved**: a new secret under `fixtures/**` is
+    an open finding until an owner approves it.
   - `.postelmd-secrets-allow` in the repository is only an **export** (written through the
-    findings API so that other instances can see it).
+    findings API), listing rule and path per entry, never fingerprints. Another instance
+    shows them to its owners as pending entries to review.
   - Any change to that file that arrives through a **pull or an external edit is inert**: the
     scanner ignores it, and the UI lists it as "pending allow-list changes" until a vault owner
     approves each entry.

@@ -42,7 +42,15 @@ ADR-0005 defines how people get in. This ADR defines how access changes and ends
 - **Password reset:**
   - with no email in v1, an admin issues a single-use reset link that expires after 24 h;
   - `postelmd reset-admin` covers the admin themselves;
-  - a reset revokes all sessions and passkeys are kept.
+  - a reset revokes all sessions. Before the reset completes, the user **reviews every
+    registered passkey and TOTP device** and keeps or removes each one: a reset often follows
+    a lost or stolen device.
+
+### Credential changes
+- **Re-authentication within the last 5 minutes** is required for every credential change:
+  password, passkeys, TOTP, OIDC links, and git remote credentials (ADR-0010).
+- **Removing a credential revokes every other session** of that user (the current one is
+  kept), because one of them may have come from the credential being removed.
 
 ### Identity linking
 - A user can link OIDC identities to their local account **while logged in** and after

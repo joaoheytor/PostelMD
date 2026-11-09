@@ -134,6 +134,12 @@ There are two guarantee levels, recorded in the manifest as `external_writers`:
        and can't log in, even with a valid password or passkey;
      - only the recovery identity can log in;
      - git push/pull, webhooks and plugin network access are disabled;
+     - **pending tokens from the backup are purged**: invites, reset links and setup tokens.
+       They were valid at backup time but may have been revoked since, and the external audit
+       sink can't prove otherwise. Admins issue new ones after the quarantine;
+     - the instance starts in **plugin safe mode** (ADR-0008): every plugin stays disabled
+       until the recovery admin re-enables it, since an approval may have been withdrawn after
+       the backup;
      - the UI shows the revalidation checklist and the report from the external audit sink:
        the security events after the backup timestamp (suspensions, membership removals, key
        rotations, finding acknowledgements);
