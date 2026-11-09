@@ -115,6 +115,10 @@ fixture; DCO blocks an unsigned commit.
   saved, in < 2 minutes.
 - Pre-setup routing matches the ADR-0009 table exactly (integration test per row).
 - A second container on the same `/data` refuses to start.
+- `/data` on 9p, FUSE or NFS refuses to start (by `statfs` magic); a vault on a filesystem
+  without `RENAME_NOREPLACE` works through the fallbacks (CI test with a seccomp profile that
+  returns `EINVAL` for it); the Docker Desktop commands in ADR-0009 are checked by hand on
+  Windows before each minor release.
 - Two tabs edit the same note → the second save gets 412 and the conflict view; nothing is
   lost.
 - Deleting a note while an autosave is pending does **not** recreate it. Delete + recreate with
@@ -127,7 +131,7 @@ fixture; DCO blocks an unsigned commit.
   including on a first push to an empty remote.
 - An allow-list change arriving through a pull is inert until an owner approves it.
 - The whole failure-scenario suite from v0.0 passes in CI.
-- `GET`/`PUT` on `.git/config` and `.postelmd/*` paths return 404.
+- Path lookup, create, move and upload naming `.git/config` or `.postelmd/*` return 404.
 - Security tests: the egress policy denies every special-purpose block (table test, including
   IPv4-mapped, NAT64 and 6to4 forms) and a `file://` or local-path remote is refused before it
   is stored; an SSH host-key mismatch fails closed; an editor can't write

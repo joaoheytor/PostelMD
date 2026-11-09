@@ -150,6 +150,11 @@ outbox (app writes, published explicitly) ─┘                 (boot epoch + m
 
 - JSON API under `/api/v1/...`. The UI is served from `/` (embedded SPA). There is **no content
   negotiation on the same URL**.
+- **Path lookup:** `GET /api/v1/vaults/{v}/paths/{path…}` resolves a path to
+  `{fileID, kind, ETag}` (or the folder listing), with the same authorization as a read.
+  Clients open files by path through it and then use the ID (ADR-0003 §3). Reserved paths
+  return `404` here like everywhere else (ADR-0006), which is what the reserved-path tests
+  exercise.
 - RESTful resources: `vaults`, `vaults/{v}/files/{id}`, `vaults/{v}/folders`, `search`,
   `vaults/{v}/git/*`, `vaults/{v}/findings`, `templates`, `plugins`, `users`, `invites`,
   `sessions`, `setup`.
@@ -163,6 +168,9 @@ outbox (app writes, published explicitly) ─┘                 (boot epoch + m
 | Sandboxed | One opaque-origin iframe **per plugin**, with its Workers created inside it, and a per-plugin CSP | `SandboxApp` (serializable) over capability-checked RPC; **headless** by default (Worker + host-rendered UI), DOM UI only with admin approval if it reads data | Any user, for themselves (if allowed) |
 
 First-party bundled plugins are on by default. Third-party plugins are never preinstalled.
+**Mermaid is trusted-tier, first-party code** (ADR-0007): it needs the DOM to measure text, so
+it can't run in a Worker or a sandbox. It ships in the app bundle (never fetched), runs with
+`securityLevel: 'strict'`, and its SVG goes through DOMPurify like any other preview HTML.
 Safe mode and emergency disable are always available.
 
 ## 8. Deployment and lifecycle
@@ -294,3 +302,33 @@ client:
     stored with the remote; a mismatch fails closed and is audited. There is never an
     "ignore host key" option.
 - Timeouts and response size caps apply per purpose.
+
+## 12. Limits and timeouts
+
+One list of every limit, so they can be reviewed together. The ADR in the last column defines
+each one; a change updates both.
+
+| Limit | Default | Configurable | Defined in |
+|---|---|---|---|
+| Note size | 5 MB (`413` above) | no | ADR-0003 §8 |
+| Request body for notes | 6 MB | no | ADR-0003 §8 |
+| Upload size | 25 MB | `POSTELMD_MAX_UPLOAD_MB` | ADR-0009 |
+| Save timeout (server) | 10 s | no | ADR-0003 §8 |
+| Wait behind a git operation or the backup barrier | 5 s, then `503 Retry-After` | no | ADR-0003 §4, ADR-0017 |
+| Autosave debounce | 1–2 s after the last keystroke | no | ADR-0003 §7 |
+| Reconcile interval | 5 min (1 min on degraded mounts) | `POSTELMD_RECONCILE_INTERVAL` | ADR-0004, ADR-0014 |
+| Absence confirmation | second pass ≥ 10 s later | no | ADR-0003 §2 |
+| SSE heartbeat | 15 s | no | ADR-0004 |
+| Event ring buffer and index obligations | 10k per vault | no | ADR-0003 §6 |
+| Auto-commit quiet window | 30 s | per vault | ADR-0010 |
+| Push retry backoff | up to 1 h between tries | no | ADR-0016 |
+| Egress redirects | 3 | no | §11 |
+| Trash and recovery copies | 7 days | no | ADR-0003 §2, ADR-0016 |
+| Tombstones | 30 days | no | ADR-0003 §2 |
+| Audit log in the database | 365 days | yes | §9 |
+| Session idle / absolute | 7 / 30 days | yes | ADR-0018 |
+| OIDC session cap / role refresh | 24 h / 1 h | `POSTELMD_OIDC_MAX_SESSION`, `POSTELMD_OIDC_ROLE_TTL` | ADR-0018, ADR-0005 |
+| Re-authentication window | 5 min | no | ADR-0018 |
+| Login backoff | after 5 failures, 1 s doubling to 15 min | no | ADR-0005 |
+| Invite / reset link / setup token | 72 h / 24 h / 30 min, single use | no | ADR-0018, ADR-0009 |
+| Graceful shutdown | 45 s deadline (`--stop-timeout 60`) | no | §8, ADR-0009 |
