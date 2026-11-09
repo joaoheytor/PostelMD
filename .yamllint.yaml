@@ -3,6 +3,8 @@ extends: default
 ignore: |
   web/node_modules/
   web/dist/
+  test/perf/editor/node_modules/
+  test/perf/editor/dist/
 
 rules:
   document-start: disable
