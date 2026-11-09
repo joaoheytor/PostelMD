@@ -58,7 +58,8 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
 - [x] **Spike: confinement primitives** (ADR-0006, results recorded there). `openat2` +
       `renameat2(RENAME_NOREPLACE)` in `internal/store/fs`; 0 escapes under a symlink-swap race
       (with a negative control); fuzzed; 9p lacks `RENAME_NOREPLACE`.
-- [ ] Spike: UI shell framework (Svelte 5 vs Lit), recorded as an ADR
+- [x] **Spike: UI shell framework** (ADR-0019): Lit, light DOM; CodeMirror mounted in a shadow root
+      so its styles comply with `style-src 'self'` (found in the spike: it breaks otherwise)
 - [ ] Spike: CodeMirror 6 + markdown-it in a Worker, measured with the PRD procedure
 
 **Acceptance:** CI is green on an empty skeleton; the file-size check fails on a 501-line

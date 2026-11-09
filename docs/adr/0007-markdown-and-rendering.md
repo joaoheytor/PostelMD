@@ -23,7 +23,9 @@ parse Markdown only for extraction: headings, links, tags and backlinks for the 
   sanitized with bluemonday.
 - **Parity:** shared golden fixtures (`testdata/markdown/*.md` with expected extraction output)
   must pass on both parsers.
-- **CSP:** `script-src 'self'`, no `unsafe-inline` scripts. `img-src 'self' blob: data:` plus
+- **CSP:** `script-src 'self'`, no `unsafe-inline` scripts. `style-src 'self'`, no
+  `unsafe-inline` or nonces; CodeMirror's injected styles comply only from a shadow root
+  (ADR-0019). `img-src 'self' blob: data:` plus
   admin-approved hosts.
 
 ## Consequences
