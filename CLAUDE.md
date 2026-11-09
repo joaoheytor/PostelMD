@@ -25,7 +25,7 @@ internal/
 web/
   src/core/            framework-free: doc store, save queue, sync engine, plugin host
   src/editor/          CodeMirror 6 setup and extensions
-  src/ui/              UI shell (framework TBD; never imported by core/ or plugin-api)
+  src/ui/              UI shell: Lit, light DOM (ADR-0019); never imported by core/ or plugin-api
 packages/plugin-api/   @postelmd/plugin-api (types + runtime contract, Apache-2.0)
 test/scenarios/        failure-scenario suite (fault injection; one test per recovery contract)
 deploy/helm/postelmd/  Helm chart

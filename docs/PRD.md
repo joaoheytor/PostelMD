@@ -158,7 +158,6 @@ A budget regression of more than 10% fails the PR (from v0.2).
 - At least 2 reference plugins built only against the public plugin API before 1.0.
 
 ## 7. Open questions
-- UI shell framework (Svelte 5 vs Lit vs other): decide in v0.0 through a spike, recorded as a
-  new ADR.
+- UI shell framework: decided by the v0.0 spike (ADR-0019, Lit).
 - Git policy is decided in ADR-0010 and ADR-0016: one repository per vault, a 30 s quiet-window
   auto-commit, and per-author commits.

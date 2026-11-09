@@ -61,7 +61,7 @@ Everything else consumes their interfaces.
 | `core/pluginHost` | Trusted plugin loader; one sandboxed iframe per plugin; capability-checked RPC |
 | `editor/` | CodeMirror 6: markdown, language data, keymaps, secret-paste warning extension |
 | `preview/` | markdown-it in a Web Worker → DOMPurify → DOM. Mermaid via a first-party bundled plugin (from v0.4; core before that). |
-| `ui/` | Shell (framework TBD): tree, tabs, dialogs, command palette, conflict view, git status |
+| `ui/` | Shell (Lit custom elements in the light DOM; the editor host mounts CodeMirror in a shadow root, ADR-0019): tree, tabs, dialogs, command palette, conflict view, git status |
 
 `core/` has **no UI-framework imports** and is unit-tested with Vitest.
 
