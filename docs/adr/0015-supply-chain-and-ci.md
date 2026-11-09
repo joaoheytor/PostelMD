@@ -11,9 +11,8 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 ## Decision
 - **Dependencies**
   - No new dependency without an ADR line explaining why.
-  - **Development-only tooling** (not shipped, so no runtime ADR needed): TypeScript, Vite,
-    Vitest, ESLint with `typescript-eslint`, golangci-lint, actionlint, shellcheck and yamllint.
-    `govulncheck` is a Go `tool` dependency in `go.mod`, so local runs and CI use the same
+  - **Development-only tooling** (not shipped, so no runtime rationale needed; see the
+    dependency register below). `govulncheck` is a Go `tool` dependency in `go.mod`, so local runs and CI use the same
     version. Dev-only advisories are tracked but don't block CI; the gate is what ships
     (`npm audit --omit=dev`, `govulncheck`, Trivy).
   - Go modules + `govulncheck`. npm with a lockfile; `npm ci --ignore-scripts`; no hand
@@ -22,6 +21,40 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
     auto-merge when green, after a minimum release age. Renovate commits carry a
     `Signed-off-by:` trailer (DCO), use the `build(deps)` type, and get the
     `skip-changelog` label unless they fix a vulnerability.
+- **Dependency register** (CLAUDE.md rule 5). Every dependency the design names, with the
+  reason the standard library or an existing dependency isn't enough. A PR that adds a
+  dependency adds or updates its row; *planned* rows become *in use* in the PR that adds them
+  to `go.mod` or `web/package.json`. Transitive dependencies are covered by `govulncheck`,
+  `npm audit --omit=dev`, Trivy and Renovate rather than listed.
+
+  | Dependency | Used by | Ships? | Why not the stdlib or an existing dependency | Status |
+  |---|---|---|---|---|
+  | `golang.org/x/sys` | `store/fs`, `store/lock` | server | `openat2`, `renameat2(RENAME_NOREPLACE)` and `flock` aren't in `syscall`/`os` (ADR-0006 spike) | in use |
+  | `go-git/go-git/v5` (+ `go-billy/v5`) | `store/git` | server | Pure-Go git: the distroless image has no `git` binary, and commits must be built from scanned bytes (ADR-0016 spike) | in use |
+  | `modernc.org/sqlite` | `store/sql` | server | Pure-Go SQLite with FTS5, keeping `CGO_ENABLED=0` (ADR-0002) | planned v0.1 |
+  | `sqlc` | `store/sql` | no (code generator) | Type-checked queries without a runtime ORM | planned v0.1 |
+  | gitleaks (`zricethezav/gitleaks/v8`) | `secrets` | server | A maintained, widely used rule set; writing our own detectors would lag it (ADR-0010). Footprint is checked when it is added | planned v0.1 |
+  | `golang.org/x/crypto` | `auth` | server | argon2id isn't in the stdlib (ADR-0005). Already a transitive dependency of go-git | planned v0.1 |
+  | `go-webauthn/webauthn` | `auth` | server | WebAuthn attestation and assertion parsing is large and security-critical (ADR-0005) | planned v0.1 |
+  | `alexedwards/scs` | `auth` | server | Server-side sessions with rotation, idle and absolute timeouts, SQLite store (ADR-0005, ADR-0018) | planned v0.1 |
+  | `fsnotify/fsnotify` | `store/watch` | server | The stdlib has no file watching (ADR-0004) | planned v0.2 |
+  | `yuin/goldmark` | `index` | server | CommonMark + GFM parsing for link and heading extraction (ADR-0007) | planned v0.2 |
+  | `prometheus/client_golang` | metrics | server | The exposition format VictoriaMetrics and Prometheus scrape; histograms done right | planned v0.2 |
+  | `coreos/go-oidc` | `auth` (`oidc`) | server | ID-token verification and discovery; hand-rolled JOSE is a known foot-gun (ADR-0005) | planned (OIDC milestone) |
+  | `microcosm-cc/bluemonday` | `http` | server | Only if the server ever returns rendered HTML (ADR-0007) | conditional |
+  | Extism on `tetratelabs/wazero` | `plugins` | server | Sandboxed server plugins (ADR-0008) | not before v1.x |
+  | CodeMirror 6 (`@codemirror/*`) | `web/src/editor` | web | The editor (ADR-0001); FrankMD's hand-built editor was replaced at great cost (lesson 2) | planned v0.1 |
+  | `markdown-it` | `web/src/preview` (Worker) | web | CommonMark + GFM with source maps for scroll sync (ADR-0007 spike) | planned v0.1 |
+  | `dompurify` | `web/src/preview` | web | Proven HTML sanitizer; runs inside the only Trusted Types policy (ADR-0007) | planned v0.1 |
+  | `lit` | `web/src/ui` | web | Reactive custom elements with no compiler (ADR-0019 spike) | planned v0.1 |
+  | `mermaid` | `web/src/preview` (lazy) | web | Diagrams; loaded only when a `mermaid` block exists (ADR-0007) | planned v0.1 |
+  | `gcr.io/distroless/static:nonroot` | image | base image | No shell or package manager in the runtime image (ADR-0009) | planned v0.1 |
+
+  Development, test and release tooling is not shipped and needs no row beyond this list:
+  TypeScript, Vite, Vitest, ESLint with `typescript-eslint`, Playwright (and the a11y scanner
+  chosen under ADR-0019), k6, golangci-lint, `govulncheck`, actionlint, shellcheck, yamllint,
+  the gitleaks CLI (pre-commit), Helm, kind, kubeconform, GoReleaser, buildx, cosign, Syft,
+  Trivy and Renovate.
 - **CI (GitHub Actions)**
   - Public repo: **GitHub-hosted runners only.** Never run fork PRs on the self-hosted ARC
     runners, and never use `pull_request_target` with a checkout of PR code.
