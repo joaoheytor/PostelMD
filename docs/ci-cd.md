@@ -90,8 +90,8 @@ branch, so fork PRs can't poison `main`'s cache.
   copied by digest to Docker Hub (release). Signatures and attestations live next to the image
   **in each registry**, and copy tools may not carry Sigstore bundles stored as OCI referrers.
   So `release.yaml` **signs and attests at each registry address** (cosign `sign` and
-  `attest-build-provenance` with `push-to-registry` for both). Whether `cosign copy` can
-  replace that is a v0.1 spike.
+  `attest-build-provenance` with `push-to-registry` for both), **after** the image is copied
+  there. The v0.1 spike (#31, below) confirmed that `cosign copy` can't replace this.
 - **Verify both addresses before the release finishes:** the job runs `cosign verify` and
   `cosign verify-attestation` against **both** `docker.io/joaoheytor/postelmd@<digest>` and
   `ghcr.io/joaoheytor/postelmd@<digest>`. Either failure fails the release, before the stable
@@ -101,6 +101,26 @@ branch, so fork PRs can't poison `main`'s cache.
 - **Signing and attestations** (keyless cosign via GitHub OIDC) are attached by digest, so they
   cover both registries: a cosign signature, a Syft SBOM (SPDX) attestation and SLSA build
   provenance (`actions/attest-build-provenance`).
+- **Signature spike results** (#31, 2026-11-09; cosign v2.6.5 and v3.1.4, crane, two zot
+  v2.1.11 registries with the OCI referrers API and one `registry:3` without it; a test key,
+  no transparency log, nothing published):
+
+  | Signed with | Stored as | `cosign copy` to another registry | Plain copy (`crane copy`) | Signing at the destination |
+  |---|---|---|---|---|
+  | cosign v2 (legacy) | `sha256-<digest>.sig` / `.att` tags | Carried; signature and attestation verify there | Lost | Works |
+  | cosign v3 (default) | Sigstore bundle v0.3 as OCI **referrers** (the format `attest-build-provenance` uses too) | **Not carried**, even to a registry with the referrers API | Lost | Works; without the referrers API (`registry:3`), cosign falls back to the OCI 1.1 tag schema |
+
+  Consequences:
+  - sign and attest **at each address**, after the copy, as above; copying signatures only
+    works for a format we don't use;
+  - verification by digest at both addresses (next bullet) stays the release gate. A
+    signature verifies at an address other than the one it was made at, so the gate must use
+    the exact registry addresses, never a digest alone;
+  - cosign v3 refuses to sign without a transparency log unless told otherwise, so a
+    misconfigured release can't silently skip Rekor;
+  - Docker Hub's own handling of referrers wasn't measured (it needs a real push). The first
+    release candidate's promotion is the test: `release.yaml` fails closed if either address
+    doesn't verify.
 - **Docker Hub description:** updated by hand for now. Syncing it automatically needs a token
   with *Read, Write, Delete* scope, broader than the push token; revisit later with a separate
   token.

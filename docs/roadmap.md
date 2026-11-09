@@ -144,6 +144,9 @@ fixture; DCO blocks an unsigned commit.
   `kill -9` during a git commit → repaired on startup (intent log test).
 - Fuzz tests for path traversal pass. The e2e run produces no CSP violation reports.
 - The image runs on amd64 and arm64 and is under 40 MB.
+- The first release promotion signs and attests at Docker Hub and GHCR separately, and
+  `cosign verify` plus `cosign verify-attestation` pass at **both** addresses by digest before
+  any tag moves (the #31 spike showed copies don't carry cosign v3 signatures).
 - The PRD performance budgets for a single user are met with the measurement procedure.
 
 ## v0.2: Live sync, search, media, sharing, backup
