@@ -83,4 +83,11 @@ jobs:
           path: results
           merge-multiple: true
       - name: Summarize
-        run: node test/perf/editor/summarize.mjs results/*.json | tee -a "$GITHUB_STEP_SUMMARY"
+        # `shell: bash` adds pipefail (the default `bash -e` doesn't), so a failing summary
+        # can't hide behind `tee`; nullglob makes "no results" an error, not a literal path.
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(results/*.json)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::no benchmark results"; exit 1; }
+          node test/perf/editor/summarize.mjs "${files[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

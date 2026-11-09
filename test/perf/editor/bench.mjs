@@ -56,6 +56,9 @@ async function session(browser, mode) {
   if (mode === "editor") await page.waitForFunction(() => window.__bench.renders >= 2, null, { timeout: 120_000 });
   await page.waitForTimeout(300);
   const events = await page.evaluate(() => window.__events);
+  const handlers = await page.evaluate(() =>
+    [...document.querySelectorAll("#preview *")].filter((el) => [...el.attributes].some((a) => /^on/i.test(a.name))).length);
+  if (handlers) violations.push(`${handlers} preview elements kept an on* attribute`);
   await ctx.close();
   if (violations.length) throw new Error(`${mode}: CSP/TT violation or page error: ${violations[0]}`);
   // Event Timing reports only events >= 16 ms; unreported keystrokes were faster than that.

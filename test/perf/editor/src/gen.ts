@@ -1,4 +1,6 @@
-// Deterministic synthetic note: 10,000 lines of mixed Markdown, including hostile raw HTML.
+// Deterministic synthetic note: 10,000 lines of mixed Markdown with benign raw HTML. Hostile HTML
+// belongs in a dedicated XSS test: Chromium reports CSP violations while DOMPurify parses it
+// (ADR-0007), which would make the "no violations" rule below meaningless here.
 export function bigNote(lines = 10_000): string {
   const out: string[] = [];
   let i = 0;
@@ -10,7 +12,7 @@ export function bigNote(lines = 10_000): string {
     else if (k === 3) out.push("| a | b | c |", "|---|---|---|", `| ${i} | x | y |`, "");
     else if (k === 4) out.push("```yaml", `key: ${i}`, "list: [1, 2, 3]", "```", "");
     else if (k === 5) out.push(`> quote ${i}`, "");
-    else out.push(`Raw HTML <kbd>Ctrl</kbd> and <img src=x onerror=alert(${i})> must be sanitized.`, "");
+    else out.push(`Raw HTML: press <kbd>Ctrl</kbd>+<kbd>S</kbd> and see <sup>${i}</sup>.`, "");
     i++;
   }
   return out.slice(0, lines).join("\n");
