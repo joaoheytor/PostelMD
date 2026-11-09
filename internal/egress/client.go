@@ -72,15 +72,31 @@ func New(o Options) *http.Client {
 		IdleConnTimeout:        90 * time.Second,
 	}
 	return &http.Client{
-		Transport: &guard{next: transport, allowHTTP: o.AllowHTTP, max: o.MaxResponseBytes},
-		Timeout:   o.Timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > MaxRedirects {
-				return ErrTooManyRedirects
-			}
-			return nil // the scheme and the address are checked again for this hop
-		},
+		Transport:     &guard{next: transport, allowHTTP: o.AllowHTTP, max: o.MaxResponseBytes},
+		Timeout:       o.Timeout,
+		CheckRedirect: checkRedirect,
 	}
+}
+
+// checkRedirect limits the chain (the scheme and the address are checked again for each
+// hop) and never forwards credentials to a host other than the first one (architecture
+// §11). net/http alone still forwards them to a subdomain. Once the chain has left the
+// first host, credentials stay off even if a later hop returns to it.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > MaxRedirects {
+		return ErrTooManyRedirects
+	}
+	first := strings.ToLower(via[0].URL.Host)
+	for _, hop := range append(via[1:], req) {
+		if strings.ToLower(hop.URL.Host) != first {
+			for _, h := range []string{"Authorization", "Proxy-Authorization", "Cookie", "Cookie2"} {
+				req.Header.Del(h)
+			}
+			req.URL.User = nil
+			break
+		}
+	}
+	return nil
 }
 
 // dialer checks the address the socket actually connects to, after DNS resolution, so a
