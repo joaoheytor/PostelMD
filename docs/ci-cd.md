@@ -24,7 +24,7 @@
 | Setting | Value |
 |---|---|
 | Default branch | `main` |
-| Ruleset on `main` | PRs required (no direct pushes, including the maintainer); required checks: `required` (from the GitHub Actions app; it's the **job** name) and `DCO`; linear history; no force pushes or deletions; conversation resolution required |
+| Ruleset on `main` | PRs required (no direct pushes, including the maintainer); required checks: `required` (from the GitHub Actions app; it's the **job** name) and `DCO`; linear history; no force pushes or deletions; conversation resolution required. **Bypass:** the repository admin role, in *pull request only* mode: the maintainer can merge a PR without its checks (for example during a GitHub Actions outage), but can never push to `main` directly. Every bypass is visible in the PR and the ruleset insights; say why in the PR. |
 | Ruleset on tags `v*` | Only the maintainer may create, update or delete them. GitHub rulesets can't require a *signed tag object* (and tag-name patterns may not be available on a personal repo), so the workflows enforce it: they run `git tag -v` against an allowed-signers file in the repo, check the tag name is SemVer (`vX.Y.Z` or `vX.Y.Z-rc.N`), and check the tagged commit is on `main` (`git merge-base --is-ancestor`). |
 | Merge method | **Squash only**, with the default squash message set to **"Pull request title and commit details"**. (Otherwise GitHub uses the commit's own message for single-commit PRs, bypassing the `pr-title` check.) The title must be a Conventional Commit; the commit details keep the `Signed-off-by:` trailers. |
 | DCO | DCO GitHub App installed; required check |
@@ -68,7 +68,7 @@ explicitly wherever a job checks out code.
 | `backup` | `backup --verify` from v0.2; full backup → restore round-trip from v0.3 (when `restore` ships) | v0.2 |
 | `helm` | `helm lint`, `kubeconform`, kind install with an RWOP PVC, N-1 upgrade | v0.3 |
 | `plugins` | Sandbox negative tests, plugin-API compatibility check (`api-extractor`) | v0.4 |
-| `required` | The only required status check. Defined with `if: always()` and `needs:` on every job above, so it **runs even when a dependency fails or is cancelled**. It passes only if every needed job's result is `success`, or `skipped` **and** listed in an explicit `allowed-skips` input (for example `pr-title` on `push`). Any `failure`, `cancelled` or unexpected `skipped` fails it. This follows the documented GitHub pattern for aggregating required checks. | v0.0 |
+| `required` | The only required status check. Defined with `if: always()` and `needs:` on every job above, so it **runs even when a dependency fails or is cancelled**. It passes only if every needed job's result is `success`, or `skipped` **and** listed in an explicit `allowed-skips` input (for example `pr-title` on `push`). Any `failure`, `cancelled` or unexpected `skipped` fails it. This follows the documented GitHub pattern for aggregating required checks. It is never made `if: !cancelled()`: a skipped required check counts as passing, so cancelling the only run would allow a merge without CI. Only a new push cancels an in-progress PR run; label and title edits queue, so a cancelled run's failing `required` never lands on the head commit. | v0.0 |
 
 **Caching:** Go module and build cache, npm cache, buildx GHA cache. The caches are scoped per
 branch, so fork PRs can't poison `main`'s cache.
