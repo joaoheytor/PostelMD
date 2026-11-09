@@ -29,8 +29,15 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       - **structure:** crash after a folder rename and before the DB commit, with two identical
         notes inside (IDs must be preserved by the structural intent); crashes at every step of
         create, delete, atomic rename and `link`/`unlink`, each reaching its table's outcome;
-        a crash at each phase of a **folder delete** (`moving`, `trashed`, a half-done purge);
+        a crash at each phase of a **folder delete** (`moving`, after the `mkdir`, `trashed`, a
+        half-done purge); every row of every table, including "appeared externally", and a
+        state outside the table landing in interference; `rename-checked` and the delete
+        fallback on a filesystem without `RENAME_NOREPLACE`; a crash at each step of a
+        **restore from trash**, and a restore racing the purge (exactly one wins);
         a commit message containing a token is rejected before the commit is written;
+      - **startup:** recovery runs before the reconciler, workers and HTTP; the reconciler never
+        tombstones or re-IDs a path named by an open or flagged intent, and applies only under
+        the vault lock;
       - **save:** a crash at every step of a save (each reaching its recovery-table row), a
         lost response retried with the old `If-Match` (`200`, no new generation), the startup
         temp sweep, `EXDEV` and `fsync` errors (no fallback, no retried `fsync`), ABA

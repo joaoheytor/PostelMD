@@ -16,6 +16,26 @@ on the next save. inotify is unreliable in some environments:
 - A **reconciler** is the source of truth for changes. It runs a full scan at startup and every
   `POSTELMD_RECONCILE_INTERVAL` (default 5 min), comparing mtime, size and hash with the
   metadata cache. It is mandatory, not optional.
+  - It may **scan** without locks, but it **applies** its findings (new IDs, generation bumps,
+    tombstones) only under the **vault lock** (ADR-0003 §4), re-checking each path under the
+    lock first. So it never acts on the middle of a structural operation, a save or a git
+    operation.
+  - It **skips every path named by an open or flagged intent** (save, structural, restore or
+    git), and the reserved paths (ADR-0006). Those paths belong to their intent's recovery
+    table, or to the user's decision, until the intent is cleared.
+- **Startup order.** Each step finishes before the next starts; nothing serves requests or
+  mutates a vault before intent recovery has run:
+  1. take the instance lock (ADR-0014);
+  2. refuse to start if a restore is in progress (ADR-0017; the marker is specified in #4);
+  3. run schema migrations (ADR-0015);
+  4. write the `post_migration_started` marker if a migration ran (ADR-0015);
+  5. **intent recovery** for every open intent (save, structural, restore, git; ADR-0003 §2
+     and §5, ADR-0016), then the temp sweep (ADR-0003 §5);
+  6. start the watcher, holding its hints, then run the **full reconcile** (with the rules
+     above), then apply the held hints;
+  7. replay the unprocessed outbox (ADR-0003 §6);
+  8. start the background workers (index, commit, push, purge);
+  9. open the admin socket, then HTTP. `/readyz` reports ready only after this step.
 - Changes go to a **per-vault event bus** and are pushed to clients over **SSE**
   (`GET /api/v1/events`):
   - each event has a monotonic ID, and a ring buffer replays from `Last-Event-ID`;
