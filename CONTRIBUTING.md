@@ -20,6 +20,17 @@ git commit -s -m "feat(editor): add jump-to-line"
 This appends `Signed-off-by: Your Name <you@example.com>`. PRs without sign-off cannot be
 merged. There is no CLA.
 
+## Development setup
+
+You need Go (the version in `go.mod`; an older Go downloads it automatically), Node 24,
+`golangci-lint`, `actionlint`, `shellcheck` and `yamllint`. With [mise](https://mise.jdx.dev):
+
+```sh
+mise use go@1.27 node@24 golangci-lint actionlint shellcheck
+pipx install yamllint
+make ci   # the same checks as the CI `required` job
+```
+
 ## Local git hooks (recommended)
 
 The repository ships git hooks that catch problems before CI does. Enable them once per clone:

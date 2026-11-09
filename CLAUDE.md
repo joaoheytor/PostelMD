@@ -123,17 +123,18 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 - [ ] Docs updated; `CHANGELOG.md` `[Unreleased]` entry added for user-visible changes
 - [ ] No dead code, no TODO without an issue link
 
-## Commands (to be filled in when the code exists)
+## Commands
 
 ```sh
-make dev        # go run + vite dev server
 make ci         # everything the CI `required` check runs, locally (no signing or publishing)
-make test       # go test ./... && npm test
-make scenarios  # failure-scenario suite (test/scenarios)
-make lint
-make e2e        # playwright smoke tests
-make image      # multi-arch image build
+make test       # go test -race ./... and the web tests (Vitest)
+make lint       # golangci-lint, tsc + eslint, file size, actionlint, shellcheck, yamllint
+make vuln       # govulncheck + npm audit --omit=dev
+make build      # bin/postelmd
 ```
+
+Planned, with the code that needs them: `make dev` (go run + Vite dev server),
+`make scenarios` (test/scenarios), `make e2e` (Playwright), `make image` (multi-arch).
 
 ## Testing conventions
 

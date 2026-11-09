@@ -1,0 +1,186 @@
+# CI for every PR and every push to main (docs/ci-cd.md §3). The `required` job is the
+# only required status check; add new jobs to its `needs:`, never to the ruleset.
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOLANGCI_LINT_VERSION: v2.15.0
+  ACTIONLINT_VERSION: v1.7.12
+  YAMLLINT_VERSION: 1.35.1
+
+jobs:
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - name: Check the PR title is a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          re='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [^ ].{0,98}$'
+          if ! printf '%s\n' "$TITLE" | grep -qE "$re"; then
+            echo "::error::PR title is not a Conventional Commit: $TITLE"
+            echo "Expected e.g. 'feat(editor): add jump-to-line'; max 100 characters."
+            echo "Types: feat fix perf refactor docs test build ci chore revert; add '!' for breaking."
+            exit 1
+          fi
+
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a CHANGELOG entry for user-visible changes
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          grep -qE '^## \[Unreleased\]$' CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [Unreleased]' section"; exit 1; }
+          if printf '%s' "$LABELS" | jq -e 'index("skip-changelog")' >/dev/null; then
+            echo "skip-changelog label set"; exit 0
+          fi
+          if printf '%s\n' "$TITLE" | grep -qE '^(feat|fix|perf)(\(|!|:)|^[a-z]+(\([^)]*\))?!:' \
+             || printf '%s' "$LABELS" | jq -e 'index("security")' >/dev/null; then
+            if git diff --quiet "$BASE_SHA" HEAD -- CHANGELOG.md; then
+              echo "::error::User-visible change without a CHANGELOG.md entry under [Unreleased]."
+              echo "Add one (CONTRIBUTING.md), or label the PR skip-changelog if it isn't user-visible."
+              exit 1
+            fi
+          fi
+          echo "changelog ok"
+
+  lint:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+      - name: Install actionlint and yamllint
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          pipx install "yamllint==${YAMLLINT_VERSION}"
+      - run: make lint-web lint-repo
+
+  test-go:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make test-go build
+
+  test-web:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make test-web
+      - run: cd web && npx vite build
+
+  vuln:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make vuln
+
+  required:
+    # Runs even when a dependency fails or is cancelled, so the check can't be bypassed.
+    if: always()
+    needs: [pr-title, changelog, lint, test-go, test-web, vuln]
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: All needed jobs succeeded (or were skipped where allowed)
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          # pr-title and changelog only run on pull_request.
+          ALLOWED_SKIPS: ${{ github.event_name == 'push' && 'pr-title changelog' || '' }}
+        run: |
+          fail=0
+          for job in $(printf '%s' "$NEEDS" | jq -r 'keys[]'); do
+            result=$(printf '%s' "$NEEDS" | jq -r --arg j "$job" '.[$j].result')
+            case "$result" in
+              success) ;;
+              skipped)
+                case " $ALLOWED_SKIPS " in
+                  *" $job "*) echo "$job: skipped (allowed)" ;;
+                  *) echo "::error::$job was skipped unexpectedly"; fail=1 ;;
+                esac ;;
+              *) echo "::error::$job: $result"; fail=1 ;;
+            esac
+          done
+          exit "$fail"
