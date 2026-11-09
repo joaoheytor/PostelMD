@@ -31,7 +31,8 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         atomic replace is tested at every crash point, with negative controls proving a
         missing `fsync` is caught. Git refs and objects are crash-tested the same way (#54, #56);
       - **for the MVP (ADR-0020):** a move and a delete to the trash crashed at every step, the
-        startup temp sweep, a second process on the same `/data`, and `fsync` and `EXDEV`
+        startup temp sweep, saves racing each other and a delete under the vault mutex, a
+        commit crash followed by a restart and the next commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
         errors (no fallback, no retried `fsync`). The rest of this list lands with the feature
         that needs it (v0.2 and later):
       - **structure:** crash after a folder rename and before the DB commit, with two identical
@@ -126,20 +127,27 @@ PostelMD is worth using before building the rest of the design.
 - A second container on the same `/data` refuses to start. `/data` on 9p, FUSE or NFS, or
   without `RENAME_NOREPLACE`, refuses to start.
 - Two tabs edit the same note → the second save gets 412 and the conflict view; nothing is
-  lost. An edit made outside PostelMD is caught the same way.
+  lost. An edit made outside PostelMD is caught the same way. Concurrent saves with the same
+  `If-Match` → exactly one `200`, the rest `412` (scenario test against the vault mutex).
+- An existing notes folder mounted at `/data/vaults/notes` is adopted (initialized as a git
+  repository if it isn't one); a Windows-path bind mount is refused with the named-volume fix.
 - Deleting a note while an autosave is pending does **not** recreate it (`404`, "this note was
-  deleted").
+  deleted"), including a save already waiting on the vault mutex when the delete runs.
 - Moving onto an existing file returns 409, and the destination is unchanged. A delete moves
   the item to the trash.
 - A stale save response never clears newer edits (an e2e test with injected latency).
 - Killing the browser mid-edit → the draft is recovered on reopen.
 - Pasting an AWS key → editor warning.
 - Failure scenarios: a crash at every step of a save, a move, a delete to the trash and a git
-  commit, under both the process-kill and the power-loss models; the startup temp sweep.
+  commit, under both the process-kill and the power-loss models; the startup temp sweep. For
+  the commit: crash → restart → next commit either succeeds, or fails with the lock message
+  and succeeds after "Remove the lock", with the branch at the old or the new commit and no
+  change lost.
 - Path lookup, create, move and upload naming `.git/config` or `.postelmd/*` return 404. Fuzz
   tests for path traversal pass. The e2e run produces no CSP violation reports.
 - A session cookie fails after the password changes; a forged or expired cookie is refused;
-  repeated failed logins slow down but never lock out.
+  a password change without the current password is refused; repeated failed logins slow
+  down but never lock out.
 - Restarting the container keeps the session and the notes intact.
 - The image runs on amd64 and arm64 and is under 40 MB. The first release is signed and
   attested at both registries (#31).

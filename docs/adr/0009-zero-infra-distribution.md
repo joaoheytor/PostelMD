@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09 (revised after design review)
+- **MVP scope (ADR-0020):** one vault at `/data/vaults/notes`; vault filesystems without `RENAME_NOREPLACE` are refused, so the Docker Desktop Windows-path vault instructions wait for ADR-0006's fallbacks; headless bootstrap, `/metrics` and `admin.sock` come later.
 
 ## Context
 People with little infrastructure must be able to run PostelMD with one `docker run`: no

@@ -9,7 +9,8 @@ multi-user rows (horizontal and vertical escalation, roles, invites, membership 
 the remote and push rows, and the plugin rows don't apply yet. The MVP adds:
 - **a stolen session cookie** is valid until it expires (7 days) or the password changes;
   one session can't be revoked server-side. Mitigations: `HttpOnly`, `SameSite=Lax`,
-  `Secure` on TLS, and "log out everywhere" bumps the epoch;
+  `Secure` on TLS, "log out everywhere" bumps the epoch, and a password change needs the
+  current password, so a stolen cookie can't lock the owner out;
 - **`auth.json` and `secret.key`** in `/data/.postelmd/` (`0600`, reserved paths) are the
   whole credential: anyone who can read the volume can forge sessions, as with the key ring
   in the full design.
