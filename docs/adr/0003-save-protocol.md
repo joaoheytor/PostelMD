@@ -63,81 +63,122 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   comparison alone. The generation bump, new hash and outbox row commit in the transaction
   that clears the intent, *after* the rename is durable;
 - after a crash during an **application-managed structural operation** (create, move or rename
-  of a file or folder, delete): identity is **never** left to hash matching. Before touching
+  of a file or folder, delete, restore from trash): identity is **never** left to hash matching. Before touching
   the filesystem, the operation writes a durable **structural intent** containing:
   - the op ID and type;
   - source and destination paths;
   - every affected `(fileID, generation, relative path)`;
   - the **source inode and device**, plus the content hash for files;
-  - the **mechanism** (`rename-noreplace`, `link-unlink`, `create`, `delete`);
+  - the **mechanism** (`rename-noreplace`, `link-unlink`, `rename-checked`, `create`,
+    `delete`, `restore`);
   - the **temp path**, if the operation writes one (§5);
   - the planned post-state.
 
-  On startup, recovery applies the table for **that operation and mechanism**. Applying the DB
-  side and clearing the intent happen in one transaction. **Interference** (a state the
+  On startup, recovery applies the table for **that operation and mechanism** (the order of
+  startup is in ADR-0004). Applying the DB side and clearing the intent happen in one
+  transaction. "Same inode" always means the same device and inode as recorded.
+
+  **Any state not listed in the table is interference.** Interference (a state the
   operation can't produce by itself) never guesses: both sides are copied into
-  `.postelmd/recovery/<op-id>/`, the vault is flagged, and the user decides. IDs are
-  reassigned only after that decision.
+  `.postelmd/recovery/<op-id>/`, the vault is flagged, the recorded paths stay read-only, and
+  the user decides. IDs are reassigned only after that decision. A row that says "appeared
+  externally" is not interference: the operation provably didn't touch that path, so the
+  reconciler handles it as any external change.
 
-  **Create** (temp file → `link()` or `renameat2(RENAME_NOREPLACE)` onto the destination):
-  | Destination | Action |
-  |---|---|
-  | Absent | Not applied: remove the temp file, drop the intent |
-  | Present, hash = intended | Applied: roll forward (insert the ID, generation 1) |
-  | Present, other content | Interference |
+  **Mechanisms.** `renameat2(RENAME_NOREPLACE)` is used wherever it works. Some filesystems
+  reject it with `EINVAL` (9p, some FUSE and overlay setups; found by the confinement spike,
+  ADR-0006). There, files use `link-unlink` and folders use `rename-checked`. The intent
+  records the mechanism actually used, and recovery applies that mechanism's table.
 
-  **Delete: files and folders (subtrees) alike.** Nothing is deleted in place. A delete is
-  an atomic `renameat2(RENAME_NOREPLACE)` of the file or folder into the vault's trash,
-  `<vault>/.postelmd-trash/<op-id>/`. The trash is on the same filesystem, so a single
-  rename removes the whole subtree from the vault. Physical removal (**purge**) is a
-  separate, resumable step.
-  - The intent records the op ID, the source path and inode, every affected
-    `(fileID, generation, relative path)` in the subtree, and a phase: `moving` → `trashed` →
-    `purging`. The phase changes are written durably before each step.
+  **Create** (temp file → `renameat2(RENAME_NOREPLACE)`, or `link()` then unlink the temp):
+  | Destination | Temp | Action |
+  |---|---|---|
+  | Absent | Any | Not applied: remove the temp, drop the intent |
+  | Present, hash = intended | Absent, or present (`link` done, unlink not) | Applied: remove any temp; roll forward (insert the ID, generation 1) |
+  | Present, other content | Any | Appeared externally (the no-clobber step failed or never ran): keep a complete temp in recovery, drop the intent; the reconciler gives the file a new ID |
+
+  **Delete: files and folders (subtrees) alike.** Nothing is deleted in place. A delete
+  creates a fresh, empty `<vault>/.postelmd-trash/<op-id>/` (`mkdir`, which fails if it
+  exists) and renames the file or folder to **`<op-id>/<basename>`**. The trash is on the same
+  filesystem, so one rename removes the whole subtree from the vault. Physical removal
+  (**purge**) is a separate, resumable step.
+  - The destination is inside a directory this operation just created, so it is absent
+    without `RENAME_NOREPLACE`. Where `renameat2` is unavailable, a plain `rename()` is
+    no-clobber here (the **delete fallback**), for files and folders alike.
+  - A **trash record** in the DB holds the op ID, the original path and basename, every
+    affected `(fileID, generation, relative path)` in the subtree, who deleted it and when,
+    and a state: `moving` → `trashed` → `purging`, or `trashed` → `restoring` (restore,
+    below). Each state change is committed before its step.
   - Files that an external tool added under the folder between the intent and the rename have
     no recorded ID. They are trashed with the folder, so they stay recoverable in the trash,
     and the reconciler never resurrects them.
 
-  | Phase | Source | Trash `<op-id>` | Action |
-  |---|---|---|---|
-  | `moving` | Present (same inode) | Absent | Not applied: drop the intent, IDs unchanged |
-  | `moving` | Absent | Present (recorded inode) | Applied: roll forward, tombstoning **every recorded ID** in one transaction; phase → `trashed` |
-  | `moving` | Present (different inode) | Present (recorded inode) | Applied, then recreated externally: roll forward the tombstones; the new path is reconciled as **new** (new IDs) |
-  | `moving` | Absent | Absent | Interference: flag it, keep the IDs untombstoned, and ask the user (nothing to copy) |
-  | `trashed` / `purging` | (any) | Present, fully or partly | Already applied: tombstones exist; **resume the purge** when retention expires (removal is idempotent and works bottom-up) |
-  | `purging` | (any) | Absent | Purge completed: clear the intent |
+  | State | Source | `<op-id>/` | `<op-id>/<basename>` | Action |
+  |---|---|---|---|---|
+  | `moving` | Same inode | Absent | Absent | Not applied: drop the intent, IDs unchanged |
+  | `moving` | Same inode | Present, empty | Absent | Not applied (crash after `mkdir`): remove `<op-id>/`, drop the intent |
+  | `moving` | Absent | Present | Same inode | Applied: tombstone **every recorded ID** in one transaction; state → `trashed` |
+  | `moving` | Other inode | Present | Same inode | Applied, then recreated externally: roll forward the tombstones; the new path is reconciled as **new** (new IDs) |
+  | `moving` | Absent | Any | Absent | Interference: flag it, keep the IDs untombstoned, and ask the user (nothing to copy) |
+  | `trashed` / `purging` | Any | Present | Fully or partly present | Already applied: tombstones exist; **resume the purge** when retention expires (removal is idempotent and works bottom-up) |
+  | `purging` | Any | Absent | Absent | Purge completed: drop the trash record |
+  | `trashed` | Any | Absent | Absent | Removed outside PostelMD (the trash is reserved, so only a shell user can): log a warning and an audit event, drop the trash record. Nothing is left to protect, and the tombstones stay. |
 
-  - **Undo and retention:** trashed items stay for **7 days**, the same as recovery copies.
-    "Restore from trash" is a no-clobber rename back, which creates **new IDs**: tombstones are
-    never revived, so old autosaves still get `410`.
-  - The purge runs in the background, outside the vault lock (the trash is reserved and not
-    visible to anything else), and is throttled for large subtrees.
+  - **Retention:** trashed items stay for **7 days**, the same as recovery copies.
+  - The purge runs in the background, outside the vault lock, and is throttled for large
+    subtrees. It starts only by a **compare-and-set** of the trash record from `trashed` to
+    `purging`, so it can never run at the same time as a restore. The trash is reserved
+    (ADR-0006): the watcher, index, git and every API except the trash API (list, restore)
+    ignore it. It is still visible to the trash API, to backups (ADR-0017) and to anyone with
+    shell access to the volume.
   - Git: deleting means the paths are absent from the working tree, so the next auto-commit
     records the deletion. The trash and `.postelmd-tmp/` (§5) are excluded through
     `.git/info/exclude` and are never committed.
 
+  **Restore from trash** is a structural operation of its own. It takes the vault lock, then
+  moves the trash record from `trashed` to **`restoring`** by compare-and-set (it fails with
+  `409` if the record is already `purging` or `restoring`). Its intent records the trash op
+  ID, the entry's inode, the destination (the original path, or one the user chooses) and the
+  mechanism. It then moves `<op-id>/<basename>` to the destination without clobbering:
+  `rename-noreplace`, or `link-unlink` for a file and `rename-checked` for a folder. A
+  restored item always gets **new IDs**: tombstones are never revived, so old autosaves still
+  get `410`.
+  | Entry `<op-id>/<basename>` | Destination | Action |
+  |---|---|---|
+  | Same inode | Absent | Not applied: state → `trashed`, drop the intent |
+  | Same inode | Present, other inode | Destination appeared externally: state → `trashed`, drop the intent; the user picks another destination |
+  | Absent | Same inode | Applied: assign new IDs to the subtree, drop the trash record and `<op-id>/` |
+  | Same inode | Same inode (`link` done, unlink not) | Complete the unlink, then as "Applied" |
+
   **Atomic rename or move** (`renameat2(RENAME_NOREPLACE)`, files and folders):
   | Source | Destination | Action |
   |---|---|---|
-  | Present (same inode) | Absent | Not applied: drop the intent |
-  | Absent | Present (same inode) | Applied: roll forward with the recorded ID mapping (IDs preserved even for identical files) |
-  | Present | Present | Interference (an atomic rename can't leave both) |
-  | Absent | Absent | Interference |
+  | Same inode | Absent | Not applied: drop the intent |
+  | Same inode | Other inode | Not applied; the destination appeared externally (the no-clobber rename failed or never ran): drop the intent |
+  | Absent | Same inode | Applied: roll forward with the recorded ID mapping (IDs preserved even for identical files) |
+  | Other inode | Same inode | Applied, then the source was recreated externally: roll forward; the new source is reconciled as **new** |
 
-  **Two-step fallback** (`link()` then `unlink()`, files only, where `renameat2` isn't
-  available):
+  **Two-step fallback** (`link-unlink`, files only, where `renameat2` isn't available):
   | Source | Destination | Action |
   |---|---|---|
-  | Present | Absent | Not applied: drop the intent |
-  | Present | Present, **same inode** as the source | Step 1 done: **complete** by unlinking the source, then roll forward |
-  | Absent | Present (recorded inode) | Applied: roll forward |
-  | Present | Present, different inode | Interference |
-  | Absent | Absent | Interference |
+  | Same inode | Absent | Not applied: drop the intent |
+  | Same inode | Other inode | Not applied; the destination appeared externally (`link()` fails with `EEXIST`): drop the intent |
+  | Same inode | Same inode | Step 1 done: **complete** by unlinking the source, then roll forward |
+  | Absent | Same inode | Applied: roll forward |
+  | Other inode | Same inode | Applied, then the source was recreated externally: roll forward; the new source is reconciled as **new** |
 
-  Folders are never moved with the two-step fallback (`link()` doesn't work on directories).
-  Where `renameat2` is unavailable, a folder move uses `rename()` under the vault lock after
-  checking that the destination is absent. The remaining window only matters against
-  uncoordinated external writers (§1).
+  **Checked rename** (`rename-checked`, folders only, where `renameat2` isn't available;
+  `link()` doesn't work on directories): under the vault lock, `lstat` the destination, then
+  `rename()` if it is absent. Plain `rename()` replaces an **empty** destination directory
+  and fails with `ENOTEMPTY` or `EEXIST` on anything else, so the only thing an external
+  writer can lose in the window between the check and the rename is an empty folder it just
+  created (§1).
+  | Source | Destination | Action |
+  |---|---|---|
+  | Same inode | Absent | Not applied: drop the intent |
+  | Same inode | Other inode | Not applied; the destination appeared externally: drop the intent |
+  | Absent | Same inode | Applied: roll forward with the recorded ID mapping |
+  | Other inode | Same inode | Applied, then the source was recreated externally: roll forward; the new source is reconciled as **new** |
 
 ### 3. Operations
 | Operation | Request | Preconditions | Outcome |
@@ -146,8 +187,9 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
 | Update | `PUT …/files/{id}` | `If-Match` | `200` + new ETag; `412` with the current content on mismatch, **unless the current content equals the submitted content** (`200`, idempotent; §5); `410` on a tombstone. **Never creates.** |
 | Delete | `DELETE …/files/{id}` | `If-Match` | `204`; leaves a tombstone |
 | Rename/move file | `POST …/files/{id}/move` `{to}` | `If-Match` on the source; the destination **must not exist** | **No-clobber**: `renameat2(RENAME_NOREPLACE)`, or `link()`+`unlink()` where that's unavailable; `409` if the destination exists |
-| Folder rename/move | `POST …/folders/move` | A subtree lock; every open file under it must be clean | No-clobber; children keep their IDs and get a generation bump |
+| Folder rename/move | `POST …/folders/move` | A subtree lock; every open file under it must be clean | No-clobber: `renameat2(RENAME_NOREPLACE)`, or `rename-checked` where that's unavailable (§2); children keep their IDs and get a generation bump |
 | Folder delete | `DELETE …/folders` | A subtree lock; every open file under it must be clean | An atomic move into the vault trash, then a resumable purge (§2); every recorded child ID is tombstoned |
+| Restore from trash | `POST …/trash/{op-id}/restore` `{to?}` | The trash record is `trashed`; the destination (default: the original path) **must not exist** | No-clobber (§2); new IDs; `409` if the record is being purged or restored, or the destination exists |
 
 The API addresses files **by ID** after creation. Paths are resolved to IDs on open.
 
@@ -233,6 +275,8 @@ It is ABA-safe because the ID must match: a deleted and recreated file has a new
 | Rename or move | intent → `renameat2(RENAME_NOREPLACE)` → `fsync` destination dir, then the source dir if different → DB |
 | `link`/`unlink` fallback | intent → `link` → `fsync` destination dir → `unlink` → `fsync` source dir → DB |
 | Delete | intent (`moving`) → create `.postelmd-trash/<op-id>/`, `fsync` the trash → rename into it → `fsync` the source dir and `<op-id>/` → DB (tombstones, `trashed`). The purge needs no per-step `fsync`: removal is idempotent and resumes. |
+| Checked rename | intent → `lstat` destination → `rename()` → `fsync` destination dir, then the source dir if different → DB |
+| Restore from trash | intent (record `restoring`) → move the entry by its mechanism → `fsync` destination dir and `<op-id>/` → DB (new IDs, drop the record) → remove the empty `<op-id>/`, `fsync` the trash |
 | Git | Objects, refs and their directories (ADR-0016, "Durability") |
 
 An **`fsync` error is fatal** for the operation. After a failed `fsync`, the kernel may have
