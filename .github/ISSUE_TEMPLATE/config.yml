@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/joaoheytor/PostelMD/security/advisories/new
+    about: Please report vulnerabilities privately (SECURITY.md), never in a public issue.
+  - name: Code of Conduct concerns
+    url: https://github.com/joaoheytor/PostelMD/blob/main/CODE_OF_CONDUCT.md
+    about: How to report conduct issues.

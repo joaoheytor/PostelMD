@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a new capability or a change in behaviour.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        PostelMD keeps a deliberately small core (see the PRD's
+        [Non-Goals](https://github.com/joaoheytor/PostelMD/blob/main/docs/PRD.md#4-non-goals)).
+        Many ideas fit better as a plugin; that's a good outcome, not a rejection.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today? Describe the problem before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "this could be a plugin" or a workaround you use today.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I read the PRD's Non-Goals, and this request isn't one of them (or I explain above why it should change).
+          required: true
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
