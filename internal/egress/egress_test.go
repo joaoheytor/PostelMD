@@ -145,3 +145,44 @@ func TestClientCapsResponses(t *testing.T) {
 		t.Fatalf("a body exactly at the cap: %d bytes, %v", len(b), err)
 	}
 }
+
+func TestRedirectsNeverCarryCredentialsToAnotherHost(t *testing.T) {
+	get := func(rawURL string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, rawURL, nil)
+		r.Header.Set("Authorization", "Basic c2VjcmV0")
+		r.Header.Set("Cookie", "s=1")
+		r.Header.Set("Accept", "*/*")
+		return r
+	}
+	tests := []struct {
+		name string
+		via  []string
+		next string
+		keep bool
+	}{
+		{"same host", []string{"https://git.example.com/a"}, "https://git.example.com/b", true},
+		{"same host, other case", []string{"https://git.example.com/a"}, "https://GIT.example.com/b", true},
+		{"subdomain", []string{"https://example.com/a"}, "https://evil.example.com/b", false},
+		{"other port", []string{"https://example.com/a"}, "https://example.com:8443/b", false},
+		{"back to the first host", []string{"https://example.com/a", "https://other.test/b"}, "https://example.com/c", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var via []*http.Request
+			for _, u := range tt.via {
+				via = append(via, get(u))
+			}
+			req := get(tt.next)
+			if err := checkRedirect(req, via); err != nil {
+				t.Fatal(err)
+			}
+			kept := req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != ""
+			if kept != tt.keep {
+				t.Fatalf("credentials kept = %v, want %v", kept, tt.keep)
+			}
+			if req.Header.Get("Accept") == "" {
+				t.Fatal("a non-credential header was removed")
+			}
+		})
+	}
+}

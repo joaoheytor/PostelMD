@@ -27,7 +27,7 @@
 ```
 [Browser main window] ──TLS?── [postelmd HTTP] ── [service/authz] ── [store/*: os.Root + reserved paths] ── [/data]
    │                                   │                    │
-[per-plugin opaque iframe (+ its workers)]   [egress client] → git remotes, IdP, registry, approved hosts
+[per-plugin opaque iframe (+ its workers)]   [egress client] → git remotes (https only; I13), IdP, registry, approved hosts
 ```
 
 ## STRIDE
@@ -59,6 +59,7 @@
 | I3 | A secret reaches git or a remote | Paste warning; synchronous save scan; commit gate; scan of the **whole outgoing range**, including paths and ref names, before push; owner-only acknowledgement; path globs never suppress unapproved fingerprints; HMAC fingerprints never exported | 0010 |
 | I12 | `/metrics` reveals operational detail | Token on the main listener (`404` without one) or a separate scrape-only listener | 0009 |
 | I4 | SSRF through server-side fetches or git remotes | Egress client: only globally reachable unicast after `Unmap()` (special-purpose, NAT64 and 6to4 blocks denied), exact-host exceptions per purpose, pinned DNS, re-checked redirects; git remotes `https`/`ssh` only, SSH through the same dialer with pinned host keys | arch §11, 0010 |
+| I13 | A vault reads another vault, or the host, through its git remote (a local path, `file://`, or an `insteadOf` rewrite in an imported `.git/config`) | The remote URL is a trust boundary: `https://` only, no credentials, query or fragment, checked by two parsers before it is stored and again before every fetch or push (after `insteadOf` rewrites); a stored remote that fails puts the vault in `unsupported`. At startup go-git keeps only the `https` transport, through the egress client, so a URL that skips the check still can't reach the filesystem (#40) | 0016 |
 | I5 | Uploaded SVG or HTML executes | Content sniffing + allow-list; `nosniff`; SVG served as an attachment | 0009 |
 | I6 | Logs leak content or secrets | Never log bodies, secret values or tokens; no log endpoint | 0009 |
 | I7 | A revoked user keeps receiving events | Per-event authorization; stream closed on revocation; replay re-authorized | 0018 |

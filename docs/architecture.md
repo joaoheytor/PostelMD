@@ -293,8 +293,10 @@ client:
   and `ext::` are refused **before the URL is stored** (#40). Public hosts are allowed by
   default; private hosts, including a tailnet, need an exception. Credentials are bound to the
   remote URL.
-  - HTTPS uses the egress client as go-git's transport; the `file` transport is uninstalled
-    (ADR-0016).
+  - HTTPS uses the egress client as go-git's transport. Every other transport (`file`,
+    `git`, `http`, and `ssh` until SSH remotes land) is uninstalled at startup (ADR-0016).
+  - The URL is checked again before every fetch or push, after any `insteadOf` rewrite in
+    `.git/config`. That also covers remotes that arrive with an imported repository.
   - **SSH dials through the egress dialer** too, so the same address policy applies. If
     go-git's SSH transport can't take our dialer, SSH remotes stay disabled until it can.
   - **SSH host keys are pinned.** When an owner configures an SSH remote, the server shows the
