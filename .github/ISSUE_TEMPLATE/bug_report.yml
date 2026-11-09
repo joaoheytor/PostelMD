@@ -1,0 +1,72 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! "It stopped working" can't be acted on, so please fill in every
+        field (CONTRIBUTING.md). **Security vulnerabilities:** don't open an issue; use
+        [private vulnerability reporting](https://github.com/joaoheytor/PostelMD/security/advisories/new).
+        Redact secrets, tokens and private hostnames from everything you paste: this
+        repository is public.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Exact error message
+      description: Copy it verbatim (UI message, HTTP status, CLI output).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: changed
+    attributes:
+      label: What changed recently?
+      description: Upgrade, config change, new plugin, storage or proxy change, external tool writing to the vault…
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `postelmd version`, or the image tag/digest.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - docker run
+        - Docker Compose
+        - Helm / Kubernetes
+        - Binary
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS / architecture, browser and version, filesystem or storage backing /data (e.g. ext4, Longhorn, NFS, Docker Desktop).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (secrets redacted)
+      render: text
