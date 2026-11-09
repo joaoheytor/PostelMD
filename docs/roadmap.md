@@ -52,11 +52,9 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         cancelled or skipped unexpectedly.
 
       These become permanent regression tests.
-- [ ] **Spike: go-git capabilities.** Pin the go-git version; confirm fast-forward pull, push,
-      blob-level staging from in-memory bytes and reachable-object enumeration; evaluate
-      three-way merge (go-git v6, or our own text merge); build the `billy.Filesystem` adapter
-      over `internal/store/fs` (moved here from the confinement spike). Record the result in
-      ADR-0016.
+- [x] **Spike: go-git capabilities** (results in ADR-0016). Pinned v5.19.3; commits from bytes,
+      compare-and-swap refs, fast-forward detection and push-object listing in
+      `internal/store/git`; v6 beta has no three-way merge, so v0.1 stays fast-forward only.
 - [x] **Spike: confinement primitives** (ADR-0006, results recorded there). `openat2` +
       `renameat2(RENAME_NOREPLACE)` in `internal/store/fs`; 0 escapes under a symlink-swap race
       (with a negative control); fuzzed; 9p lacks `RENAME_NOREPLACE`.

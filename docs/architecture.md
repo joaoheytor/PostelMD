@@ -35,7 +35,7 @@ Everything else consumes their interfaces.
 | `service` | Use cases (save, move, search, commit, backup) and authorization checks via memberships |
 | `store/fs` | Vault access via `os.Root`, reserved-path enforcement (ADR-0006), atomic writes, the re-`stat` check |
 | `store/watch` | fsnotify adapter. Emits raw hints; it is the only place that touches inotify. |
-| `store/git` | go-git adapter (go-git's own filesystem access is wrapped here and given each vault's `os.Root`-backed filesystem) |
+| `store/git` | go-git adapter. go-git touches only `.git/`; commits are built from supplied bytes and worktree changes go through `store/fs` (ADR-0016 spike results) |
 | `store/sql` | SQLite repositories (sqlc), migrations, outbox, intent log |
 | `store/lock` | Instance lock (`flock`), vault and file locks with fixed lock ordering |
 | `vault` | Vault lifecycle and states, including maintenance mode |

@@ -101,6 +101,23 @@ or switches branches by itself.
 - Lock files left behind by an external git (`.git/index.lock`) put the vault in
   `unsupported` until the admin confirms.
 
+### go-git capabilities spike results (2026-11-09, go-git v5.19.3, v6.0.0-beta.1)
+Implemented in `internal/store/git` (`Commit`, `SetBranch`, `Relation`, `ObjectsToPush`),
+tested against the real git binary (`git fsck --strict`).
+
+| Question | Finding | Consequence |
+|---|---|---|
+| Version | v5.19.3 is the latest stable. v6 is `v6.0.0-beta.1`. | Pin **v5.19.3**; Renovate tracks it. Revisit v6 at its first stable release. |
+| Commit from in-memory bytes | Works with plumbing only (blob → trees → commit). The worktree is never read or written; `git fsck --strict` accepts the result. go-git writes tree entries in the order given, so the adapter sorts them the way git does (a directory sorts as `name/`). | The commit gate (ADR-0010) scans exactly the bytes it commits. Auto-commit never uses go-git's index or `Worktree.Add`. |
+| Move a ref safely | `CheckAndSetReference` is compare-and-swap. | `SetBranch(old, next)` is the only ref mutation, so a concurrent external git change fails instead of being overwritten. |
+| Fast-forward pull | `Fetch` + an ancestry check works. `Merge(FastForwardMerge)` moves the ref **and leaves the worktree untouched** (with no worktree attached). | A pull is: fetch → `Relation` → apply the changed paths through `internal/store/fs` under the crash intent above → `SetBranch`. go-git never checks files out. |
+| Diverged push | Rejected, but only as an unexported error string (`non-fast-forward update: …`), not a sentinel. | Never infer divergence from the push error (CLAUDE.md rule 14). Check `Relation` against the freshly fetched remote before pushing; treat any push failure as a generic failure to retry. |
+| Objects a push sends | `revlist.Objects(want, have)` lists exactly the new commits, trees and blobs. | The push gate scans that list (ADR-0010). |
+| Three-way merge | **v6 beta still rejects every strategy except fast-forward** (it declares ORT options, but `Merge` returns `ErrUnsupportedMergeStrategy`). | v0.1 stays fast-forward only, as decided above. Divergent merges need our own text three-way merge: a separate design issue, not a v0.1 promise. |
+| `billy.Filesystem` adapter | go-git needs a filesystem only for `.git/` once it never touches the worktree. go-billy's default `osfs` chroot refuses symlinks leading out of `.git/` (tested), but resolves them in user space, so it isn't race-proof like `internal/store/fs`. | Accepted for `.git/` only: it is a reserved path app users can't write (ADR-0006), so only an external writer with shell access could race it. A billy adapter over `internal/store/fs` stays possible later; no worktree adapter is needed. |
+| Transports | The transport for a URL scheme is chosen **process-wide** (`client.InstallProtocol`). Plain local paths and `file://` are valid remotes, served in-process. | At startup, install the egress client (architecture §11) as the `http`/`https` transport and uninstall `file`. Validate every remote URL against a scheme allow-list (`https`, and `ssh` when supported) **before** storing it. Otherwise a vault whose remote is `/data/<other-vault>` could read another vault. |
+| Dependency footprint | go-git adds about 20 modules (ssh, OpenPGP, sha1cd, go-diff…). `govulncheck` finds no called vulnerabilities; the module-level `x/crypto/openpgp` advisory isn't reachable from our code. | Accepted under ADR-0001 (native git for the audience's features). `make vuln` gates it on every PR. |
+
 ### Attribution
 - Auto-commits are **per author**: the auto-committer groups changed files by the last
   PostelMD user who saved each file, and creates one commit per author in the batch.
@@ -124,3 +141,5 @@ or switches branches by itself.
 | Rebase on pull | Rewrites shared history; worse attribution |
 | One commit per save | Noisy history; hurts performance |
 | Single committer identity for everyone | Loses who changed what (repudiation) |
+| go-git `Worktree` (checkout, `Add`, `Commit`) | It reads and writes the worktree itself, outside `internal/store/fs` confinement and the crash intents, and stages whatever is on disk at that moment rather than the scanned bytes |
+| Shelling out to the `git` binary | Not in the distroless image (ADR-0009); ties behaviour to the installed git version |
