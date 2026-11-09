@@ -60,7 +60,10 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       (with a negative control); fuzzed; 9p lacks `RENAME_NOREPLACE`.
 - [x] **Spike: UI shell framework** (ADR-0019): Lit, light DOM; CodeMirror mounted in a shadow root
       so its styles comply with `style-src 'self'` (found in the spike: it breaks otherwise)
-- [ ] Spike: CodeMirror 6 + markdown-it in a Worker, measured with the PRD procedure
+- [x] **Spike: CodeMirror 6 + markdown-it in a Worker** (ADR-0007): DOMPurify stays on the main
+      thread; changed-block patching, batched initial render and `content-visibility` make typing
+      with the preview open cost the same as with it hidden; editor budget made relative to a
+      `<textarea>` control
 
 **Acceptance:** CI is green on an empty skeleton; the file-size check fails on a 501-line
 fixture; DCO blocks an unsigned commit.

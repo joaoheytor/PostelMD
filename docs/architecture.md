@@ -60,7 +60,7 @@ Everything else consumes their interfaces.
 | `core/treeStore` | File tree state, optimistic updates reconciled with the server |
 | `core/pluginHost` | Trusted plugin loader; one sandboxed iframe per plugin; capability-checked RPC |
 | `editor/` | CodeMirror 6: markdown, language data, keymaps, secret-paste warning extension |
-| `preview/` | markdown-it in a Web Worker → DOMPurify → DOM. Mermaid via a first-party bundled plugin (from v0.4; core before that). |
+| `preview/` | markdown-it in a Web Worker → blocks → DOMPurify on the main thread (inside the only Trusted Types policy) → patch only changed blocks (ADR-0007). Mermaid via a first-party bundled plugin (from v0.4; core before that). |
 | `ui/` | Shell (Lit custom elements in the light DOM; the editor host mounts CodeMirror in a shadow root, ADR-0019): tree, tabs, dialogs, command palette, conflict view, git status |
 
 `core/` has **no UI-framework imports** and is unit-tested with Vitest.

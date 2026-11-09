@@ -51,7 +51,7 @@
 | T12 | Rollback resurrects revoked access | DB-only rollback only before any mutation; otherwise full restore + access revalidation | 0015 |
 | T8 | Tampered image, chart or binary | cosign with pinned identities; SBOM; digest pinning | 0015 |
 | R1 | Who changed or deleted a note, or who acknowledged a secret? | Per-author git commits; external changes labelled; append-only audit log (365 days) | 0016, arch §9 |
-| I1 | Stored XSS through Markdown | markdown-it (restricted HTML) → DOMPurify; CSP `script-src 'self'` and `style-src 'self'`; a smoke test fails on any CSP violation; Mermaid in strict mode | 0007, 0019 |
+| I1 | Stored XSS through Markdown | markdown-it (restricted HTML) → DOMPurify inside the only Trusted Types policy; CSP `script-src 'self'`, `style-src 'self'` and `require-trusted-types-for 'script'`; a smoke test fails on any CSP violation; Mermaid in strict mode | 0007, 0019 |
 | I2 | A plugin exfiltrates notes or reads the session | Sandboxed plugins in a per-plugin opaque iframe, with Workers created inside it and a per-plugin CSP; capability RPC; negative tests. The trusted tier is admin-only. | 0008 |
 | I3 | A secret reaches git or a remote | Paste warning; synchronous save scan; commit gate; scan of the **whole outgoing range** before push; owner-only acknowledgement | 0010 |
 | I4 | SSRF through server-side fetches | Egress client: deny private ranges, exact-host exceptions per purpose, pinned DNS, re-checked redirects | arch §11 |
