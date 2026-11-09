@@ -53,8 +53,8 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 3. **No god objects.** On the frontend, state lives in `web/src/core` stores; UI components
    subscribe. Components never talk to each other through ad-hoc DOM events.
 4. **The save protocol is sacred** (ADR-0003). Every write uses `If-Match` / `If-None-Match`
-   with the ID+generation+hash ETag. Autosave never creates a file. Moves never overwrite the
-   destination. **Deletes never unlink in place**: they move the item into the vault trash,
+   with the ID+generation+hash ETag (the MVP uses a content-hash ETag; ADR-0020). Autosave
+   never creates a file. Moves never overwrite the destination. **Deletes never unlink in place**: they move the item into the vault trash,
    and a resumable purge removes it later. A save response clears dirty state only for its
    own edit generation and editing session (`esid`). Any change to save, sync, git or
    conflict code needs tests first.
@@ -83,9 +83,11 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 15. **Secrets and logs:** never log note content, secret values, tokens or passwords. Secret
     scanning runs on the exact bytes and metadata being committed or pushed, and cached
     detections never stand in for authorization decisions (ADR-0010). Security-relevant
-    actions go through the audit package, which writes to the DB **and** the external sink.
+    actions go through the audit package, which writes to the DB **and** the external sink
+    (the MVP has no DB: stdout only; ADR-0020).
 16. **Authorization per request:** check membership and role on every request and every SSE
-    event delivery. Never cache roles in sessions (ADR-0018).
+    event delivery. Never cache roles in sessions (ADR-0018). In the MVP (one user), check the
+    session's signature, expiry and epoch on every request (ADR-0020).
 17. **Plugins:** sandboxed plugins are headless by default, with code in a Worker, identity
     bound to a `MessageChannel` port, and any extra capability needing the admin's approval
     again (ADR-0008).

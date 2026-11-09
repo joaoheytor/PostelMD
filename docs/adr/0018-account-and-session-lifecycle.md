@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09
+- **MVP scope (ADR-0020):** deferred to v0.3; the MVP has one account and a session epoch.
 
 ## Context
 ADR-0005 defines how people get in. This ADR defines how access changes and ends:

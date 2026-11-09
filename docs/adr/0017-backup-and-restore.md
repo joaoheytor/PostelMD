@@ -2,6 +2,7 @@
 
 - **Status:** Proposed (v0.2: `backup`; v0.3: `restore` tested in CI)
 - **Date:** 2026-11-09
+- **MVP scope (ADR-0020):** deferred to v0.3.
 
 ## Context
 An instance is made of things that must be recovered **together**:

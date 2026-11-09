@@ -35,6 +35,10 @@ docs-as-code tooling (MkDocs, Backstage TechDocs, Hugo) can publish.
 
 ### MVP (v0.1–v0.3; see `roadmap.md`)
 
+v0.1 is a smaller first step, for the maintainer alone ([ADR-0020](adr/0020-mvp-scope.md)): one
+user, one vault, local git, no database. Its four-week test decides whether, and in which
+order, the rest of this list is built.
+
 **Editor and workspace**
 - File tree: create, rename, move and delete files and folders; nested folders.
 - CodeMirror 6 editor with Markdown highlighting, code-fence language highlighting and

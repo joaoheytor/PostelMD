@@ -5,6 +5,11 @@
 
 Decisions are recorded in [`adr/`](adr/). This document describes how the pieces fit together.
 
+> **MVP (v0.1):** [ADR-0020](adr/0020-mvp-scope.md) builds a subset of this design: one user,
+> one vault at `/data/vaults/notes` serialized by one vault mutex, no SQLite (the credential is `/data/.postelmd/auth.json`, sessions
+> are signed cookies), a content-hash ETag, local git with no remote, and no watcher, plugins,
+> backup or metrics. The sections below describe the full design that later milestones build.
+
 ## 1. System context
 
 ```mermaid

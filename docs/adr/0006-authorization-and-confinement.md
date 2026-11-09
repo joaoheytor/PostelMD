@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09 (revised after design review)
+- **MVP scope (ADR-0020):** the MVP keeps confinement and reserved paths; vaults, memberships and the `RENAME_NOREPLACE` fallbacks come later (one user, one vault).
 
 ## Context
 Several users share one process and one volume. A path-traversal or authorization bug would

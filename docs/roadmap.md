@@ -29,7 +29,12 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       - **harness (done):** `internal/store/fs` reports every write and `fsync` to a hook;
         `internal/store/fs/faultfs` crashes at any step and models a power loss. The save's
         atomic replace is tested at every crash point, with negative controls proving a
-        missing `fsync` is caught;
+        missing `fsync` is caught. Git refs and objects are crash-tested the same way (#54, #56);
+      - **for the MVP (ADR-0020):** a move and a delete to the trash crashed at every step, the
+        startup temp sweep, saves racing each other and a delete under the vault mutex, a
+        commit crash followed by a restart and the next commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
+        errors (no fallback, no retried `fsync`). The rest of this list lands with the feature
+        that needs it (v0.2 and later):
       - **structure:** crash after a folder rename and before the DB commit, with two identical
         notes inside (IDs must be preserved by the structural intent); crashes at every step of
         create, delete, atomic rename and `link`/`unlink`, each reaching its table's outcome;
@@ -97,100 +102,108 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
 **Acceptance:** CI is green on an empty skeleton; the file-size check fails on a 501-line
 fixture; DCO blocks an unsigned commit.
 
-## v0.1: "My runbooks, safely, in one `docker run`"
+## v0.1: MVP, "My runbooks, safely, in one `docker run`" (ADR-0020)
+One user (the maintainer), one vault, no database, no network. The goal is to find out whether
+PostelMD is worth using before building the rest of the design.
+
 **Scope:**
 - single binary with the embedded SPA and the instance lock;
-- local auth (passwords) with first-run setup;
-- personal vault;
-- file tree CRUD with no-clobber moves;
-- CM6 editor;
-- live preview (sanitized, with Mermaid);
-- the full save protocol (ADR-0003), with conflict UI and drafts;
-- fuzzy finder and template starter pack;
-- **git-backed vault** (ADR-0010 and ADR-0016: auto-commit, history, push, **fast-forward-only
-  pull**);
-- **secret detection** with the commit and push gates;
-- reserved paths;
-- `/healthz`, `/readyz`, `/metrics` (behind a token or on a separate listener; ADR-0009);
-- multi-arch image.
+- one password, set on first run with the setup token; signed session cookies with a session
+  epoch; `postelmd reset-password`;
+- file tree: create, rename, move (no-clobber) and delete to the trash;
+- CM6 editor, live preview (sanitized, with Mermaid), copy buttons;
+- safe save: content-hash ETag, `If-Match`/`If-None-Match`, atomic replace, conflict view,
+  IndexedDB drafts;
+- local git: commit with a message (optional auto-commit), history and diff per file, restore a
+  version;
+- secret warning on save and paste;
+- fuzzy finder and the template starter pack;
+- reserved paths; `/healthz`, `/readyz`; multi-arch image.
 
 **Acceptance criteria**
-- The canonical `docker run` (ADR-0009) → setup URL in the logs → admin created → first note
+- The canonical `docker run` (ADR-0009) → setup URL in the logs → password set → first note
   saved, in < 2 minutes.
-- Pre-setup routing matches the ADR-0009 table exactly (integration test per row).
-- A second container on the same `/data` refuses to start.
-- `/data` on 9p, FUSE or NFS refuses to start (by `statfs` magic); a vault on a filesystem
-  without `RENAME_NOREPLACE` works through the fallbacks (CI test with a seccomp profile that
-  returns `EINVAL` for it); the Docker Desktop commands in ADR-0009 are checked by hand on
-  Windows before each minor release.
+- Pre-setup routing matches the ADR-0009 table (integration test per row).
+- A second container on the same `/data` refuses to start. `/data` on 9p, FUSE or NFS, or
+  without `RENAME_NOREPLACE`, refuses to start.
 - Two tabs edit the same note → the second save gets 412 and the conflict view; nothing is
-  lost.
-- Deleting a note while an autosave is pending does **not** recreate it. Delete + recreate with
-  the same content → the old autosave gets 410/412.
-- Moving onto an existing file returns 409, and the destination is unchanged.
+  lost. An edit made outside PostelMD is caught the same way. Concurrent saves with the same
+  `If-Match` → exactly one `200`, the rest `412` (scenario test against the vault mutex).
+- An existing notes folder mounted at `/data/vaults/notes` is adopted (initialized as a git
+  repository if it isn't one); a Windows-path bind mount is refused with the named-volume fix.
+- Deleting a note while an autosave is pending does **not** recreate it (`404`, "this note was
+  deleted"), including a save already waiting on the vault mutex when the delete runs.
+- Moving onto an existing file returns 409, and the destination is unchanged. A delete moves
+  the item to the trash.
 - A stale save response never clears newer edits (an e2e test with injected latency).
 - Killing the browser mid-edit → the draft is recovered on reopen.
-- Pasting an AWS key → editor warning; the file is **not auto-committed**; push is blocked.
-  A secret committed outside PostelMD anywhere in reachable history blocks the push,
-  including on a first push to an empty remote.
-- An allow-list change arriving through a pull is inert until an owner approves it.
-- The whole failure-scenario suite from v0.0 passes in CI.
-- Path lookup, create, move and upload naming `.git/config` or `.postelmd/*` return 404.
-- Security tests: the egress policy denies every special-purpose block (table test, including
-  IPv4-mapped, NAT64 and 6to4 forms) and a `file://` or local-path remote is refused before it
-  is stored; an SSH host-key mismatch fails closed; an editor can't write
-  `.github/workflows/*`; a new secret under an approved path glob is still an open finding; a
-  token in a path or branch name blocks the push; repeated failed logins slow down but never
-  lock out a passkey login; a credential change without recent re-authentication is refused;
-  `/metrics` returns 404 without its token; `postelmd audit verify` detects an edited, removed
-  or inserted line in the `file:` sink.
-- Restarting the container keeps the sessions (persisted keys) and the notes intact. A
-  `kill -9` during a git commit → repaired on startup (intent log test).
-- Fuzz tests for path traversal pass. The e2e run produces no CSP violation reports.
-- The image runs on amd64 and arm64 and is under 40 MB.
-- The first release promotion signs and attests at Docker Hub and GHCR separately, and
-  `cosign verify` plus `cosign verify-attestation` pass at **both** addresses by digest before
-  any tag moves (the #31 spike showed copies don't carry cosign v3 signatures).
+- Pasting an AWS key → editor warning.
+- Failure scenarios: a crash at every step of a save, a move, a delete to the trash and a git
+  commit, under both the process-kill and the power-loss models; the startup temp sweep. For
+  the commit: crash → restart → next commit either succeeds, or fails with the lock message
+  and succeeds after "Remove the lock", with the branch at the old or the new commit and no
+  change lost.
+- Path lookup, create, move and upload naming `.git/config` or `.postelmd/*` return 404. Fuzz
+  tests for path traversal pass. The e2e run produces no CSP violation reports.
+- A session cookie fails after the password changes; a forged or expired cookie is refused;
+  a password change without the current password is refused; repeated failed logins slow
+  down but never lock out.
+- Restarting the container keeps the session and the notes intact.
+- The image runs on amd64 and arm64 and is under 40 MB. The first release is signed and
+  attested at both registries (#31).
 - The PRD performance budgets for a single user are met with the measurement procedure.
+- **The four-week test** in ADR-0020: the maintainer uses it for real notes, nothing is lost,
+  and the list of what's missing decides v0.2's order.
 
-## v0.2: Live sync, search, media, sharing, backup
-- File watcher + reconciler + SSE (snapshot handoff, replay, per-event authorization).
-- SQLite FTS5 search; `reindex`.
-- Image paste and drag-drop.
-- Invites, multiple users, shared vaults; the account and session lifecycle (ADR-0018); the
-  audit log.
-- Passkeys.
-- `backup` (ADR-0017), `reset-admin`, `vault lock`.
+## v0.2: Remote git, live sync, search
+The order after v0.1 is a starting point; the MVP's findings decide it.
+- SQLite (ADR-0002): file IDs, generations, save and structural intents, outbox (the full
+  ADR-0003).
+- Push and fast-forward-only pull through the egress client (ADR-0010, ADR-0016, #40); remote
+  credentials; the commit and push secret gates and findings.
+- File watcher + reconciler + SSE (snapshot handoff, replay).
+- SQLite FTS5 search; `reindex`. Image paste and drag-drop.
 
 **Acceptance criteria**
 - An external `echo >> note.md` shows up in an open browser within 2 s (Linux bind mount), or
   within the reconcile interval (Docker Desktop).
-- An external rename keeps the file ID when the content is unchanged.
-- A viewer can't write (API-enforced, table tests).
-- Removing a member closes their SSE stream within 1 s, and their replay contains no events
-  from that vault.
-- Suspending a user kills all their sessions. A password reset revokes sessions. Removing the
-  last owner returns 409.
+- An external rename keeps the file ID when the content is unchanged. Delete + recreate with
+  the same content → the old autosave gets 410/412.
+- Pasting an AWS key → the file is **not auto-committed**; push is blocked. A secret committed
+  outside PostelMD anywhere in reachable history blocks the push, including on a first push to
+  an empty remote. An allow-list change arriving through a pull is inert until approved.
+- The egress policy denies every special-purpose block, and a `file://` or local-path remote is
+  refused before it is stored (done in #55 and #57); an SSH host-key mismatch fails closed; a
+  token in a path or branch name blocks the push.
+- A `kill -9` during a git commit, pull or structural operation → repaired on startup (the
+  intent tests in the failure-scenario suite).
 - Search across 10k notes < 200 ms p95.
-- `postelmd backup --verify` confirms an archive (decrypts it, checks the manifest hashes and
-  runs `integrity_check` on the database copy). The full restore ships in v0.3.
-- Passkey registration and login work over HTTPS and localhost. Plain HTTP shows the
-  insecure-transport banner.
 
-## v0.3: Homelab dogfooding
+## v0.3: Multiple users and homelab dogfooding
+- Invites, multiple users, personal and shared vaults with roles; the account and session
+  lifecycle (ADR-0018); passkeys; the audit log (database and `file:` sink); `auth.json`
+  imported into SQLite.
+- `backup` and `restore` (ADR-0017), `reset-admin`, `vault lock`, key rotation; `/metrics`
+  behind a token.
 - Helm chart (OCI, RWOP PVC), Compose example, GoReleaser binaries.
-- `restore` command and a CI restore test.
 - Argo CD Application in the `homelab` repo; Sealed Secrets; Longhorn; VictoriaMetrics.
 - `docs/operations/` runbooks: backup, restore, fencing before force-delete, key compromise,
   upgrade and rollback.
 
 **Acceptance criteria**
-- A fresh Argo CD sync brings the app up healthy.
-- The monthly restore drill has been done once, recorded, and meets the RTO/RPO in ADR-0014 §5.
-- A chart install on kind with an RWOP PVC passes in CI.
-- The fencing runbook has been rehearsed: a node is drained and the volume detached before the
-  force-delete.
-- One week of daily use with zero save errors and zero split-brain in the metrics.
+- A viewer can't write (API-enforced, table tests). Removing a member closes their SSE stream
+  within 1 s, and their replay contains no events from that vault.
+- Suspending a user kills all their sessions. A password reset revokes sessions. Removing the
+  last owner returns 409. A credential change without recent re-authentication is refused.
+- Passkey registration and login work over HTTPS and localhost. Plain HTTP shows the
+  insecure-transport banner.
+- `/metrics` returns 404 without its token; `postelmd audit verify` detects an edited, removed
+  or inserted line in the `file:` sink; an editor can't write `.github/workflows/*`.
+- `postelmd backup --verify` confirms an archive; a restore onto an empty volume starts in
+  quarantine; the monthly restore drill has been done once and meets the RTO/RPO in
+  ADR-0014 §5.
+- A fresh Argo CD sync brings the app up healthy. A chart install on kind with an RWOP PVC
+  passes in CI. The fencing runbook has been rehearsed.
 - An N-1 → N upgrade on the same volume is tested in CI, and a rollback via the pre-migrate
   snapshot has been rehearsed.
 
@@ -234,8 +247,8 @@ afterwards (see GOVERNANCE.md).
 |---|---|
 | Lint, unit, fuzz (short), file-size, DCO | v0.0 |
 | Integration, Playwright smoke, multi-arch build, Trivy/govulncheck thresholds, SBOM, cosign, `docker run` smoke (including the duplicate-writer check) | v0.1 |
-| Performance budgets (no regression > 10%), backup verification (`backup --verify`: decrypt, manifest hashes, `integrity_check`) | v0.2 |
-| Helm install on kind, backup → restore round-trip, N-1 upgrade test | v0.3 |
+| Performance budgets (no regression > 10%) | v0.2 |
+| Helm install on kind, backup verification (`backup --verify`), backup → restore round-trip, N-1 upgrade test | v0.3 |
 | Plugin sandbox negative tests, plugin API compatibility check | v0.4 |
 | Upgrade chain test (every consecutive 0.x step up to N), accessibility check | v0.5 |
 

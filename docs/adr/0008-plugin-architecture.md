@@ -2,6 +2,7 @@
 
 - **Status:** Proposed (implementation from v0.4)
 - **Date:** 2026-11-09 (revised after design review)
+- **MVP scope (ADR-0020):** deferred to v0.4.
 
 ## Context
 Third parties must be able to write and publish plugins (an Obsidian-like ecosystem). In a

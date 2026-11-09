@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09
+- **MVP scope (ADR-0020):** the MVP has one local account with a password; passkeys, invites, OIDC and trusted-header auth come later.
 
 ## Context
 PostelMD is multi-user and will be public. Many self-hosters, including the maintainer's

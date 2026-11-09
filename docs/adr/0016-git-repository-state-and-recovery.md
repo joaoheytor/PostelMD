@@ -2,6 +2,7 @@
 
 - **Status:** Proposed (in v0.1)
 - **Date:** 2026-11-09
+- **MVP scope (ADR-0020):** the MVP uses commits from bytes and durable refs and objects, with no remote; push, pull and their intents arrive in v0.2.
 
 ## Context
 ADR-0010 makes every vault a git repository with auto-commit and push/pull. Repositories can
