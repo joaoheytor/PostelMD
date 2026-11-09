@@ -94,3 +94,14 @@ func TestRemove(t *testing.T) {
 	mustDo(t, r.Remove("link-outside"))
 	wantContent("secret", "SECRET")(t, filepath.Dir(vault))
 }
+
+func TestSyncFile(t *testing.T) {
+	r, _ := newVault(t)
+	mustDo(t, r.SyncFile("dir/note.md"))
+	if err := r.SyncFile("dir"); !errors.Is(err, ErrNotRegular) {
+		t.Fatalf("SyncFile on a directory = %v, want ErrNotRegular", err)
+	}
+	if err := r.SyncFile("link-outside"); !errors.Is(err, ErrSymlink) {
+		t.Fatalf("SyncFile on a symlink = %v, want ErrSymlink", err)
+	}
+}

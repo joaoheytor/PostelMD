@@ -66,16 +66,18 @@ type Repo struct {
 // race-proof like internal/store/fs; .git is a reserved path no app user can write
 // (ADR-0006), which leaves only external writers who already have shell access.
 //
-// opts configure the root that SetBranch writes refs through (fs.WithHook in tests).
+// Every write to .git is durable before the call that made it returns: objects through
+// syncFS, refs through SetBranch. opts configure the root both use (fs.WithHook in tests).
 func Open(vaultDir string, opts ...fs.Option) (*Repo, error) {
 	dir := filepath.Join(vaultDir, ".git")
-	st := filesystem.NewStorage(osfs.New(dir), cache.NewObjectLRUDefault())
-	r, err := gogit.Open(st, nil)
+	dotgit, err := fs.OpenRoot(dir, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("store/git: open %q: %w", vaultDir, err)
 	}
-	dotgit, err := fs.OpenRoot(dir, opts...)
+	st := filesystem.NewStorage(syncFS{Filesystem: osfs.New(dir), root: dotgit}, cache.NewObjectLRUDefault())
+	r, err := gogit.Open(st, nil)
 	if err != nil {
+		_ = dotgit.Close()
 		return nil, fmt.Errorf("store/git: open %q: %w", vaultDir, err)
 	}
 	return &Repo{r: r, dotgit: dotgit}, nil
