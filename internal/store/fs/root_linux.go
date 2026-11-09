@@ -18,11 +18,16 @@ const resolveFlags = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESO
 // Root is an open vault directory. All operations are relative to its directory fd, so
 // renaming or replacing the vault's own path after opening doesn't redirect them.
 type Root struct {
-	dir *os.File
+	dir  *os.File
+	hook Hook
 }
 
 // OpenRoot opens dir as a vault root. dir comes from configuration, not from users.
-func OpenRoot(dir string) (*Root, error) {
+func OpenRoot(dir string, opts ...Option) (*Root, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	fd, err := unix.Open(dir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, fmt.Errorf("store/fs: open root %q: %w", dir, err)
@@ -31,7 +36,7 @@ func OpenRoot(dir string) (*Root, error) {
 		_ = unix.Close(fd)
 		return nil, err
 	}
-	return &Root{dir: os.NewFile(uintptr(fd), dir)}, nil
+	return &Root{dir: os.NewFile(uintptr(fd), dir), hook: o.hook}, nil
 }
 
 // Close releases the root's directory fd.
@@ -111,7 +116,9 @@ func (r *Root) RenameNoReplace(from, to string) error {
 		return err
 	}
 	defer func() { _ = unix.Close(tfd) }()
-	err = unix.Renameat2(ffd, fromBase, tfd, toBase, unix.RENAME_NOREPLACE)
+	err = step(r.hook, Op{Kind: OpRenameNoReplace, Path: from, To: to}, func() error {
+		return unix.Renameat2(ffd, fromBase, tfd, toBase, unix.RENAME_NOREPLACE)
+	})
 	if errors.Is(err, unix.EINVAL) {
 		return fmt.Errorf("%w: rename %s -> %s", ErrNoReplaceUnsupported, from, to)
 	}

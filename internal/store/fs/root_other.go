@@ -13,7 +13,7 @@ import (
 type Root struct{}
 
 // OpenRoot reports that vault confinement isn't available on this platform.
-func OpenRoot(dir string) (*Root, error) {
+func OpenRoot(dir string, _ ...Option) (*Root, error) {
 	return nil, fmt.Errorf("store/fs: open root %q: %w", dir, errors.ErrUnsupported)
 }
 
@@ -25,3 +25,15 @@ func (r *Root) ReadFile(string) ([]byte, error) { return nil, errors.ErrUnsuppor
 
 // RenameNoReplace is unsupported on this platform.
 func (r *Root) RenameNoReplace(string, string) error { return errors.ErrUnsupported }
+
+// CreateFile is unsupported on this platform.
+func (r *Root) CreateFile(string, []byte, uint32) error { return errors.ErrUnsupported }
+
+// Rename is unsupported on this platform.
+func (r *Root) Rename(string, string) error { return errors.ErrUnsupported }
+
+// Mkdir is unsupported on this platform.
+func (r *Root) Mkdir(string) error { return errors.ErrUnsupported }
+
+// SyncDir is unsupported on this platform.
+func (r *Root) SyncDir(string) error { return errors.ErrUnsupported }

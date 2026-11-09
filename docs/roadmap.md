@@ -21,11 +21,15 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       added once CI has reported on a PR.
 - [x] Repo bootstrap: Go module, Vite + TS app, Makefile (`make ci` = local parity), `ci.yaml`
       v0.0 jobs, CodeQL, Scorecard, Renovate
-- [ ] **DCO enforcement:** install the DCO GitHub App, make it a required status check on
+- [x] **DCO enforcement:** install the DCO GitHub App, make it a required status check on
       `main`, and verify it with one unsigned test PR
 - [ ] **Failure-scenario suite (executable, before feature work).** Small Go programs and
       tests that reproduce each contract on real temp directories, with fault injection
       (kill points, `ENOSPC`, concurrent writers):
+      - **harness (done):** `internal/store/fs` reports every write and `fsync` to a hook;
+        `internal/store/fs/faultfs` crashes at any step and models a power loss. The save's
+        atomic replace is tested at every crash point, with negative controls proving a
+        missing `fsync` is caught;
       - **structure:** crash after a folder rename and before the DB commit, with two identical
         notes inside (IDs must be preserved by the structural intent); crashes at every step of
         create, delete, atomic rename and `link`/`unlink`, each reaching its table's outcome;
