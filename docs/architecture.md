@@ -206,20 +206,42 @@ Tailscale. RTO/RPO are in ADR-0014 §5; backup and restore in ADR-0017.
 
 | Signal | Examples |
 |---|---|
-| Metrics | `postelmd_save_total{result}`, `postelmd_save_conflicts_total`, `postelmd_external_overwrite_suspected_total`, `postelmd_outbox_pending`, `postelmd_watcher_lag_seconds`, `postelmd_reconcile_drift_total`, `postelmd_secret_findings_open`, `postelmd_git_push_total{result}`, `postelmd_split_brain_total` |
+| Metrics (access: ADR-0009) | `postelmd_save_total{result}`, `postelmd_save_conflicts_total`, `postelmd_external_overwrite_suspected_total`, `postelmd_outbox_pending`, `postelmd_watcher_lag_seconds`, `postelmd_reconcile_drift_total`, `postelmd_secret_findings_open`, `postelmd_git_push_total{result}`, `postelmd_split_brain_total` |
 | Logs | slog JSON with request IDs. Never log note content, secret values or tokens. |
 | Alerts (suggested) | Save errors > 0, split brain > 0, reconcile drift spikes, git push failures, disk > 80%, outbox backlog |
 
 **Audit log** (an append-only SQLite table, admin-readable in the UI and exportable as JSON):
-- **Covers:** logins and failures, session revocations, account state changes, membership and
-  role changes, ownership transfers, finding acknowledgements and allow-list changes, plugin
-  approvals, disables and revocations, key rotations, backups and restores, vault maintenance
-  mode, and external changes detected by the reconciler (attributed as "external").
+- **Covers** (the complete list; a new security-relevant action adds a line here):
+  - authentication: logins and failures, login backoff engaged, re-authentication, session
+    revocations;
+  - accounts: state changes, invites created, used and revoked, reset links issued, used and
+    revoked, setup tokens issued and used (`reset-admin` included);
+  - credentials: password changes, passkeys and TOTP added and removed, OIDC identities linked
+    and unlinked, git remote credentials created, replaced, suspended and re-confirmed, SSH
+    host keys pinned and mismatched;
+  - authorization: membership and role changes, ownership transfers, admin grants;
+  - secrets: finding acknowledgements, allow-list approvals, rule disables, ruleset version
+    changes;
+  - egress: exceptions added and removed, requests denied by the policy;
+  - plugins: approvals, disables, revocations, safe mode entered and left;
+  - keys: rotations and retirements;
+  - operations: backups, restores, quarantine started and ended, recovery identity created and
+    disabled, maintenance mode, recovery interference flagged, database rollback;
+  - external changes detected by the reconciler (attributed as "external"), and changes to
+    owner-only control files (ADR-0006).
 - **External audit sink.** The in-database log is lost with the instance or rolled back by a
   restore, so every audit event is also sent to an external sink (`POSTELMD_AUDIT_SINK`):
   - `stdout` (default): structured `audit` log lines. **This is only a transport**; how long
     they are kept depends on the operator's log pipeline;
-  - `file:<path>`: an append-only JSON-lines file **on a separate volume** (not `/data`);
+  - `file:<path>`: an append-only JSON-lines file **on a separate volume** (not `/data`).
+    It is **hash-chained**: each line carries a sequence number and
+    `mac = HMAC-SHA256(audit key, previous mac ‖ canonical line)`, using the `audit` key
+    (ADR-0005), which never leaves `/data`. Someone with access to the sink volume alone can't
+    edit, insert or remove lines without breaking the chain. On startup, the server verifies
+    the last line and continues the chain; a break is reported as an event and an alert
+    metric. Every 1,000 events and on shutdown, the current sequence number and mac are also
+    written to `stdout`, so a truncated tail shows up against the log pipeline.
+    `postelmd audit verify <file>` checks a whole file offline;
   - `webhook` (post-MVP): signed, through the egress client.
 
   The rule, which the docs and the restore UI enforce: **the external sink's retention must be
@@ -244,14 +266,31 @@ Tailscale. RTO/RPO are in ADR-0014 §5; backup and restore in ADR-0017.
 Every server-side outbound connection (git remotes, OIDC discovery, plugin registry and
 revocation fetches, Grafana/Prometheus proxying, future webhooks) goes through one egress
 client:
-- **Default deny for private, loopback, link-local and metadata ranges** (RFC 1918, RFC 4193,
-  127/8, 169.254/16 including cloud metadata, ::1). DNS is resolved once and the connection is
-  pinned to the checked IP (prevents DNS-rebinding).
+- **Only globally reachable unicast addresses are allowed by default.** The check runs on the
+  address the socket actually connects to (`net.Dialer.Control`), after `netip.Addr.Unmap()`,
+  so IPv4-mapped IPv6 can't smuggle a private IPv4 address. An address is allowed only if it
+  is global unicast **and** is not in any IANA special-purpose block marked not globally
+  reachable, which includes: 0.0.0.0/8, 10/8, 100.64/10 (carrier-grade NAT, and Tailscale
+  addresses), 127/8, 169.254/16 (cloud metadata), 172.16/12, 192.0.0/24, 192.168/16,
+  198.18/15, the documentation ranges, 240/4, ::/128, ::1, fc00::/7, fe80::/10, multicast,
+  and the IPv6 blocks that embed an IPv4 address (64:ff9b::/96 and 64:ff9b:1::/48 NAT64,
+  2002::/16 6to4, 2001::/32 Teredo). DNS is resolved once and the connection is pinned to the
+  checked IP (prevents DNS rebinding).
 - **Narrow exceptions:** the admin approves exact `scheme://host:port` entries per purpose (for
   example, `grafana embed: https://grafana.home.lan:443`). Private targets are then allowed
   **only** for that purpose and that host. There are no CIDR-wide allow rules in the UI.
 - **Redirects:** at most 3. Each hop is re-checked against the policy. Credentials are
   never forwarded to a different host than the one they were configured for.
-- **Git remotes:** HTTPS or SSH to approved hosts (public hosts are allowed by default; private
-  hosts need an exception). Credentials are bound to the remote URL.
+- **Git remotes:** only `https` and `ssh` URLs. Local paths, `file://`, `git://`, `http://`
+  and `ext::` are refused **before the URL is stored** (#40). Public hosts are allowed by
+  default; private hosts, including a tailnet, need an exception. Credentials are bound to the
+  remote URL.
+  - HTTPS uses the egress client as go-git's transport; the `file` transport is uninstalled
+    (ADR-0016).
+  - **SSH dials through the egress dialer** too, so the same address policy applies. If
+    go-git's SSH transport can't take our dialer, SSH remotes stay disabled until it can.
+  - **SSH host keys are pinned.** When an owner configures an SSH remote, the server shows the
+    host key fingerprint and the owner confirms it (or pastes a `known_hosts` line). It is
+    stored with the remote; a mismatch fails closed and is audited. There is never an
+    "ignore host key" option.
 - Timeouts and response size caps apply per purpose.

@@ -35,7 +35,8 @@
 | # | Threat | Mitigation | ADR |
 |---|---|---|---|
 | S1 | Forged identity header | Trusted-header auth off by default. When enabled: TCP peer in `TRUSTED_PROXIES` only, header rejected from untrusted peers, NetworkPolicy, explicit identity linking | 0005 |
-| S2 | Credential stuffing or brute force | argon2id, rate limit + lockout, passkeys, invite-only signup | 0005 |
+| S2 | Credential stuffing or brute force | argon2id, per-account backoff and per-IP limits (never a lockout an attacker could trigger), passkeys, invite-only signup | 0005 |
+| S5 | Credential change from a hijacked session | Re-authentication within 5 min for every credential change; removing a credential revokes the other sessions; passkeys reviewed during a reset | 0018 |
 | S3 | First-run setup hijack | Single-use, expiring token printed to logs only; headless `ADMIN_*_FILE` alternative | 0009 |
 | S4 | Account takeover via an OIDC email match | No automatic linking by email; linking requires a fresh login | 0018 |
 | T1 | Path traversal or symlink escape | `os.Root` per vault; symlinks not followed; fuzz tests | 0006 |
@@ -52,10 +53,12 @@
 | T8 | Tampered image, chart or binary | cosign with pinned identities; SBOM; digest pinning | 0015 |
 | T8b | A forged or misplaced release tag starts a release | Tag ruleset (admin only); `scripts/verify-release-tag.sh` before any release job: SemVer name, annotated tag, SSH signature from a key in `.github/allowed_signers` on `main` (revocable), tagged commit on `main` | 0015 |
 | R1 | Who changed or deleted a note, or who acknowledged a secret? | Per-author git commits; external changes labelled; append-only audit log (365 days) | 0016, arch §9 |
+| R2 | Audit records edited or removed after the fact | External sink; the `file:` sink is HMAC-chained with a key that stays in `/data`; chain head also logged to `stdout`; `postelmd audit verify` | arch §9 |
 | I1 | Stored XSS through Markdown | markdown-it (restricted HTML) → DOMPurify inside the only Trusted Types policy; CSP `script-src 'self'`, `style-src 'self'` and `require-trusted-types-for 'script'`; a smoke test fails on any CSP violation; Mermaid in strict mode | 0007, 0019 |
 | I2 | A plugin exfiltrates notes or reads the session | Sandboxed plugins in a per-plugin opaque iframe, with Workers created inside it and a per-plugin CSP; capability RPC; negative tests. The trusted tier is admin-only. | 0008 |
-| I3 | A secret reaches git or a remote | Paste warning; synchronous save scan; commit gate; scan of the **whole outgoing range** before push; owner-only acknowledgement | 0010 |
-| I4 | SSRF through server-side fetches | Egress client: deny private ranges, exact-host exceptions per purpose, pinned DNS, re-checked redirects | arch §11 |
+| I3 | A secret reaches git or a remote | Paste warning; synchronous save scan; commit gate; scan of the **whole outgoing range**, including paths and ref names, before push; owner-only acknowledgement; path globs never suppress unapproved fingerprints; HMAC fingerprints never exported | 0010 |
+| I12 | `/metrics` reveals operational detail | Token on the main listener (`404` without one) or a separate scrape-only listener | 0009 |
+| I4 | SSRF through server-side fetches or git remotes | Egress client: only globally reachable unicast after `Unmap()` (special-purpose, NAT64 and 6to4 blocks denied), exact-host exceptions per purpose, pinned DNS, re-checked redirects; git remotes `https`/`ssh` only, SSH through the same dialer with pinned host keys | arch §11, 0010 |
 | I5 | Uploaded SVG or HTML executes | Content sniffing + allow-list; `nosniff`; SVG served as an attachment | 0009 |
 | I6 | Logs leak content or secrets | Never log bodies, secret values or tokens; no log endpoint | 0009 |
 | I7 | A revoked user keeps receiving events | Per-event authorization; stream closed on revocation; replay re-authorized | 0018 |
@@ -71,7 +74,8 @@
 | E3 | Code execution through runbook blocks | Not supported, by design | 0011 |
 | I11 | A sandboxed plugin exfiltrates through iframe self-navigation | Headless plugins (code in a Worker, no document access); a DOM plugin plus data-read needs admin approval with an explicit warning; navigation detection disables the plugin | 0008 |
 | E7 | A demoted OIDC admin keeps privileges | `admin_oidc` is authoritative and recomputed; stale-privilege window ≤ the role TTL (1 h) | 0005 |
-| E8 | A restore reactivates a suspended account (including an admin) | Quarantine trusts no restored identity; an operator-created recovery admin approves accounts individually (admins always individually); the recovery identity is disabled afterwards | 0017 |
+| E8 | A restore reactivates a suspended account (including an admin), a revoked invite or reset link, or a withdrawn plugin approval | Quarantine trusts no restored identity; an operator-created recovery admin approves accounts individually (admins always individually); pending invites, reset links and setup tokens are purged; plugin safe mode; the recovery identity is disabled afterwards | 0017 |
+| E9 | A vault editor changes a CI workflow that runs with the steward's token | Owner-only control files; external changes to them wait for an owner; steward tokens without workflow scope | 0006, 0010 |
 | E5 | A plugin spoofs another plugin's identity over RPC | Identity bound to a dedicated MessageChannel port, invalidated on navigation | 0008 |
 | E6 | A suspended user's git token keeps being used | Vault-owned credentials with a steward; suspended automatically when the steward loses access | 0010 |
 | E4 | A plugin update silently gains capabilities | Approval bound to the capabilities hash; re-approval required | 0008 |

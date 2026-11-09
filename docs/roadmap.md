@@ -107,7 +107,7 @@ fixture; DCO blocks an unsigned commit.
   pull**);
 - **secret detection** with the commit and push gates;
 - reserved paths;
-- `/healthz`, `/readyz`, `/metrics`;
+- `/healthz`, `/readyz`, `/metrics` (behind a token or on a separate listener; ADR-0009);
 - multi-arch image.
 
 **Acceptance criteria**
@@ -128,6 +128,14 @@ fixture; DCO blocks an unsigned commit.
 - An allow-list change arriving through a pull is inert until an owner approves it.
 - The whole failure-scenario suite from v0.0 passes in CI.
 - `GET`/`PUT` on `.git/config` and `.postelmd/*` paths return 404.
+- Security tests: the egress policy denies every special-purpose block (table test, including
+  IPv4-mapped, NAT64 and 6to4 forms) and a `file://` or local-path remote is refused before it
+  is stored; an SSH host-key mismatch fails closed; an editor can't write
+  `.github/workflows/*`; a new secret under an approved path glob is still an open finding; a
+  token in a path or branch name blocks the push; repeated failed logins slow down but never
+  lock out a passkey login; a credential change without recent re-authentication is refused;
+  `/metrics` returns 404 without its token; `postelmd audit verify` detects an edited, removed
+  or inserted line in the `file:` sink.
 - Restarting the container keeps the sessions (persisted keys) and the notes intact. A
   `kill -9` during a git commit → repaired on startup (intent log test).
 - Fuzz tests for path traversal pass. The e2e run produces no CSP violation reports.

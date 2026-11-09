@@ -78,6 +78,26 @@ ADR-0016) and plugin vault access.
   `.postelmd/` directory or `app.db`, `keys/` or `*.db` files at its root, unless the admin
   explicitly confirms after seeing the list.
 
+### Owner-only control files
+Some files make a git host or git itself **run or fetch** things with the vault's
+credentials: a vault editor who changes a CI workflow could get it run with the steward's
+token. These paths are readable by every member but **writable only by vault owners**
+(create, write, move to or from, delete; `403` with an explanation for editors):
+
+| Path (case-insensitive) | Why |
+|---|---|
+| `.github/workflows/**`, `.github/actions/**` | GitHub Actions |
+| `.gitlab-ci.yml`, `.gitlab/**` | GitLab CI |
+| `.forgejo/workflows/**`, `.gitea/workflows/**` | Forgejo and Gitea Actions |
+| `.gitmodules` | Submodule URLs that clients fetch |
+| `.gitattributes` | Filter, diff and merge drivers |
+
+- Auto-commit stages a change to these paths only if its last saver is an owner. A change
+  that the reconciler finds (an external writer) waits as a "pending control-file change"
+  until an owner approves it, like an imported allow-list entry (ADR-0010).
+- Changes arriving by pull are the remote's history and aren't blocked, but they are audited.
+- Steward credentials should not be able to change workflows anyway (ADR-0010).
+
 ### Testing
 - Table-driven authz tests for every role × operation.
 - Fuzz tests on path handling.
