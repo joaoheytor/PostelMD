@@ -1,0 +1,76 @@
+#!/bin/sh
+# pre-commit: checks on the STAGED content (what will be committed, not the working tree).
+#   1. secret scan with gitleaks (skipped with a warning if gitleaks isn't installed;
+#      CI is the hard gate);
+#   2. public-repo check: absolute home paths and the local denylist
+#      (.claude/public-guard.local.txt, git-ignored), in added lines and file names;
+#   3. file-size limit for source files (CLAUDE.md rule 2: 500 lines).
+# Enable once per clone:  git config core.hooksPath .githooks
+set -eu
+g() { git -c color.ui=never -c core.fsmonitor=false "$@"; }
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# Materialize the staged blobs (added, copied, modified, renamed, type-changed).
+g diff --cached --name-only -z --diff-filter=ACMRT > "$tmp/files"
+[ -s "$tmp/files" ] || exit 0
+mkdir "$tmp/tree"
+xargs -0 git -c core.fsmonitor=false checkout-index --prefix="$tmp/tree/" -- < "$tmp/files"
+fail=0
+
+# 1. Secrets. The config comes from HEAD, never from the staged change, so a commit can't
+#    relax the rules that scan it; a staged config is still scanned, under another name.
+#    .gitleaksignore files are never honoured here (empty ignore path).
+if command -v gitleaks >/dev/null 2>&1; then
+  mkdir "$tmp/noignore"
+  find "$tmp/tree" -name .gitleaks.toml -exec sh -c 'mv "$1" "$1.scan"' _ {} \;
+  set --
+  if g cat-file -e HEAD:.gitleaks.toml 2>/dev/null; then
+    g show HEAD:.gitleaks.toml > "$tmp/gitleaks.toml"
+    set -- "--config=$tmp/gitleaks.toml"
+  fi
+  if ! gitleaks dir "$tmp/tree" --no-banner --redact "$@" \
+      --gitleaks-ignore-path "$tmp/noignore" > "$tmp/gl.log" 2>&1; then
+    echo "pre-commit: gitleaks found a possible secret in the staged content:" >&2
+    cat "$tmp/gl.log" >&2
+    fail=1
+  fi
+else
+  echo "pre-commit: warning: gitleaks not installed; secret scan skipped (CI still scans)." >&2
+fi
+
+# 2. Public-repo check: added lines (so existing text doesn't re-trigger) and file names.
+#    The two guard scripts are excluded because they contain these patterns as regexes.
+g diff --cached -U0 --no-ext-diff --diff-filter=ACMRT -- . \
+    ':(exclude).claude/hooks/postelmd_guard.py' ':(exclude).githooks/pre-commit' \
+  | grep '^+' | grep -v '^+++ ' > "$tmp/added" || true
+tr '\0' '\n' < "$tmp/files" >> "$tmp/added"
+home='(/home/[a-z][a-z0-9_-]*/|/Users/[^/ ]+/)'
+if grep -qE "$home" "$tmp/added"; then
+  echo "pre-commit: staged content contains an absolute home-directory path:" >&2
+  grep -nE "$home" "$tmp/added" | head -5 >&2
+  fail=1
+fi
+deny="$(g rev-parse --show-toplevel)/.claude/public-guard.local.txt"
+if [ -f "$deny" ]; then
+  tr -d '\r' < "$deny" | grep -vE '^(#|$)' > "$tmp/deny" || true
+  if [ -s "$tmp/deny" ] && grep -qiF -f "$tmp/deny" "$tmp/added"; then
+    echo "pre-commit: staged content contains a term from .claude/public-guard.local.txt (not for the public repo)." >&2
+    fail=1
+  fi
+fi
+
+# 3. File-size hard limit for source files (generated files and fixtures excluded)
+tr '\0' '\n' < "$tmp/files" | grep -E '\.(go|ts|js|mjs|svelte|py|sh)$' \
+  | grep -vE '(^|/)(testdata|fixtures|generated)/|\.gen\.|_gen\.go$|\.pb\.go$' > "$tmp/src" || true
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  n=$(awk 'END { print NR }' "$tmp/tree/$f")  # also counts a last line without a newline
+  if [ "$n" -gt 500 ]; then
+    echo "pre-commit: $f has $n lines (hard limit 500, CLAUDE.md rule 2)." >&2
+    fail=1
+  fi
+done < "$tmp/src"
+
+exit "$fail"

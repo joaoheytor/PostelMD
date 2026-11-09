@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "ask": [
+      "Edit(**/.claude/hooks/**)",
+      "Edit(**/.claude/settings.json)",
+      "Edit(**/.githooks/**)",
+      "Edit(**/.gitleaks.toml)",
+      "Edit(**/.github/workflows/**)",
+      "Edit(**/LICENSE)"
+    ],
+    "deny": [
+      "Bash(printenv*)",
+      "Bash(env)",
+      "Bash(export -p)",
+      "Bash(set)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.config/gh/hosts.yml)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/postelmd_guard.py\" secrets",
+            "timeout": 10,
+            "statusMessage": "Scanning for secret-shaped strings…"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/postelmd_guard.py\" public",
+            "timeout": 10,
+            "statusMessage": "Checking content is safe to publish…"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/postelmd_guard.py\" adr",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/postelmd_guard.py\" git",
+            "timeout": 10,
+            "statusMessage": "Checking git/GitHub command policy…"
+          }
+        ]
+      }
+    ]
+  }
+}

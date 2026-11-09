@@ -1,0 +1,11 @@
+# Patterns are anchored (CLAUDE.md: "/notes/", not "notes/").
+
+# Local-only Claude Code files (never published)
+/.claude/settings.local.json
+/.claude/public-guard.local.txt
+/.claude/worktrees/
+
+# OS / editor noise
+**/.DS_Store
+/.idea/
+/.vscode/
