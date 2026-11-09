@@ -71,6 +71,19 @@ func TestPowerLossRules(t *testing.T) {
 			want: map[string]string{"a.md": "old", "sub/": "", "sub/a.md": "old"},
 		},
 		{
+			name: "a removal is undone until its directory is synced",
+			run:  func(t *testing.T, r *fs.Root) { must(t, r.Remove("a.md")) },
+			want: map[string]string{"a.md": "old", "sub/": ""},
+		},
+		{
+			name: "a synced removal is durable",
+			run: func(t *testing.T, r *fs.Root) {
+				must(t, r.Remove("a.md"))
+				must(t, r.SyncDir("."))
+			},
+			want: map[string]string{"sub/": ""},
+		},
+		{
 			name: "a new directory is lost until its parent is synced",
 			run:  func(t *testing.T, r *fs.Root) { must(t, r.Mkdir("new")) },
 			want: map[string]string{"a.md": "old", "sub/": ""},

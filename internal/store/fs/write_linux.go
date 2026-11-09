@@ -126,3 +126,23 @@ func (r *Root) SyncDir(rel string) error {
 	}
 	return nil
 }
+
+// Remove unlinks the file rel (never a directory). Vault deletes never use it: they move
+// items to the trash (ADR-0003 §2). It is for app-owned files such as a git ref lock.
+// Like any entry change, it is durable only after SyncDir on the parent.
+func (r *Root) Remove(rel string) error {
+	if err := checkRel(rel); err != nil {
+		return err
+	}
+	dir, base := splitParent(rel)
+	dfd, err := r.openat(dir, unix.O_PATH|unix.O_DIRECTORY)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(dfd) }()
+	err = step(r.hook, Op{Kind: OpRemove, Path: rel}, func() error { return unix.Unlinkat(dfd, base, 0) })
+	if err != nil {
+		return mapErr("remove", rel, err)
+	}
+	return nil
+}

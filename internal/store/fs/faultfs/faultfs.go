@@ -125,6 +125,9 @@ func (d *Disk) After(op fs.Op, err error) {
 	case fs.OpMkdir:
 		parent, base := d.parent(op.Path)
 		parent.cur[base] = newDir()
+	case fs.OpRemove:
+		parent, base := d.parent(op.Path)
+		delete(parent.cur, base)
 	case fs.OpSyncDir:
 		n := d.lookup(op.Path)
 		n.stable = maps.Clone(n.cur)
