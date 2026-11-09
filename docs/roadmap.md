@@ -31,8 +31,9 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         atomic replace is tested at every crash point, with negative controls proving a
         missing `fsync` is caught. Git refs and objects are crash-tested the same way (#54, #56);
       - **for the MVP (ADR-0020):** a move and a delete to the trash crashed at every step, the
-        startup temp sweep, saves racing each other and a delete under the vault mutex, a
-        commit crash followed by a restart and the next commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
+        startup temp sweep, saves racing each other and a delete under the vault mutex (these
+        are done, in `internal/vault`), a commit crash followed by a restart and the next
+        commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
         errors (no fallback, no retried `fsync`). The rest of this list lands with the feature
         that needs it (v0.2 and later):
       - **structure:** crash after a folder rename and before the DB commit, with two identical

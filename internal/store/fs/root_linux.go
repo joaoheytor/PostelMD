@@ -8,6 +8,8 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
+	"slices"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -90,6 +92,28 @@ func (r *Root) ReadFile(rel string) ([]byte, error) {
 		return nil, fmt.Errorf("store/fs: %s is larger than %d bytes", rel, MaxFileSize)
 	}
 	return io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+}
+
+// ReadDir lists the directory rel ("." for the root), sorted by name. Entry types come from
+// the directory itself, so a symlink is listed as a symlink and never followed.
+func (r *Root) ReadDir(rel string) ([]iofs.DirEntry, error) {
+	if rel != "." {
+		if err := checkRel(rel); err != nil {
+			return nil, err
+		}
+	}
+	fd, err := r.openat(rel, unix.O_RDONLY|unix.O_DIRECTORY)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), rel)
+	defer func() { _ = f.Close() }()
+	entries, err := f.ReadDir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("store/fs: list %s: %w", rel, err)
+	}
+	slices.SortFunc(entries, func(a, b iofs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
+	return entries, nil
 }
 
 // RenameNoReplace moves from to to (files or directories) and fails with an error wrapping
