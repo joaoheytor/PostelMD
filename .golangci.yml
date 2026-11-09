@@ -61,10 +61,10 @@ linters:
       - path: _test\.go$
         linters: [forbidigo]
         text: "filesystem I/O"
-      # Tests read files at paths they built themselves.
+      # Tests read files at paths, and run the git binary with arguments, they built themselves.
       - path: _test\.go$
         linters: [gosec]
-        text: "G304"
+        text: "G304|G204"
 
 formatters:
   enable:
