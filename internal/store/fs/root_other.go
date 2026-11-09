@@ -40,3 +40,6 @@ func (r *Root) SyncDir(string) error { return errors.ErrUnsupported }
 
 // Remove is unsupported on this platform.
 func (r *Root) Remove(string) error { return errors.ErrUnsupported }
+
+// SyncFile is unsupported on this platform.
+func (r *Root) SyncFile(string) error { return errors.ErrUnsupported }

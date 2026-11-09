@@ -3,6 +3,8 @@
 package fs
 
 import (
+	"fmt"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -143,6 +145,32 @@ func (r *Root) Remove(rel string) error {
 	err = step(r.hook, Op{Kind: OpRemove, Path: rel}, func() error { return unix.Unlinkat(dfd, base, 0) })
 	if err != nil {
 		return mapErr("remove", rel, err)
+	}
+	return nil
+}
+
+// SyncFile fsyncs the regular file rel through a fresh descriptor (on Linux, fsync flushes
+// the file whatever descriptor wrote it). It is for files written by code that can't sync
+// them itself, such as go-git's object writer (ADR-0016, "Durability").
+func (r *Root) SyncFile(rel string) error {
+	if err := checkRel(rel); err != nil {
+		return err
+	}
+	fd, err := r.openat(rel, unix.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return mapErr("stat", rel, err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return fmt.Errorf("%w: %s", ErrNotRegular, rel)
+	}
+	err = step(r.hook, Op{Kind: OpSyncFile, Path: rel}, func() error { return unix.Fsync(fd) })
+	if err != nil {
+		return mapErr("sync", rel, err)
 	}
 	return nil
 }
