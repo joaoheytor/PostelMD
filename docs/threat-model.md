@@ -4,6 +4,16 @@
   boundary changes.
 - **Last updated:** 2026-11-09
 
+**MVP (v0.1, [ADR-0020](adr/0020-mvp-scope.md)):** one user and no remote, so the
+multi-user rows (horizontal and vertical escalation, roles, invites, membership changes),
+the remote and push rows, and the plugin rows don't apply yet. The MVP adds:
+- **a stolen session cookie** is valid until it expires (7 days) or the password changes;
+  one session can't be revoked server-side. Mitigations: `HttpOnly`, `SameSite=Lax`,
+  `Secure` on TLS, and "log out everywhere" bumps the epoch;
+- **`auth.json` and `secret.key`** in `/data/.postelmd/` (`0600`, reserved paths) are the
+  whole credential: anyone who can read the volume can forge sessions, as with the key ring
+  in the full design.
+
 ## Assets
 1. Note contents (possibly sensitive operational knowledge)
 2. Credentials: user passwords and passkeys, sessions, git remote tokens, the OIDC client

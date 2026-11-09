@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09
+- **MVP scope (ADR-0020):** deferred to v0.2; the MVP has no watcher, and an outside edit shows on reopen.
 
 ## Context
 Notes change outside the app (`git pull`, vim, Syncthing, another user). FrankMD only noticed

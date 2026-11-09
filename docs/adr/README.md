@@ -17,6 +17,9 @@ next number, and open a PR. Statuses: `Proposed` → `Accepted` → (`Deprecated
 ADR-0012 (license) and ADR-0013 (name) are **Accepted**: the first commit depends on them.
 All others are **Proposed** until the code that depends on them is merged.
 
+**MVP:** ADR-0020 defines v0.1 as a subset of this design. Each ADR it narrows has a
+"MVP scope" note under its status line.
+
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-backend-language.md) | Go backend, TypeScript + CodeMirror 6 frontend | Proposed |
@@ -38,3 +41,4 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
 | [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Proposed |
+| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Proposed |

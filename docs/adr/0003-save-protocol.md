@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09 (revised after design review)
+- **MVP scope (ADR-0020):** the MVP uses the client contract (§7), the atomic write path (§5) and a content-hash ETag with single-rename moves and trash deletes; file IDs, generations, intents and the outbox arrive in v0.2.
 
 ## Context
 FrankMD's biggest bug category was data loss and races:

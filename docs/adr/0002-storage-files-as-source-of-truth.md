@@ -2,6 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09
+- **MVP scope (ADR-0020):** the MVP has no SQLite; this database arrives in v0.2.
 
 ## Context
 Users must be able to keep using git, vim and Syncthing on their notes, and must be able to walk
