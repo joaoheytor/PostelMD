@@ -32,7 +32,10 @@ parse Markdown only for extraction: headings, links, tags and backlinks for the 
     URL too). It is the only way HTML or a Worker reaches the page.
   - `dompurify`: DOMPurify's own internal policy for parsing into an inert document.
 - **Mermaid:** lazy-loaded only when a `mermaid` block exists; `securityLevel: 'strict'`, and
-  its output is sanitized too.
+  its output is sanitized too. It is **trusted-tier, first-party code**: it needs the DOM to
+  measure text, so it runs on the main thread, from the app bundle only (never a CDN). From
+  v0.4 it is packaged as a first-party bundled plugin of the trusted tier (ADR-0008), with the
+  same rules.
 - **Server:** goldmark is used only for extraction. If the server ever returns HTML, it is
   sanitized with bluemonday.
 - **Parity:** shared golden fixtures (`testdata/markdown/*.md` with expected extraction output)

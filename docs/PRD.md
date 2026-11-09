@@ -65,7 +65,10 @@ docs-as-code tooling (MkDocs, Backstage TechDocs, Hugo) can publish.
 
 **Operations**
 - One image used by `docker run`, Compose and the Helm chart. `/healthz`, `/readyz` and
-  `/metrics`. Subcommands: `backup`, `reindex`, `reset-admin`, `healthcheck`.
+  `/metrics`. Subcommands (ADR-0009 says which run online, offline or stateless): `serve`,
+  `healthcheck`, `version`, `backup`, `restore`, `reindex`, `reset-admin`, `keys rotate` and
+  `keys retire`, `vault lock` and `vault unlock`, `plugin disable` and
+  `plugin import-revocations`, `db rollback`, `audit verify`.
 
 ### Post-MVP (v0.4 → 1.0)
 - Plugin API beta (trusted and sandboxed tiers), plugin registry, reference plugins (K8s

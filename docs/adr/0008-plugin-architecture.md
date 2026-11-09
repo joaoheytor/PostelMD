@@ -121,7 +121,8 @@ therefore come from an **opaque origin**, not from "being in a Worker".
   - the registry is a reviewed git index pointing to signed release artifacts (cosign);
   - offline tarball upload is available for air-gapped installs.
 - **Defaults:**
-  - **first-party bundled plugins** (Mermaid from v0.4) are **enabled by default**;
+  - **first-party bundled plugins** (Mermaid from v0.4, in the **trusted** tier because it needs
+    the DOM; ADR-0007) are **enabled by default**;
   - third-party plugins are never installed or enabled on a fresh instance;
   - user installs are off until the admin allows them.
 

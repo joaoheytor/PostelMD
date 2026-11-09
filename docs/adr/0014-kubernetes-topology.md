@@ -24,8 +24,42 @@ protocol (ADR-0003) all assume it. Kubernetes alone doesn't guarantee this:
 - The boot UUID is stored in SQLite at startup. Background workers check it periodically, and
   if it changed (a second writer slipped past, for example on a filesystem where `flock` is
   emulated), the process **stops writing** and exits, raising `postelmd_split_brain_total`.
-- Startup refuses network filesystems (NFS, SMB, CIFS, FUSE-backed) for `/data/.postelmd`,
-  unless `POSTELMD_ALLOW_NETWORK_FS=true`. That variable is documented as unsafe.
+- **Accepted filesystems for `/data/.postelmd`** (SQLite in WAL mode needs working shared
+  memory and POSIX locks; the instance lock needs `flock`). Startup reads the filesystem
+  type with `statfs` and decides by its magic number, never by mount options or names:
+
+  | Filesystem (magic) | Decision |
+  |---|---|
+  | ext2/3/4 (`0xEF53`), XFS (`0x58465342`), Btrfs (`0x9123683E`), ZFS (`0x2FC12FC1`), F2FS (`0xF2F52010`), bcachefs (`0xCA451A4E`) | Accepted |
+  | tmpfs (`0x01021994`), overlayfs (`0x794C7630`, the container's own layer: no volume at `/data`) | Starts, with a permanent "data is not persistent" banner, a log warning and a metric |
+  | NFS (`0x6969`), SMB/CIFS (`0x517B`, `0xFF534D42`, `0xFE534D42`), 9p (`0x01021997`), FUSE (`0x65735546`: virtiofs, sshfs, rclone…), Ceph (`0x00C36400`) | **Refused** |
+  | Any other magic | **Refused**, with the magic number in the error; known-safe ones get added to this list |
+
+  `POSTELMD_ALLOW_NETWORK_FS=true` overrides a refusal. It is documented as unsafe.
+- **Vaults are checked by capability, not by filesystem name.** Notes folders are often bind
+  mounts from a host or a NAS, so when a vault is added and at every start, PostelMD probes
+  its root and records the result in the vault status:
+  - `openat2(RESOLVE_BENEATH)` is **required**; without it, confinement (ADR-0006) can't be
+    guaranteed and the vault is refused;
+  - `renameat2(RENAME_NOREPLACE)` is probed with an **absent** target (the VFS answers
+    `EEXIST` for an existing target before the filesystem is asked, so that proves nothing).
+    `EINVAL` selects the fallbacks of ADR-0003 §2 (`link-unlink` for files,
+    `rename-checked` for folders); if `link()` fails too, structural operations on files are
+    disabled for that vault, since a plain `rename()` would clobber;
+  - on 9p, FUSE, NFS and SMB, the watcher is treated as unreliable: the status shows "watch
+    degraded" and the reconcile interval for that vault drops to 1 min (ADR-0004).
+- **Measured on Docker Desktop** (2026-11-09, Windows with the WSL2 backend, Linux 6.18; a
+  probe in a container):
+
+  | Mount | Magic | `openat2` | `RENAME_NOREPLACE` | `flock` | inotify sees outside writes |
+  |---|---|---|---|---|---|
+  | Named volume | ext4 | yes | yes | yes | yes (from another container) |
+  | Bind mount from the WSL side | ext4 | yes | yes | yes | yes (from the host); needs `--user` |
+  | Bind mount of a Windows path | 9p | yes | **`EINVAL`** | yes | yes (from the host); writable by any UID |
+
+  macOS (virtiofs, which reports the FUSE magic) wasn't measured; the startup checks above
+  make it safe either way: `/data/.postelmd` is refused there and vault capabilities are
+  probed. The resulting advice is in ADR-0009.
 
 ### 2. Kubernetes topology
 - **StatefulSet with `replicas: 1`.**

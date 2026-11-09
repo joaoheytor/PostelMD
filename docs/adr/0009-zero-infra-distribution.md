@@ -30,6 +30,21 @@ docker logs postelmd   # one-time setup URL
 
 - `--user` is **required for bind mounts**: the image cannot fix ownership, because it has no
   shell and doesn't run as root. Named volumes work without it.
+- **Docker Desktop.** From a WSL shell, the command above works as is (the bind is ext4).
+  With a Windows path (PowerShell, `C:\…`) or on macOS, a bind mount is 9p or virtiofs, where
+  SQLite isn't safe, so startup refuses it (ADR-0014). Use a **named volume for `/data`** and
+  bind only the notes folder as a vault:
+
+  ```sh
+  docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+    -p 127.0.0.1:8080:8080 \
+    -v postelmd-data:/data \
+    -v "$HOME/notes:/data/vaults/notes" \
+    docker.io/joaoheytor/postelmd:0.1
+  ```
+  No `--user` is needed there: the named volume belongs to the image's user, and Docker
+  Desktop's file sharing doesn't enforce host ownership. The vault works with the no-clobber
+  fallbacks and a shorter reconcile interval (ADR-0014).
 - If `/data` isn't writable, the app exits with an error that prints the exact fix.
 - `--stop-timeout 60`: Docker's default (10 s) is shorter than the 45 s shutdown deadline
   (architecture §8). Compose files use `stop_grace_period: 60s`; the Helm chart uses
