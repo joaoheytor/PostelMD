@@ -59,9 +59,9 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   pass. Any ambiguity (for example several identical template files) gives every new path a new
   ID and tombstones the old IDs. Open tabs on a tombstoned ID see `410` with a "file moved or
   deleted externally" dialog;
-- after a crash during a **content write**: IDs are written in the same SQLite transaction
-  that records the generation bump, *after* the rename succeeded. On startup, the reconciler
-  repairs files whose hash doesn't match their recorded generation by bumping the generation;
+- after a crash during a **content write**: the save intent (§5) decides, never a hash
+  comparison alone. The generation bump, new hash and outbox row commit in the transaction
+  that clears the intent, *after* the rename is durable;
 - after a crash during an **application-managed structural operation** (create, move or rename
   of a file or folder, delete): identity is **never** left to hash matching. Before touching
   the filesystem, the operation writes a durable **structural intent** containing:
@@ -70,6 +70,7 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   - every affected `(fileID, generation, relative path)`;
   - the **source inode and device**, plus the content hash for files;
   - the **mechanism** (`rename-noreplace`, `link-unlink`, `create`, `delete`);
+  - the **temp path**, if the operation writes one (§5);
   - the planned post-state.
 
   On startup, recovery applies the table for **that operation and mechanism**. Applying the DB
@@ -112,8 +113,8 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   - The purge runs in the background, outside the vault lock (the trash is reserved and not
     visible to anything else), and is throttled for large subtrees.
   - Git: deleting means the paths are absent from the working tree, so the next auto-commit
-    records the deletion. The trash is excluded through `.git/info/exclude` and is never
-    committed.
+    records the deletion. The trash and `.postelmd-tmp/` (§5) are excluded through
+    `.git/info/exclude` and are never committed.
 
   **Atomic rename or move** (`renameat2(RENAME_NOREPLACE)`, files and folders):
   | Source | Destination | Action |
@@ -142,7 +143,7 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
 | Operation | Request | Preconditions | Outcome |
 |---|---|---|---|
 | Create | `POST …/files` `{path}` | `If-None-Match: *` | `201` + ETag; `412` if the path exists (including a concurrent create) |
-| Update | `PUT …/files/{id}` | `If-Match` | `200` + new ETag; `412` with the current content on mismatch; `410` on a tombstone. **Never creates.** |
+| Update | `PUT …/files/{id}` | `If-Match` | `200` + new ETag; `412` with the current content on mismatch, **unless the current content equals the submitted content** (`200`, idempotent; §5); `410` on a tombstone. **Never creates.** |
 | Delete | `DELETE …/files/{id}` | `If-Match` | `204`; leaves a tombstone |
 | Rename/move file | `POST …/files/{id}/move` `{to}` | `If-Match` on the source; the destination **must not exist** | **No-clobber**: `renameat2(RENAME_NOREPLACE)`, or `link()`+`unlink()` where that's unavailable; `409` if the destination exists |
 | Folder rename/move | `POST …/folders/move` | A subtree lock; every open file under it must be clean | No-clobber; children keep their IDs and get a generation bump |
@@ -158,18 +159,93 @@ The API addresses files **by ID** after creation. Paths are resolved to IDs on o
 - Saves wait (bounded, 5 s) behind a running git operation, then fail with
   `503 Retry-After`. The client retries; nothing is lost because the draft persists.
 
-### 5. Write path
-1. Take the locks and re-read the current file. Verify ID, generation and hash.
-2. Write a temp file in the same directory, fsync, re-`stat` the target (§1), `rename()`,
-   fsync the directory.
-3. Run the **synchronous secret scan** on the new content (bounded by the 5 MB note size
+### 5. Write path, temp files and durability
+
+**Temp files** live in **`<vault>/.postelmd-tmp/`**, never next to the target:
+- Siblings like `note.md.tmp` are seen by external tools (Syncthing can sync a half-written
+  one; `git status`, editors and search show them), and a crash leaves them in user folders.
+- The directory is at the vault root, on the same filesystem as the vault, so `renameat` from
+  it is atomic. It is **reserved** (ADR-0006), excluded from the watcher, index, git
+  (`.git/info/exclude`) and backups (ADR-0017), and created `0700`.
+- A temp file is `<op-id>`, created with `O_CREAT|O_EXCL`, mode `0600`. Before the rename it
+  takes the target's permission bits (`fchmod`); a create uses the vault default.
+- Every temp path is **recorded in the operation's intent** before the file is created.
+- `EXDEV` (a sub-folder mounted from another filesystem) fails the operation with `500`, a
+  metric and a log line. It **never falls back** to copying, which isn't atomic.
+- **Startup sweep:** after intent recovery (which handles every temp an open intent names),
+  any entry in `.postelmd-tmp/` that no open intent names is removed.
+
+**Save intent.** A content save has two side effects (the file, then the database), so it
+writes a durable intent first (CLAUDE.md rule 14): op ID, file ID, base generation and hash,
+the new content's hash, the target path, the target's `stat` at the precondition check, and
+the temp path. It holds no content: until the client gets a `200`, its draft is the copy.
+
+1. Take the locks and re-read the current file. Verify ID, generation and hash. If the
+   precondition fails, apply the **idempotent rule** below; otherwise return `412`.
+2. If the submitted content equals the current content, return `200` with the current ETag;
+   nothing is written.
+3. Commit the save intent.
+4. Write the temp file and `fsync` it. Re-`stat` the target (§1); if it changed, remove the temp,
+   drop the intent and return `412`. `renameat()` onto the target, then `fsync` the target's directory and
+   `.postelmd-tmp/`.
+5. Run the **synchronous secret scan** on the new content (bounded by the 5 MB note size
    limit; target < 20 ms p95). Findings are returned **in the save response** (ADR-0010).
-4. In one SQLite transaction: bump the generation and record the new hash, the findings and
-   an **outbox** row (`file.updated`, generation N).
-5. Publish the event to the bus **explicitly from the outbox**. The watcher's own echo of
+6. In one SQLite transaction: bump the generation, record the new hash and the findings, add
+   an **outbox** row (`file.updated`, generation N), and clear the intent.
+7. Publish the event to the bus **explicitly from the outbox**. The watcher's own echo of
    this write is suppressed by `(path, hash)`; suppression never suppresses the application
    event.
-6. Release the locks. Indexing and the git auto-commit are queued with `(fileID, generation)`.
+8. Release the locks. Indexing and the git auto-commit are queued with `(fileID, generation)`.
+
+**Save recovery** (startup, per open save intent; the temp is judged by its hash, so a
+partly written temp never counts as the new content):
+
+| Target | Temp | Action |
+|---|---|---|
+| Base hash | Any | Not applied: remove the temp, drop the intent. The client's retry succeeds. |
+| New hash | Absent | Applied: roll forward (scan, generation, hash, findings, outbox) and clear the intent in one transaction |
+| New hash | Present, new hash | An external writer installed the same bytes: remove the temp, drop the intent; the reconciler records an external change |
+| Other content | Present, new hash | Interference: move the temp to `.postelmd/recovery/<op-id>/`, drop the intent, flag it to the user; the reconciler records the external change |
+| Other content | Absent or partial | Interference: remove any temp, drop the intent; the reconciler records the external change. Nothing is lost: the client never got a `200`, so its retry gets `412` and the conflict view shows its draft |
+| Absent | Present, new hash | External delete or move: keep the temp in recovery as above; the reconciler handles the absence (ADR-0004) |
+| Absent | Absent or partial | External delete or move: remove any temp, drop the intent; the client's retry gets `410` or `412` with its draft intact |
+
+**Idempotent retries.** A precondition mismatch where the file ID is live and the **current
+content hash equals the hash of the submitted content** returns `200` with the current ETag
+and the current findings, and writes nothing. The client's snapshot is exactly what is on
+disk, so clearing its dirty state (for that edit generation, §7) loses nothing. This covers a
+retry whose first response was lost after the commit, and two tabs saving identical text.
+It is ABA-safe because the ID must match: a deleted and recreated file has a new ID.
+
+**Durability.** The rules, for every mechanism:
+- An intent is **committed** before the operation's first filesystem side effect.
+- File data is `fsync`ed before it is renamed or linked into place.
+- After any directory entry changes (create, rename, link, unlink), that directory is
+  `fsync`ed; a rename between directories `fsync`s both.
+- The database records an operation as done only after its filesystem steps are durable.
+- SQLite runs in WAL mode with **`synchronous=FULL`**. With `NORMAL`, the latest commits can
+  be lost on power loss, which would lose intents and generation bumps.
+
+| Mechanism | Order |
+|---|---|
+| Content save | intent → temp + `fsync` → re-`stat` → `renameat` → `fsync` target dir and `.postelmd-tmp/` → DB |
+| Create | intent → temp + `fsync` → `renameat2(RENAME_NOREPLACE)`, or `link` then `unlink` the temp → `fsync` destination dir and `.postelmd-tmp/` → DB |
+| Rename or move | intent → `renameat2(RENAME_NOREPLACE)` → `fsync` destination dir, then the source dir if different → DB |
+| `link`/`unlink` fallback | intent → `link` → `fsync` destination dir → `unlink` → `fsync` source dir → DB |
+| Delete | intent (`moving`) → create `.postelmd-trash/<op-id>/`, `fsync` the trash → rename into it → `fsync` the source dir and `<op-id>/` → DB (tombstones, `trashed`). The purge needs no per-step `fsync`: removal is idempotent and resumes. |
+| Git | Objects, refs and their directories (ADR-0016, "Durability") |
+
+An **`fsync` error is fatal** for the operation. After a failed `fsync`, the kernel may have
+dropped the dirty pages and a second `fsync` can report success, so nothing retries it. The
+operation fails, the vault goes read-only (as for `ENOSPC`, §6), an alert metric is raised,
+and the intent's recovery table runs on the next startup.
+
+**Crash models in the scenario suite.** A process kill keeps everything written, because the
+page cache survives. **Power loss** also drops what wasn't synced. In test builds,
+`internal/store/fs` and the `.git/` adapter log every mutation and `fsync`. For each crash
+point, the suite rebuilds the disk state from synced operations only (unsynced file data
+reverts to its last synced content, and unsynced directory entries are undone), runs
+recovery, and asserts the table's outcome. A committed SQLite transaction counts as durable.
 
 ### 6. Asynchronous jobs
 - Index, link-extraction and commit jobs carry `(fileID, generation)`. A job **drops its
@@ -245,14 +321,23 @@ The API addresses files **by ID** after creation. Paths are resolved to IDs on o
   documents the case that can't be detected.
 - A stale save response after a newer edit.
 - `ENOSPC` simulation.
-- Crash between `rename()` and the DB commit (startup repair).
+- A crash at every step of a save, each reaching its row of the save recovery table (§5),
+  under both crash models (process kill and power loss).
+- A save whose response was lost, retried with the old `If-Match`: `200`, no new generation.
+- A leftover temp file not named by any intent is swept at startup; one named by an open
+  intent is not.
+- `EXDEV` (a sub-folder on another mount): the save fails and never falls back to a copy.
+- An `fsync` error: the operation fails, the vault goes read-only, and nothing retries the
+  `fsync`.
 - A contract test that the client reads and uses the returned ETag.
 - Fuzz tests on the operation sequence.
 
 ## Consequences
 - Positive: no lost updates between PostelMD clients; honest, detectable behaviour for
   external writers; deterministic and testable.
-- Negative: more state (IDs, generations, tombstones, outbox). Uncoordinated external writers
+- Negative: more state (IDs, generations, tombstones, outbox, intents). Every save costs one
+  extra durable SQLite commit (the intent); autosave is debounced, so this is about one more
+  `fsync` per 1–2 s of typing. Uncoordinated external writers
   can lose data in a narrow window that may go undetected; that is documented, and maintenance
   mode is the safe path.
 - Metrics:

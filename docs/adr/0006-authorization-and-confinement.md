@@ -63,6 +63,7 @@ results, history and diff, reconciliation, indexing and plugin vault access.
 | `.git` and everything below | Repository internals; git access only through `gitvault` |
 | `.postelmd` and everything below | Application state |
 | `.postelmd-trash` and everything below (at the vault root) | Vault trash for deletes (ADR-0003). Reachable only through the trash API (list, restore). |
+| `.postelmd-tmp` and everything below (at the vault root) | Temp files of in-flight writes, named by their intents (ADR-0003 §5). Never reachable through the API. |
 | `.postelmd-secrets-allow` | Readable, but writable only through the findings API (ADR-0010) |
 | `.stfolder`, `.stversions`, `.sync-conflict-*` | Syncthing internals. Conflict copies are surfaced in a dedicated UI, not edited in place. |
 | Any path component that is empty, `.` or `..`, or that contains NUL or a control character | Defence in depth (the OS-level confinement also blocks these) |

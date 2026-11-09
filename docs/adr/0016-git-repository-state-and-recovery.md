@@ -101,6 +101,21 @@ or switches branches by itself.
 - Lock files left behind by an external git (`.git/index.lock`) put the vault in
   `unsupported` until the admin confirms.
 
+### Durability
+go-git v5.19.3 never calls `fsync`. Loose objects are written to a temp file and renamed
+without a sync, and a ref is **truncated and rewritten in place**, so a power loss can leave
+an empty branch ref. PostelMD therefore (ADR-0003 §5 gives the general rules):
+- opens `.git/` through a billy wrapper in `internal/store/git` that `fsync`s a file when it is
+  closed and its directory after a create or rename, so every object is durable before any
+  ref points at it;
+- **never writes a branch ref through go-git**. `SetBranch` uses git's own lockfile protocol:
+  create `<ref>.lock` with `O_CREAT|O_EXCL` (which also excludes a concurrent external git),
+  compare the current value with the expected old one (`ErrRefMoved` otherwise), write the new
+  value, `fsync` it, rename it over the ref, and `fsync` the directory. The intent names the
+  lock file, so recovery removes a `.lock` left by PostelMD's own crash; any other `.lock`
+  keeps the rule above;
+- orders every operation: objects → ref → clearing the intent in the database.
+
 ### go-git capabilities spike results (2026-11-09, go-git v5.19.3, v6.0.0-beta.1)
 Implemented in `internal/store/git` (`Commit`, `SetBranch`, `Relation`, `ObjectsToPush`),
 tested against the real git binary (`git fsck --strict`).
@@ -109,7 +124,7 @@ tested against the real git binary (`git fsck --strict`).
 |---|---|---|
 | Version | v5.19.3 is the latest stable. v6 is `v6.0.0-beta.1`. | Pin **v5.19.3**; Renovate tracks it. Revisit v6 at its first stable release. |
 | Commit from in-memory bytes | Works with plumbing only (blob → trees → commit). The worktree is never read or written; `git fsck --strict` accepts the result. go-git writes tree entries in the order given, so the adapter sorts them the way git does (a directory sorts as `name/`). | The commit gate (ADR-0010) scans exactly the bytes it commits. Auto-commit never uses go-git's index or `Worktree.Add`. |
-| Move a ref safely | `CheckAndSetReference` is compare-and-swap. | `SetBranch(old, next)` is the only ref mutation, so a concurrent external git change fails instead of being overwritten. |
+| Move a ref safely | `CheckAndSetReference` is compare-and-swap, but it rewrites the ref in place without `fsync` (see Durability). | `SetBranch(old, next)` is the only ref mutation. It keeps the compare-and-swap, so a concurrent external git change fails instead of being overwritten, and writes the ref with git's lockfile protocol. |
 | Fast-forward pull | `Fetch` + an ancestry check works. `Merge(FastForwardMerge)` moves the ref **and leaves the worktree untouched** (with no worktree attached). | A pull is: fetch → `Relation` → apply the changed paths through `internal/store/fs` under the crash intent above → `SetBranch`. go-git never checks files out. |
 | Diverged push | Rejected, but only as an unexported error string (`non-fast-forward update: …`), not a sentinel. | Never infer divergence from the push error (CLAUDE.md rule 14). Check `Relation` against the freshly fetched remote before pushing; treat any push failure as a generic failure to retry. |
 | Objects a push sends | `revlist.Objects(want, have)` lists exactly the new commits, trees and blobs. | The push gate scans that list (ADR-0010). |

@@ -77,6 +77,7 @@ Everything else consumes their interfaces.
       _assets/               # pasted or uploaded media
       .git/                  # reserved (ADR-0006)
       .postelmd-trash/       # reserved; deletes are atomic moves here, purged after 7 days (ADR-0003)
+      .postelmd-tmp/         # reserved; temp files of in-flight writes, named by their intents
   .postelmd/                 # app state; never inside a vault; reserved
     instance.lock            # flock held by the single running process (ADR-0014)
     admin.sock               # 0600 Unix socket for online CLI commands (ADR-0009)
@@ -101,12 +102,15 @@ sequenceDiagram
   E->>S: PUT /api/v1/vaults/{v}/files/{id}<br/>If-Match: "id.gen.hash"  (snapshot editGen=7)
   S->>S: lock(vault→file), check ID + generation + hash
   alt matches
-    S->>FS: write tmp, fsync, re-stat target, rename, fsync dir
+    S->>S: commit the save intent (synchronous=FULL)
+    S->>FS: write .postelmd-tmp/<op>, fsync, re-stat target, rename, fsync both dirs
     S->>S: synchronous secret scan
-    S->>S: TX: generation+1, hash, findings, outbox row
+    S->>S: TX: generation+1, hash, findings, outbox row, clear intent
     S-->>E: 200 ETag "id.gen+1.hash'" + findings
     S->>S: publish event from outbox (watcher echo suppressed)<br/>queue index + commit with (id, gen)
     E->>E: clear dirty only if editGen still 7
+  else mismatch, but current content = submitted content
+    S-->>E: 200 + current ETag (idempotent retry; nothing written)
   else mismatch
     S-->>E: 412 + current content and ETag → conflict view
   else tombstone

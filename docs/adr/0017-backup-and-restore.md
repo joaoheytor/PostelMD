@@ -26,7 +26,10 @@ keys can't decrypt the stored credentials.
   trashed items may be the only surviving version of user content referenced by open
   intents; their cleanup and purge are paused during capture).
 
-Only derived data (the FTS index) and caches are excluded; they are rebuilt on restore.
+Only derived data (the FTS index), caches and each vault's `.postelmd-tmp/` are excluded. The
+index and caches are rebuilt on restore. Temp files are never the only copy of anything: an
+interrupted save's content is still the client's draft, and recovery moves any temp worth
+keeping into `recovery/` (ADR-0003 §5).
 
 ### Taking a backup (`postelmd backup` or the admin API)
 1. Take the **instance backup barrier**. It covers **every mutation inside the consistency
