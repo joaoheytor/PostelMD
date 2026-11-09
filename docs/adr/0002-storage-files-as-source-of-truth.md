@@ -10,7 +10,7 @@ fast search.
 
 ## Decision
 - Note content lives **only** as files under `/data/vaults/<slug>/`. There is no copy in a database.
-- SQLite (`modernc.org/sqlite`, pure Go, WAL mode) at `/data/.postelmd/app.db` stores:
+- SQLite (`modernc.org/sqlite`, pure Go, WAL mode, `synchronous=FULL`; ADR-0003 §5) at `/data/.postelmd/app.db` stores:
   - **authoritative:** users, credentials, sessions, vaults, memberships, invites, plugin
     approvals, secret findings and acknowledgements, **file IDs, generations and tombstones**
     (ADR-0003), the git intent log (ADR-0016) and the event outbox;

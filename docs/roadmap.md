@@ -31,7 +31,10 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         create, delete, atomic rename and `link`/`unlink`, each reaching its table's outcome;
         a crash at each phase of a **folder delete** (`moving`, `trashed`, a half-done purge);
         a commit message containing a token is rejected before the commit is written;
-      - **save:** ABA delete+recreate, a stale response vs a newer edit, two offline tab drafts,
+      - **save:** a crash at every step of a save (each reaching its recovery-table row), a
+        lost response retried with the old `If-Match` (`200`, no new generation), the startup
+        temp sweep, `EXDEV` and `fsync` errors (no fallback, no retried `fsync`), ABA
+        delete+recreate, a stale response vs a newer edit, two offline tab drafts,
         an ambiguous external rename, an external write in the rename window (shows what is
         and isn't detected);
       - **git:** a crash at each step of commit and **fast-forward pull** (finish and abort both
@@ -47,6 +50,8 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         database-only rollback eligibility;
       - **outbox:** overflow by kind (commit obligations survive, clients get `resync`);
       - **single writer:** a second process on the same `/data` refuses to start;
+      - **power loss:** every save, structural and git crash point above also runs under the
+        power-loss model (unsynced data and directory entries dropped; ADR-0003 §5);
       - **release:** an `-rc` tag never publishes to Docker Hub or moves an alias; signatures
         verify from both registries; the `required` check fails when a needed job is
         cancelled or skipped unexpectedly.
