@@ -94,7 +94,7 @@ Changing these requires an ADR.
 ### Performance budgets
 | Metric | Budget |
 |---|---|
-| Keystroke-to-paint in the editor (10k-line note) | < 16 ms p95 |
+| Typing in the editor (10k-line note, preview open) | Keydown JS processing < 4 ms p95, **and** keystroke-to-paint p95 no more than 10% above a plain `<textarea>` control on the same runner (ADR-0007 spike) |
 | Autosave | Debounced 1–2 s after the last keystroke, plus on blur/navigation. **Never per keystroke.** |
 | Preview render | Off the main thread (Worker), debounced; **skipped when the preview is hidden** |
 | Word and character stats | Computed lazily or idle, not on every change |
@@ -108,7 +108,10 @@ Changing these requires an ADR.
   Playwright-pinned version) with 4× CPU throttling for the client;
 - data: synthetic vault generator, 10k notes, median 4 KB, p99 200 KB, one 10k-line note,
   5 vaults, 5 concurrent users (k6);
-- each figure is the p95 of ≥ 30 samples after warm-up.
+- each figure is the p95 of ≥ 30 samples after warm-up;
+- browser timings use the Event Timing API. Absolute paint latency in headless CI reflects the
+  runner (software rendering), so editor budgets are relative to a control measured in the
+  same run.
 
 A budget regression of more than 10% fails the PR (from v0.2).
 
