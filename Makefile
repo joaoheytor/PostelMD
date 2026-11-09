@@ -8,7 +8,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: help ci build test test-go test-web fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci build test test-go test-web test-scripts fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -18,13 +18,16 @@ ci: lint test vuln build ## Everything the CI `required` check runs
 build: ## Build the postelmd binary into bin/
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/postelmd ./cmd/postelmd
 
-test: test-go test-web ## Go and web tests
+test: test-go test-web test-scripts ## Go, web and script tests
 
 test-go:
 	go test -race ./...
 
 test-web: web-deps
 	cd web && npm test
+
+test-scripts: ## Tests for release scripts (throwaway repos and SSH keys)
+	scripts/verify-release-tag_test.sh
 
 fuzz: ## Every Go fuzz target for FUZZTIME (default 30s)
 	scripts/fuzz.sh
