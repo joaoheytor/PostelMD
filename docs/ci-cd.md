@@ -68,7 +68,7 @@ explicitly wherever a job checks out code.
 | `backup` | `backup --verify` from v0.2; full backup → restore round-trip from v0.3 (when `restore` ships) | v0.2 |
 | `helm` | `helm lint`, `kubeconform`, kind install with an RWOP PVC, N-1 upgrade | v0.3 |
 | `plugins` | Sandbox negative tests, plugin-API compatibility check (`api-extractor`) | v0.4 |
-| `required` | The only required status check. Defined with `if: always()` and `needs:` on every job above, so it **runs even when a dependency fails or is cancelled**. It passes only if every needed job's result is `success`, or `skipped` **and** listed in an explicit `allowed-skips` input (for example `pr-title` on `push`). Any `failure`, `cancelled` or unexpected `skipped` fails it. This follows the documented GitHub pattern for aggregating required checks. | v0.0 |
+| `required` | The only required status check. Defined with `if: always()` and `needs:` on every job above, so it **runs even when a dependency fails or is cancelled**. It passes only if every needed job's result is `success`, or `skipped` **and** listed in an explicit `allowed-skips` input (for example `pr-title` on `push`). Any `failure`, `cancelled` or unexpected `skipped` fails it. This follows the documented GitHub pattern for aggregating required checks. It is never made `if: !cancelled()`: a skipped required check counts as passing, so cancelling the only run would allow a merge without CI. Only a new push cancels an in-progress PR run; label and title edits queue, so a cancelled run's failing `required` never lands on the head commit. | v0.0 |
 
 **Caching:** Go module and build cache, npm cache, buildx GHA cache. The caches are scoped per
 branch, so fork PRs can't poison `main`'s cache.
