@@ -147,10 +147,10 @@ PostelMD is worth using before building the rest of the design.
 - Killing the browser mid-edit → the draft is recovered on reopen.
 - Pasting an AWS key → editor warning.
 - Failure scenarios: a crash at every step of a save, a move, a delete to the trash, a
-  restore from the trash (both layouts) and a git commit, under both the process-kill and the power-loss models; the startup temp sweep. For
-  the commit: crash → restart → next commit either succeeds, or fails with the lock message
-  and succeeds after "Remove the lock", with the branch at the old or the new commit and no
-  change lost.
+  restore from the trash (both layouts) and a git commit, under both the process-kill and
+  the power-loss models; the startup temp sweep. For the commit: crash → restart → next
+  commit either succeeds, or fails with the lock message and succeeds after "Remove the
+  lock", with the branch at the old or the new commit and no change lost.
 - Path lookup, create, move and upload naming `.git/config` or `.postelmd/*` return 404. Fuzz
   tests for path traversal pass. The e2e run produces no CSP violation reports.
 - A session cookie fails after the password changes; a forged or expired cookie is refused;

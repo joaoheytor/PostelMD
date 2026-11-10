@@ -11,7 +11,7 @@ import (
 )
 
 // ErrNotInTrash: the trash id names nothing a delete left there (ADR-0024). It is an
-// ErrNotFound, so callers that don't tell them apart answer 404 for both.
+// ErrNotFound, so a caller that doesn't check for it answers 404; the API answers 410.
 var ErrNotInTrash = fmt.Errorf("%w: not in the trash", ErrNotFound)
 
 // ErrNameHasSlash: a restore's new name is a path, not a name; the folder goes separately.
