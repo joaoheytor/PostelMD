@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && vite build -c vite.diagram.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run"
@@ -32,6 +32,7 @@
     "@lezer/highlight": "1.2.5",
     "dompurify": "3.4.17",
     "lit": "3.3.3",
-    "markdown-it": "15.0.3"
+    "markdown-it": "15.0.3",
+    "mermaid": "12.3.0"
   }
 }

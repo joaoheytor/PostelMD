@@ -1,6 +1,6 @@
 # ADR-0007: Markdown dialect and client-side rendering
 
-- **Status:** Accepted
+- **Status:** Accepted; its Mermaid paragraph is superseded by [ADR-0021](0021-mermaid-in-a-sandboxed-frame.md)
 - **Date:** 2026-11-09
 
 ## Context

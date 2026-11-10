@@ -68,7 +68,7 @@ Everything else consumes their interfaces.
 | `core/treeStore` | File tree state, optimistic updates reconciled with the server |
 | `core/pluginHost` | Trusted plugin loader; one sandboxed iframe per plugin; capability-checked RPC |
 | `editor/` | CodeMirror 6: markdown, language data, keymaps, secret-paste warning extension |
-| `preview/` | markdown-it in a Web Worker → blocks → DOMPurify on the main thread (inside the only Trusted Types policy) → patch only changed blocks (ADR-0007). Mermaid via a first-party bundled plugin (from v0.4; core before that). |
+| `preview/` | markdown-it in a Web Worker → blocks → DOMPurify on the main thread (inside the only Trusted Types policy) → patch only changed blocks (ADR-0007). Mermaid in a sandboxed renderer frame, its SVG shown as images (ADR-0021); a first-party bundled plugin from v0.4. |
 | `ui/` | Shell (Lit custom elements in the light DOM; the editor host mounts CodeMirror in a shadow root, ADR-0019): tree, tabs, dialogs, command palette, conflict view, git status |
 
 `core/` has **no UI-framework imports** and is unit-tested with Vitest.
@@ -173,9 +173,11 @@ outbox (app writes, published explicitly) ─┘                 (boot epoch + m
 | Sandboxed | One opaque-origin iframe **per plugin**, with its Workers created inside it, and a per-plugin CSP | `SandboxApp` (serializable) over capability-checked RPC; **headless** by default (Worker + host-rendered UI), DOM UI only with admin approval if it reads data | Any user, for themselves (if allowed) |
 
 First-party bundled plugins are on by default. Third-party plugins are never preinstalled.
-**Mermaid is trusted-tier, first-party code** (ADR-0007): it needs the DOM to measure text, so
-it can't run in a Worker or a sandbox. It ships in the app bundle (never fetched), runs with
-`securityLevel: 'strict'`, and its SVG goes through DOMPurify like any other preview HTML.
+**Mermaid is first-party code that runs sandboxed** (ADR-0021): it needs the DOM to measure
+text, so it can't run in a Worker, and under the app's Trusted Types CSP it can't run in the
+app's document either. It runs with `securityLevel: 'strict'` in a hidden `sandbox` frame with
+an opaque origin and its own CSP (no network), served by our server (never fetched from a
+CDN). Its SVG comes back over a `MessagePort` and is shown as an `<img>`.
 Safe mode and emergency disable are always available.
 
 ## 8. Deployment and lifecycle

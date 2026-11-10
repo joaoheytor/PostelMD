@@ -1,4 +1,5 @@
 import { type Disposable, DisposableStore, toDisposable } from "../core/disposable";
+import { Diagrams } from "./diagrams";
 import type { Block } from "./render";
 import { assetWorker, sanitized } from "./sanitize";
 import type { Reply, Request } from "./worker";
@@ -36,6 +37,8 @@ export class Preview implements Disposable {
   /** Replies are applied one at a time, in order. */
   private applying: Promise<void> = Promise.resolve();
   private disposed = false;
+  /** Created on the first Mermaid block. */
+  private diagrams: Diagrams | undefined;
   /** The copy buttons' "Copied" timers. */
   private readonly flashes = new DisposableStore();
 
@@ -77,6 +80,7 @@ export class Preview implements Disposable {
     this.disposed = true;
     this.timer?.dispose();
     this.flashes.dispose();
+    this.diagrams?.dispose();
     this.el.removeEventListener("click", this.onClick);
     this.worker.terminate();
   }
@@ -102,6 +106,32 @@ export class Preview implements Disposable {
     button.textContent = text;
     const id = setTimeout(() => (button.textContent = copyLabel), 2000);
     this.flashes.add(toDisposable(() => clearTimeout(id)));
+  }
+
+  /**
+   * Replaces a mermaid code block with its diagram, once rendered (ADR-0021). On an error the
+   * code stays, with the error under it as text.
+   */
+  private async diagram(pre: HTMLElement, source: string): Promise<void> {
+    this.diagrams ??= new Diagrams();
+    const d = await this.diagrams.render(source);
+    if (this.disposed || !pre.isConnected) return;
+    if (!d.ok) {
+      const p = document.createElement("p");
+      p.className = "pm-diagram-error";
+      p.textContent = `This diagram has an error: ${d.error}`;
+      pre.after(p);
+      return;
+    }
+    const img = document.createElement("img");
+    img.className = "pm-diagram";
+    img.alt = d.label;
+    if (d.width > 0 && d.height > 0) {
+      img.width = d.width;
+      img.height = d.height;
+    }
+    img.src = d.url;
+    pre.replaceWith(img);
   }
 
   /** A newer text was sent since this reply's: skip it, or stop working on it. */
@@ -140,6 +170,9 @@ export class Preview implements Disposable {
   private render(blocks: Block[]): DocumentFragment {
     const frag = sanitized(blocks.map((b) => `<div class="pm-block" data-line="${b.line}">${b.html}</div>`).join(""));
     [...frag.children].forEach((el, i) => this.source.set(el, blocks[i]?.html ?? ""));
+    for (const code of frag.querySelectorAll("pre > code.language-mermaid")) {
+      if (code.parentElement) void this.diagram(code.parentElement, code.textContent ?? "");
+    }
     for (const pre of frag.querySelectorAll("pre:not(.pm-frontmatter)")) {
       const button = document.createElement("button");
       button.type = "button";

@@ -48,7 +48,7 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   | `markdown-it` | `web/src/preview` (Worker) | web | CommonMark + GFM with source maps for scroll sync (ADR-0007 spike) | in use |
   | `dompurify` | `web/src/preview` | web | Proven HTML sanitizer; runs inside the only Trusted Types policy (ADR-0007) | in use |
   | `lit` | `web/src/ui` | web | Reactive custom elements with no compiler (ADR-0019 spike) | in use |
-  | `mermaid` | `web/src/preview` (lazy) | web | Diagrams; loaded only when a `mermaid` block exists (ADR-0007) | planned v0.1 |
+  | `mermaid` | `web/src/diagram` (sandboxed frame) | web | Diagrams; loaded only when a `mermaid` block exists, in its own frame (ADR-0021) | in use |
   | `gcr.io/distroless/static:nonroot` | image | base image | No shell or package manager in the runtime image (ADR-0009) | planned v0.1 |
 
   Development, test and release tooling is not shipped and needs no row beyond this list:
