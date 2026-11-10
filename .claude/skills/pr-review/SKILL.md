@@ -39,12 +39,24 @@ for CI first.
 
 ## 4. Wait for CI on the reviewed head
 
+First, a PR that conflicts with `main` gets no `pull_request` runs at all, so don't wait for
+one: if `gh pr view N --json mergeable -q .mergeable` says `CONFLICTING`, report
+"conflicting: merge main" (merge, don't rebase or force-push) and stop.
+
 `gh pr checks --watch` can exit right after a push, before the new checks are queued. Loop
 until the head has checks and none is pending (queued and in-progress checks are in the
-`pending` bucket), then read the result:
+`pending` bucket), for at most 30 minutes, then read the result:
 
 ```sh
-bash -c 'while b=$(gh pr checks N --json bucket -q ".[].bucket" 2>/dev/null); [ -z "$b" ] || printf "%s\n" "$b" | grep -qx pending; do sleep 30; done; gh pr checks N'
+bash -c 'for i in $(seq 60); do
+  b=$(gh pr checks N --json bucket -q ".[].bucket" 2>&1); rc=$?
+  # with --json, gh exits 0 whatever the checks say; "no checks reported" just means not yet
+  if [ $rc -ne 0 ] && ! printf "%s" "$b" | grep -q "no checks"; then
+    echo "gh pr checks failed: $b" >&2; exit 1; fi
+  if [ $rc -eq 0 ] && [ -n "$b" ] && ! printf "%s\n" "$b" | grep -qx pending; then
+    gh pr checks N; exit; fi
+  sleep 30
+done; echo "CI still pending or absent after 30 min: check mergeable and the Actions tab" >&2; exit 1'
 ```
 
 Then list open code-scanning alerts on the PR's merge ref, and fix any in the same PR:

@@ -248,9 +248,9 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   `SHELLCHECK_IMAGE` = `koalaman/shellcheck` v0.11.0, published 2025-08-04). CI used to
   install actionlint with `go install` and take the runner's preinstalled, unpinned
   shellcheck, which is older than 0.11.0 and reported an SC2015 that local runs didn't. The
-  actionlint image bundles shellcheck 0.11.0, the same as `SHELLCHECK_IMAGE`. They are linters, not
-  security tools: they run with no network and a read-only mount, and the digest pin is the
-  control. A bump moves both together, to releases at least two weeks old.
+  actionlint image bundles shellcheck 0.11.0, the same as `SHELLCHECK_IMAGE`. Neither image is signed
+  upstream (no cosign signature for either digest, checked 2026-11-10), so the controls are
+  the digest pin, `--network none` and a read-only mount. A bump moves both together, to releases at least two weeks old.
 - **2026-11-10, the release workflows** (`prerelease.yaml`, `release.yaml`). No new
   dependency: they reuse `candidate.yaml`'s actions and tools, plus crane v0.22.1 pinned as
   above.

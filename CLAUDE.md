@@ -143,8 +143,8 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   depending on another open slice.
 - Agents write repository files with Write/Edit, not shell redirection, so the guard hook
   sees them (it asks before `sed -i`, `perl -pi`, `tee` and `>` into repository files).
-- The maintainer's shell is zsh: it doesn't word-split `$VAR` and expands a leading `=`
-  (`echo ==` fails). Run loops and word splitting under `bash -c '…'`.
+- If your shell is zsh, it doesn't word-split `$VAR` and expands a leading `=`: run loops and
+  word splitting under `bash -c '…'`. Machine-specific notes go in `CLAUDE.local.md` (ignored).
 
 ## Definition of Done
 
