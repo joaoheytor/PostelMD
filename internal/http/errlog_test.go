@@ -3,7 +3,9 @@ package http
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	iofs "io/fs"
 	"log/slog"
 	stdhttp "net/http"
@@ -69,19 +71,32 @@ func TestUnexpectedErrorsLogNoPaths(t *testing.T) {
 			if strings.Contains(line, secret) || strings.Contains(line, "forged") || strings.Count(line, "\n") != 1 {
 				t.Fatalf("the log leaks user text: %s", line)
 			}
-			if !strings.Contains(line, `"err":{"op":"open","errno":"none","kind":"unexpected"}`) {
+			if !strings.Contains(line, `"err":{"op":"open","errno":"none","kind":"unexpected","type":"*errors.errorString"}`) {
 				t.Fatalf("logged %s, want the pathless description", line)
 			}
 		})
 	}
 }
 
-// TestPathlessNamesTheErrno: a system error inside a PathError is named, so the log still
-// tells an operator what failed.
-func TestPathlessNamesTheErrno(t *testing.T) {
-	var buf bytes.Buffer
-	slog.New(slog.NewJSONHandler(&buf, nil)).Error("x", pathless(&iofs.PathError{Op: "write", Path: "a.md", Err: syscall.ENOSPC}))
-	if !strings.Contains(buf.String(), `"err":{"op":"write","errno":"ENOSPC","kind":"unexpected"}`) {
-		t.Fatalf("logged %s", buf.String())
+// TestPathlessTellsFailuresApart: the log still tells an operator what failed: a system error
+// is named, a store `stat` is known, and an error without a path (a damaged auth state file
+// fails to decode) is told apart by its type.
+func TestPathlessTellsFailuresApart(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&iofs.PathError{Op: "write", Path: "a.md", Err: syscall.ENOSPC},
+			`"err":{"op":"write","errno":"ENOSPC","kind":"unexpected","type":"syscall.Errno"}`},
+		{&iofs.PathError{Op: "stat", Path: "a.md", Err: syscall.EIO},
+			`"err":{"op":"stat","errno":"EIO","kind":"unexpected","type":"syscall.Errno"}`},
+		{fmt.Errorf("auth: credential: %w", json.Unmarshal([]byte("{"), new(struct{}))),
+			`"err":{"op":"unknown","errno":"none","kind":"unexpected","type":"*json.SyntaxError"}`},
+	} {
+		var buf bytes.Buffer
+		slog.New(slog.NewJSONHandler(&buf, nil)).Error("x", pathless(tc.err))
+		if !strings.Contains(buf.String(), tc.want) {
+			t.Fatalf("logged %s, want %s", buf.String(), tc.want)
+		}
 	}
 }

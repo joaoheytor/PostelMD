@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"fmt"
 	iofs "io/fs"
 	"log/slog"
 	"syscall"
@@ -11,15 +12,16 @@ import (
 // pathless describes err with values that can't carry user text, so no path or name it
 // quotes reaches the log (CLAUDE.md rule 15) and no line break can forge a log line: the
 // store operation that failed (one of ours, by name), the system error's name when it is a
-// known one, and a fixed kind. Each is picked from a fixed list by comparison, never copied
-// out of err (CodeQL go/log-injection). Every API logs its unexpected errors with it.
+// known one, a fixed kind, and the Go type of the innermost error. The first three are picked
+// from fixed lists by comparison, never copied out of err (CodeQL go/log-injection). Every API
+// logs its unexpected errors with it.
 func pathless(err error) slog.Attr {
 	op := "unknown"
 	var pe *iofs.PathError
 	if errors.As(err, &pe) {
 		// Our own name for the operation, never pe.Op itself: an Op the store doesn't use is
 		// logged as "unknown".
-		for _, name := range []string{"open", "rename", "remove", "list", "mkdir", "sync", "read", "write", "create"} {
+		for _, name := range []string{"open", "stat", "rename", "remove", "list", "mkdir", "sync", "read", "write", "create"} {
 			if pe.Op == name {
 				op = name
 			}
@@ -50,5 +52,18 @@ func pathless(err error) slog.Attr {
 			break
 		}
 	}
-	return slog.Group("err", "op", op, "errno", errno, "kind", kind)
+	return slog.Group("err", "op", op, "errno", errno, "kind", kind, "type", innermostType(err))
+}
+
+// innermostType names the Go type of the error at the bottom of err's chain (for example
+// *json.SyntaxError), so an operator can tell failures apart. A type name comes from code,
+// never from user text.
+func innermostType(err error) string {
+	for {
+		next := errors.Unwrap(err)
+		if next == nil {
+			return fmt.Sprintf("%T", err)
+		}
+		err = next
+	}
 }
