@@ -46,9 +46,11 @@ const highlight = HighlightStyle.define([
 
 /**
  * Mounts CodeMirror 6 in root, a shadow root: there its styles use constructable
- * stylesheets, which the CSP's style-src 'self' allows (ADR-0019).
+ * stylesheets, which the CSP's style-src 'self' allows (ADR-0019). onEdit runs for the
+ * user's edits (they need saving); onChange for every change of the text, including
+ * replace() (the preview follows both).
  */
-export function mountEditor(root: ShadowRoot, doc: string, label: string, onEdit: () => void): Editor {
+export function mountEditor(root: ShadowRoot, doc: string, label: string, onEdit: () => void, onChange: () => void): Editor {
   const view = new EditorView({
     root,
     parent: root,
@@ -63,7 +65,9 @@ export function mountEditor(root: ShadowRoot, doc: string, label: string, onEdit
         EditorView.contentAttributes.of({ "aria-label": label }),
         theme,
         EditorView.updateListener.of((u) => {
-          if (u.docChanged && !u.transactions.some((t) => t.annotation(external))) onEdit();
+          if (!u.docChanged) return;
+          onChange();
+          if (!u.transactions.some((t) => t.annotation(external))) onEdit();
         }),
       ],
     }),

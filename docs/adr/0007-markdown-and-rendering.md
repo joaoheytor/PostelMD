@@ -1,6 +1,6 @@
 # ADR-0007: Markdown dialect and client-side rendering
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-09
 
 ## Context
@@ -26,11 +26,13 @@ parse Markdown only for extraction: headings, links, tags and backlinks for the 
     typing. Without it, a large preview slowed every keystroke.
   - The preview is not rendered while hidden, and rendering is debounced.
   - Source line mapping (`data-line` on each block) drives the editor ↔ preview scroll sync.
-- **Trusted Types:** `require-trusted-types-for 'script'` with exactly two policy names:
+- **Trusted Types:** `require-trusted-types-for 'script'` with exactly three policy names:
   - `postelmd-preview` (ours): its `createHTML` sanitizes with DOMPurify, and its
     `createScriptURL` accepts only same-origin URLs under `/assets/` (the Worker is a script
     URL too). It is the only way HTML or a Worker reaches the page.
   - `dompurify`: DOMPurify's own internal policy for parsing into an inert document.
+  - `lit-html`: Lit's own policy (ADR-0019), created when Lit loads. It only ever receives
+    Lit's template strings, which are part of our bundle, and it isn't reachable from app code.
 - **Mermaid:** lazy-loaded only when a `mermaid` block exists; `securityLevel: 'strict'`, and
   its output is sanitized too. It is **trusted-tier, first-party code**: it needs the DOM to
   measure text, so it runs on the main thread, from the app bundle only (never a CDN). From
@@ -42,7 +44,8 @@ parse Markdown only for extraction: headings, links, tags and backlinks for the 
   must pass on both parsers.
 - **CSP:** `script-src 'self'`, no `unsafe-inline` scripts. `style-src 'self'`, no
   `unsafe-inline` or nonces; CodeMirror's injected styles comply only from a shadow root
-  (ADR-0019). `worker-src 'self'`. `trusted-types postelmd-preview dompurify`.
+  (ADR-0019). `worker-src 'self'`. `trusted-types postelmd-preview dompurify lit-html` (see
+  Clarifications).
   `img-src 'self' blob: data:` plus admin-approved hosts.
 
 ### Spike results (2026-11-09: CodeMirror 6 + markdown-it 15.0.3 + DOMPurify 3.4.17)
@@ -91,3 +94,12 @@ edited by Playwright in headless Chromium at 4× CPU throttling: 150 keystrokes 
 | Sanitizing in the Worker | DOMPurify needs a DOM; Workers have none. A DOM-free sanitizer would be new, less-proven security code |
 | Re-render and re-sanitize the whole preview on each edit | About 1 s of main-thread work per edit on a 10k-line note |
 | Same JS parser on the server (would require a TS backend) | Rejected together with the TS backend (ADR-0001) |
+
+## Clarifications
+- **2026-11-10, first implementation.** The CSP names three policies, not two: Lit (chosen
+  after this ADR, in ADR-0019) creates `lit-html` as soon as it loads, so a list without it
+  stops the app from starting. ADR-0019's spike didn't catch this because its CSP had
+  `require-trusted-types-for` but no `trusted-types` list. GFM details that the CSP and the
+  sanitizer settings require: table alignment is rendered as `pm-align-*` classes, since
+  inline `style` is stripped; task-list markers are `role="img"` elements named "Done" or
+  "To do", since form elements are stripped. YAML front matter is shown as a code block.

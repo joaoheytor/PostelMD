@@ -45,8 +45,8 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   | Extism on `tetratelabs/wazero` | `plugins` | server | Sandboxed server plugins (ADR-0008) | not before v1.x |
   | CodeMirror 6 (`@codemirror/*`) | `web/src/editor` | web | The editor (ADR-0001); FrankMD's hand-built editor was replaced at great cost (lesson 2) | in use |
   | `@lezer/highlight` | `web/src/editor` | web | CodeMirror's own highlighting tags, used to style Markdown tokens; already a dependency of `@codemirror/language` | in use |
-  | `markdown-it` | `web/src/preview` (Worker) | web | CommonMark + GFM with source maps for scroll sync (ADR-0007 spike) | planned v0.1 |
-  | `dompurify` | `web/src/preview` | web | Proven HTML sanitizer; runs inside the only Trusted Types policy (ADR-0007) | planned v0.1 |
+  | `markdown-it` | `web/src/preview` (Worker) | web | CommonMark + GFM with source maps for scroll sync (ADR-0007 spike) | in use |
+  | `dompurify` | `web/src/preview` | web | Proven HTML sanitizer; runs inside the only Trusted Types policy (ADR-0007) | in use |
   | `lit` | `web/src/ui` | web | Reactive custom elements with no compiler (ADR-0019 spike) | in use |
   | `mermaid` | `web/src/preview` (lazy) | web | Diagrams; loaded only when a `mermaid` block exists (ADR-0007) | planned v0.1 |
   | `gcr.io/distroless/static:nonroot` | image | base image | No shell or package manager in the runtime image (ADR-0009) | planned v0.1 |

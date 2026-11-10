@@ -14,6 +14,12 @@ var testUI = fstest.MapFS{
 	"assets/app-1a2b.js": {Data: []byte("export {}")},
 }
 
+// appCSP is ADR-0007's policy: scripts, styles and Workers only from our origin, no inline
+// script or style, and Trusted Types with exactly these policy names.
+const appCSP = "default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; " +
+	"img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; " +
+	"require-trusted-types-for 'script'; trusted-types postelmd-preview dompurify lit-html"
+
 func TestWebApp(t *testing.T) {
 	srv, svc := newServer(t, false)
 	if resp, _ := do(t, srv, call{method: "GET", path: "/setup"}); resp.StatusCode != 200 {
@@ -25,8 +31,8 @@ func TestWebApp(t *testing.T) {
 		if resp.StatusCode != 200 || !strings.Contains(body, "<title>PostelMD") || resp.Header.Get("Cache-Control") != "no-cache" {
 			t.Errorf("GET %s = %d %q, cache %q; want index.html, revalidated", path, resp.StatusCode, body, resp.Header.Get("Cache-Control"))
 		}
-		if !strings.Contains(resp.Header.Get("Content-Security-Policy"), "default-src 'self'") {
-			t.Errorf("GET %s without the CSP", path)
+		if got := resp.Header.Get("Content-Security-Policy"); got != appCSP {
+			t.Errorf("GET %s: CSP %q, want %q", path, got, appCSP)
 		}
 	}
 	resp, body := do(t, srv, call{method: "GET", path: "/assets/app-1a2b.js"})

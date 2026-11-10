@@ -2,9 +2,11 @@ import { html, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import type { DocState } from "../core/document";
 import { type Disposable, DisposableStore } from "../core/disposable";
-import type { OpenNote, Workspace } from "../core/workspace";
+import { parent } from "../core/tree";
+import { isNote, type OpenNote, type Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
-import { LightElement, listen, StoreController } from "./base";
+import { Preview } from "../preview/pane";
+import { LightElement, listen, openNote, StoreController } from "./base";
 import "./history";
 import "./move";
 
@@ -17,29 +19,49 @@ const statusText: Record<DocState["status"], string> = {
   gone: "Not saved: the note is gone",
 };
 
+/** Whether the preview is shown, remembered in this browser only. */
+const previewKey = "postelmd.preview";
+
+function previewPref(): boolean {
+  try {
+    return localStorage.getItem(previewKey) === "on";
+  } catch {
+    return false; // storage blocked: start hidden
+  }
+}
+
 /**
  * The open note: CodeMirror in its own shadow root (ADR-0019), the save status, and the
- * conflict and deleted-note banners. Edits save on a debounce, on blur, on Ctrl+S, and when
- * the tab is hidden.
+ * conflict and deleted-note banners, and the live preview beside it. Edits save on a
+ * debounce, on blur, on Ctrl+S, and when the tab is hidden.
  */
 export class NoteEditor extends LightElement {
-  static override properties = { workspace: { attribute: false }, moving: { state: true }, browsing: { state: true } };
+  static override properties = {
+    workspace: { attribute: false },
+    moving: { state: true },
+    browsing: { state: true },
+    previewing: { state: true },
+  };
   declare workspace: Workspace;
   /** The rename-or-move form is open. */
   declare moving: boolean;
   /** The history dialog is open. */
   declare browsing: boolean;
+  /** The preview is shown. While it is hidden, nothing renders it (CLAUDE.md rule 9). */
+  declare previewing: boolean;
 
   private readonly ws = new StoreController(this, () => this.workspace?.state);
   private editor: Editor | undefined;
   private mounted: { note: OpenNote; host: Element } | undefined;
   private docSub: Disposable | undefined;
+  private preview: { pane: Preview; el: Element } | undefined;
   private listeners: DisposableStore | undefined;
 
   constructor() {
     super();
     this.moving = false;
     this.browsing = false;
+    this.previewing = previewPref();
   }
 
   override connectedCallback(): void {
@@ -72,6 +94,7 @@ export class NoteEditor extends LightElement {
   }
 
   private unmount(): void {
+    this.closePreview();
     this.docSub?.dispose();
     this.editor?.dispose();
     this.docSub = this.editor = this.mounted = undefined;
@@ -83,19 +106,66 @@ export class NoteEditor extends LightElement {
    * element, since an element's shadow root can't be replaced.
    */
   protected override updated(): void {
+    this.mountEditor();
+    this.mountPreview();
+  }
+
+  private mountEditor(): void {
     const note = this.ws.value?.open;
     const host = this.querySelector(".pm-editor-host");
     if (note === this.mounted?.note && host === this.mounted?.host) return;
     this.unmount();
     if (!note || !host) return;
-    const editor = mountEditor(host.attachShadow({ mode: "open" }), note.initial, `Text of ${note.doc.path}`, () =>
-      note.doc.edit(),
+    const editor = mountEditor(
+      host.attachShadow({ mode: "open" }),
+      note.initial,
+      `Text of ${note.doc.path}`,
+      () => note.doc.edit(),
+      () => this.preview?.pane.update(() => editor.text()),
     );
     this.editor = editor;
     this.mounted = { note, host };
     this.workspace.reader = () => editor.text();
     this.docSub = note.doc.state.subscribe(() => this.requestUpdate());
     editor.focus();
+  }
+
+  /** Starts the preview when it is shown (or its element changed), and stops it when hidden. */
+  private mountPreview(): void {
+    const el = this.previewing ? this.querySelector<HTMLElement>(".pm-preview") : null;
+    if (el === (this.preview?.el ?? null)) return;
+    this.closePreview();
+    if (!el || !this.editor) return;
+    const pane = new Preview(el);
+    this.preview = { pane, el };
+    pane.show(this.editor.text());
+  }
+
+  private closePreview(): void {
+    this.preview?.pane.dispose();
+    this.preview = undefined;
+  }
+
+  private togglePreview(): void {
+    this.previewing = !this.previewing;
+    try {
+      localStorage.setItem(previewKey, this.previewing ? "on" : "off");
+    } catch {
+      // storage blocked: the choice lasts until reload
+    }
+  }
+
+  /**
+   * Links in the preview never navigate away from the editor: a relative link to a note
+   * opens it; other relative links do nothing. External links open in a new tab (sanitize.ts).
+   */
+  private followLink(e: MouseEvent, from: string): void {
+    const href = (e.target as Element).closest("a")?.getAttribute("href");
+    if (href === null || href === undefined || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+    e.preventDefault();
+    const url = new URL(href, `https://vault.invalid/${parent(from) ? `${parent(from)}/` : ""}`);
+    const path = decodeURIComponent(url.pathname.slice(1));
+    if (url.host === "vault.invalid" && isNote(path)) void openNote(this.workspace, path);
   }
 
   private takeTheirs(note: OpenNote): void {
@@ -116,6 +186,7 @@ export class NoteEditor extends LightElement {
         <span class="pm-editor-status" data-status=${st.status} role="status"
           >${statusText[st.status]}${st.message ? `: ${st.message}` : ""}</span
         >
+        <button type="button" aria-pressed=${this.previewing} @click=${this.togglePreview}>Preview</button>
         <button type="button" @click=${() => (this.browsing = true)}>History</button>
         <button type="button" @click=${() => (this.moving = true)}>Rename or move</button>
         <button type="button" @click=${() => this.trash(note.doc.path)}>Delete</button>
@@ -145,7 +216,19 @@ export class NoteEditor extends LightElement {
             <button type="button" @click=${() => this.workspace.saveAsNew()}>Save it as a new note</button>
           </section>`
         : nothing}
-      ${keyed(note, html`<div class="pm-editor-host" @focusout=${() => void note.doc.flush()}></div>`)}
+      <div class="pm-editor-panes">
+        ${keyed(note, html`<div class="pm-editor-host" @focusout=${() => void note.doc.flush()}></div>`)}
+        ${this.previewing
+          ? keyed(
+              note,
+              html`<section
+                class="pm-preview"
+                aria-label="Preview of ${note.doc.path}"
+                @click=${(e: MouseEvent) => this.followLink(e, note.doc.path)}
+              ></section>`,
+            )
+          : nothing}
+      </div>
     `;
   }
 }
