@@ -9,6 +9,7 @@ import "./finder";
 import "./editor";
 import "./login";
 import "./setup";
+import "./trash";
 import type { FileTree } from "./tree";
 import "./tree";
 
@@ -19,8 +20,11 @@ export class WorkspaceView extends LightElement {
     committing: { state: true },
     listingDrafts: { state: true },
     finding: { state: true },
+    inTrash: { state: true },
   };
   declare app: App;
+  /** The trash dialog is open. */
+  declare inTrash: boolean;
   /** The commit dialog is open. */
   declare committing: boolean;
   /** The unsaved-drafts dialog is open. */
@@ -38,6 +42,7 @@ export class WorkspaceView extends LightElement {
     this.committing = false;
     this.listingDrafts = false;
     this.finding = false;
+    this.inTrash = false;
   }
 
   override connectedCallback(): void {
@@ -86,6 +91,7 @@ export class WorkspaceView extends LightElement {
         ${this.offered.value?.length
           ? html`<button type="button" @click=${() => (this.listingDrafts = true)}>Unsaved drafts (${this.offered.value.length})</button>`
           : nothing}
+        <button type="button" @click=${() => (this.inTrash = true)}>Trash</button>
         <button type="button" @click=${() => (this.committing = true)}>Commit…</button>
         <button type="button" @click=${() => this.app.logout()}>Log out</button>
       </header>
@@ -113,6 +119,7 @@ export class WorkspaceView extends LightElement {
         : nothing}
       ${this.finding ? html`<pm-finder .workspace=${w} .onClose=${() => (this.finding = false)}></pm-finder>` : nothing}
       ${this.listingDrafts ? html`<pm-drafts .workspace=${w} .onClose=${() => (this.listingDrafts = false)}></pm-drafts>` : nothing}
+      ${this.inTrash ? html`<pm-trash .workspace=${w} .onClose=${() => (this.inTrash = false)}></pm-trash>` : nothing}
     `;
   }
 }

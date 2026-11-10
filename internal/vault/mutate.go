@@ -162,7 +162,7 @@ func (v *Vault) Delete(ctx context.Context, p string) (string, error) {
 // newTrashFolder makes a new, durable folder in the trash, named after the time of the
 // delete ("-1", "-2"… after it if one exists), and returns its name.
 func (v *Vault) newTrashFolder() (string, error) {
-	stamp := v.now().UTC().Format("20060102T150405.000000000Z")
+	stamp := v.now().UTC().Format(stampLayout)
 	for i := 0; ; i++ {
 		folder := stamp
 		if i > 0 {

@@ -62,6 +62,7 @@ the remote and push rows, and the plugin rows don't apply yet. The MVP adds:
 | S4 | Account takeover via an OIDC email match | No automatic linking by email; linking requires a fresh login | 0018 |
 | T1 | Path traversal or symlink escape | `os.Root` per vault; symlinks not followed; fuzz tests | 0006 |
 | T2 | Access to `.git/`, `.postelmd/` or the allow-list through the API, or reserved paths arriving in a pulled commit | `store.IsReserved` on every operation, including watcher, commit-scan, staging and pull; 404; a pull with a reserved path is refused; test matrix | 0006, 0016 |
+| T2a | The trash restore used to reach into or out of `.postelmd-trash` (a path, `..`, a symlink), or to put an item in a reserved place | The client names an item only by a trash entry's name, looked up among the trash's direct children; symlinks (including a symlinked trash folder) and entries no delete makes are never listed or restored (410); the destination gets a move's checks (`IsReserved`, no overwrite; 404) | 0024, 0006 |
 | T3 | Lost update between PostelMD clients | ID + generation + hash ETag; locks; atomic rename | 0003 |
 | T4 | ABA: an old autosave applied to a recreated file | File IDs + tombstones → 410/412 | 0003 |
 | T5 | Overwrite by a race with an external writer | Re-`stat` before rename; detection metric; maintenance mode. The lost bytes are neither detectable nor recoverable (ADR-0003 §1). **Residual, documented.** | 0003 |

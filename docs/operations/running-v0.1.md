@@ -228,8 +228,15 @@ Deleting moves the note or folder into `~/postelmd/vaults/notes/.postelmd-trash/
 folder named after the UTC time of the delete, under its own name:
 `20261110T143005.123456789Z/runbook.md` (a second delete in the same instant uses a folder
 ending in `-1`). Deletes made before this layout are named `20261110T143005.123456789Z-runbook.md`
-instead. The trash doesn't record the folder the note was in. There's no trash view in v0.1.
-To restore, move it back under a name that doesn't exist, then reload the page:
+instead. The trash doesn't record the folder the note was in.
+
+In the web app, **Trash** (at the top) lists what was deleted, newest first; **Restore** asks
+where to put the item (the vault root under its own name by default; `ops/` keeps the name in
+the `ops` folder) and never overwrites: if the name is taken, type another one
+([ADR-0024](../adr/0024-restore-from-the-trash.md)).
+
+Without the web app, move it back by hand under a name that doesn't exist, then reload the
+page:
 
 ```sh
 ls -lt ~/postelmd/vaults/notes/.postelmd-trash/*/ | head -20
@@ -237,8 +244,8 @@ mv -n ~/postelmd/vaults/notes/.postelmd-trash/20261110T143005.123456789Z/runbook
   ~/postelmd/vaults/notes/runbook.md
 ```
 
-An empty time-named folder in the trash is what a crash during a delete leaves: the note
-is still where it was, and the folder can be removed. The trash is never emptied
+An empty time-named folder in the trash is what a crash during a delete or a restore leaves:
+the note is wherever the trash view and the tree show it, and the folder can be removed. The trash is never emptied
 automatically. Delete old entries by hand when you're sure.
 
 ## Disk full, or permission errors

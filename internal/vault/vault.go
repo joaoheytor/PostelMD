@@ -2,7 +2,8 @@
 // moves and trash deletes on one vault, serialized by one mutex. Every mutation's one data-bearing
 // step is a single atomic rename, so none needs an intent (CLAUDE.md rule 14). A delete first makes the
 // empty trash folder it renames into: that step holds no data, so a crash after it needs no
-// recovery (ADR-0022's table). All file I/O goes through
+// recovery (ADR-0022's table); a restore from the trash removes that folder after its rename,
+// and a crash between them leaves the same empty folder (ADR-0024). All file I/O goes through
 // internal/store/fs, and every path a caller supplies is checked with fs.IsReserved.
 package vault
 

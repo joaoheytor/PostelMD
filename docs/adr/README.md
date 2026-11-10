@@ -45,3 +45,4 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0021](0021-mermaid-in-a-sandboxed-frame.md) | Mermaid renders in a sandboxed frame, shown as images | Accepted |
 | [0022](0022-mvp-trash-layout.md) | The MVP trash keeps each item's name in a folder of its own | Accepted |
 | [0023](0023-a-draft-key-per-note-session.md) | A draft key per note session | Accepted |
+| [0024](0024-restore-from-the-trash.md) | Restore from the trash | Accepted |

@@ -34,7 +34,8 @@ export function encodePath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
-async function request(method: string, url: string, init: RequestInit = {}): Promise<Response> {
+/** One API request; the building block of the calls here and in trash-api.ts. */
+export async function request(method: string, url: string, init: RequestInit = {}): Promise<Response> {
   let resp: Response;
   try {
     resp = await fetch(url, { ...init, method, credentials: "same-origin", cache: "no-store" });
@@ -45,7 +46,7 @@ async function request(method: string, url: string, init: RequestInit = {}): Pro
   return resp;
 }
 
-function json(body: unknown): RequestInit {
+export function json(body: unknown): RequestInit {
   return { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
@@ -69,7 +70,8 @@ async function fail(resp: Response): Promise<never> {
   throw await errorOf(resp);
 }
 
-async function ok(resp: Response): Promise<Response> {
+/** The response if it succeeded; otherwise throws its ApiError. */
+export async function ok(resp: Response): Promise<Response> {
   return resp.ok ? resp : fail(resp);
 }
 
