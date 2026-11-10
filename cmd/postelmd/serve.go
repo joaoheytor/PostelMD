@@ -17,6 +17,7 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/store/layout"
 	"github.com/joaoheytor/PostelMD/internal/store/lock"
 	"github.com/joaoheytor/PostelMD/internal/vault"
+	"github.com/joaoheytor/PostelMD/web"
 )
 
 // shutdownDeadline bounds a graceful stop (architecture §8; Docker's --stop-timeout is 60).
@@ -73,7 +74,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 			"(valid %s): %s\n\n", auth.SetupTokenTTL, tok)
 	}
 	srv := &http.Server{
-		Handler:           pmhttp.NewRouter(svc, v, log),
+		Handler:           pmhttp.NewRouter(svc, v, web.Dist(), log),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

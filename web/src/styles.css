@@ -1,0 +1,128 @@
+/* One global stylesheet for the light-DOM shell (ADR-0019). Classes are prefixed with
+   their component's name. The editor's colours read the same custom properties. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1d1f23;
+  --muted: #5f6672;
+  --line: #d9dde3;
+  --side: #f5f6f8;
+  --accent: #1f5fbf;
+  --link: #1f5fbf;
+  --code: #8a3f00;
+  --selection: #c9dcff;
+  --danger: #b3261e;
+  --warn-bg: #fff4d6;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191d;
+    --fg: #e4e6ea;
+    --muted: #9aa1ad;
+    --line: #30343b;
+    --side: #1e2126;
+    --accent: #7fb0ff;
+    --link: #7fb0ff;
+    --code: #f0b37e;
+    --selection: #2c4a7a;
+    --danger: #ff8a80;
+    --warn-bg: #3a3220;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); }
+button, input { font: inherit; }
+button {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--side);
+  color: var(--fg);
+  cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.pm-loading, .pm-editor-empty { padding: 32px; color: var(--muted); }
+.pm-error { color: var(--danger); }
+
+/* Login and setup */
+pm-login, pm-setup { display: block; }
+.pm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 380px;
+  margin: 12vh auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.pm-card h1 { margin: 0; font-size: 1.4rem; }
+.pm-card p { margin: 0; color: var(--muted); }
+.pm-card label { display: flex; flex-direction: column; gap: 4px; }
+.pm-card fieldset { display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--line); border-radius: 6px; }
+.pm-reauth { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); padding: 0; }
+.pm-reauth .pm-card { margin: 0; border: 0; }
+
+/* Workspace */
+pm-app, pm-workspace { display: flex; flex-direction: column; height: 100%; }
+.pm-top { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.pm-top-name { font-weight: 700; }
+.pm-top-error { margin: 0; padding: 6px 12px; }
+.pm-main { display: flex; flex: 1; min-height: 0; }
+.pm-side { width: 280px; flex-shrink: 0; overflow: auto; padding: 8px; background: var(--side); border-right: 1px solid var(--line); }
+.pm-note { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* Tree */
+.pm-tree-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+.pm-tree-create { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.pm-tree-create label { display: flex; flex-direction: column; gap: 4px; width: 100%; font-size: 0.85rem; color: var(--muted); }
+pm-tree ul { list-style: none; margin: 0; padding-left: 14px; }
+pm-tree nav > ul { padding-left: 0; }
+pm-tree li button, .pm-tree-root {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+pm-tree li button:hover, .pm-tree-root:hover { background: var(--line); }
+.pm-tree-root { font-weight: 600; }
+.pm-tree-root[aria-pressed="true"] { color: var(--accent); }
+.pm-tree-folder::before { content: "▸ "; color: var(--muted); }
+.pm-tree-folder[aria-expanded="true"]::before { content: "▾ "; }
+.pm-tree-note[aria-current="page"] { background: var(--selection); }
+.pm-tree-other { display: block; padding: 3px 6px; color: var(--muted); }
+.pm-tree-loading, .pm-tree-empty { margin: 2px 6px; color: var(--muted); font-size: 0.85rem; }
+
+/* Editor */
+pm-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.pm-editor-bar { display: flex; align-items: center; gap: 12px; padding: 6px 16px; border-bottom: 1px solid var(--line); }
+.pm-editor-path { flex: 1; margin: 0; font-size: 1rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-editor-status { color: var(--muted); font-size: 0.85rem; }
+.pm-editor-status[data-status="error"],
+.pm-editor-status[data-status="conflict"],
+.pm-editor-status[data-status="gone"] { color: var(--danger); }
+.pm-editor-host { flex: 1; min-height: 0; }
+.pm-banner { margin: 8px 16px; padding: 12px 16px; border-radius: 8px; background: var(--warn-bg); }
+.pm-banner h3 { margin: 0 0 6px; font-size: 1rem; }
+.pm-banner p { margin: 0 0 8px; }
+.pm-banner pre { max-height: 30vh; overflow: auto; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; }

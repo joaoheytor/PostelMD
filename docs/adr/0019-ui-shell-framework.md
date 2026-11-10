@@ -1,6 +1,6 @@
 # ADR-0019: UI shell framework: Lit, light DOM, editor in a shadow root
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-09
 
 ## Context
@@ -85,7 +85,8 @@ uses constructable stylesheets (`adoptedStyleSheets`) instead. CSP allows those,
     class names instead.
 - Follow-ups:
   - The CodeMirror 6 + Worker spike (roadmap v0.0) builds on the shadow-root editor host.
-  - The a11y scan tool, and its dependency rationale, come with the first UI PR.
+  - The a11y scan tool is axe-core through `@axe-core/playwright`: the Playwright smoke tests
+    fail on any serious or critical violation. It is test tooling and doesn't ship.
   - A tree with 10k notes needs virtualization whichever framework renders it. The spike's
     2,000 items took about 150 ms to mount.
 

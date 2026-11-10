@@ -1,6 +1,10 @@
-// Placeholder entry point. The UI shell is Lit (ADR-0019) and arrives with the first UI work;
-// CodeMirror 6 arrives with the editor work in v0.1.
-const app = document.querySelector<HTMLElement>("#app");
-if (app) {
-  app.textContent = "PostelMD";
-}
+import { App } from "./core/app";
+import "./styles.css";
+import "./ui/app";
+import type { AppView } from "./ui/app";
+
+const app = new App();
+const view = document.createElement("pm-app") as AppView;
+view.app = app;
+document.querySelector("#app")?.replaceWith(view);
+void app.boot();

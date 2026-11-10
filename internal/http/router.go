@@ -1,6 +1,7 @@
 package http
 
 import (
+	"io/fs"
 	"log/slog"
 	stdhttp "net/http"
 	"strings"
@@ -13,7 +14,9 @@ import (
 //   - cross-origin protection: a non-safe request from another origin is refused (403),
 //     so a site the user visits can't drive the API with their cookie;
 //   - the pre-setup gate (ADR-0009): until setup, only setup and health are served.
-func NewRouter(a Auth, v Vault, log *slog.Logger) stdhttp.Handler {
+//
+// ui is the built web app, served outside /api/ (nil when the binary has no UI).
+func NewRouter(a Auth, v Vault, ui fs.FS, log *slog.Logger) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", ok)
@@ -31,6 +34,7 @@ func NewRouter(a Auth, v Vault, log *slog.Logger) stdhttp.Handler {
 	mux.HandleFunc("/api/", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeError(w, stdhttp.StatusNotFound, "not found")
 	})
+	mux.Handle("/", webApp(ui))
 
 	return securityHeaders(stdhttp.NewCrossOriginProtection().Handler(setupGate(a, mux)))
 }
