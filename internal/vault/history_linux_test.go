@@ -20,6 +20,9 @@ func gitCLI(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null") // the developer's own git config stays out
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	// And the default global excludes file, $XDG_CONFIG_HOME/git/ignore or ~/.config/git/ignore.
+	t.Setenv("XDG_CONFIG_HOME", "/nonexistent")
+	t.Setenv("HOME", "/nonexistent")
 	ident := []string{"-c", "user.name=Host", "-c", "user.email=host@example.invalid", "-C", dir}
 	out, err := exec.Command("git", append(ident, args...)...).CombinedOutput()
 	if err != nil {

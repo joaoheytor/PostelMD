@@ -172,6 +172,9 @@ func (a *GitAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
 		writeError(w, stdhttp.StatusConflict, "the branch moved during the commit, retry")
 	case errors.Is(err, vault.ErrDetached):
 		writeError(w, stdhttp.StatusConflict, "git HEAD is detached; check out a branch on the host")
+	case errors.Is(err, vault.ErrUnsafeExclude):
+		writeError(w, stdhttp.StatusConflict, ".git/info/exclude is a symlink or not a regular file; "+
+			"PostelMD can't read it safely: replace it with a regular file on the host")
 	default:
 		a.notes.fail(w, r, err)
 	}

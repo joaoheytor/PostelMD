@@ -11,6 +11,15 @@ fail() {
 	exit 1
 }
 
+# smoke_workdir makes the test's work directory, which holds the bind-mounted data
+# directories. It lives under SMOKE_TMPDIR (default ~/.cache), not /tmp: /tmp can be tmpfs
+# (it is on WSL), and the bind mounts must be on a real disk filesystem, as in the README.
+smoke_workdir() {
+	parent=${SMOKE_TMPDIR:-$HOME/.cache}
+	mkdir -p "$parent"
+	mktemp -d "$parent/pm-smoke.XXXXXX"
+}
+
 # wait_healthy waits for Docker's own health check, which runs /postelmd healthcheck.
 wait_healthy() {
 	i=0
@@ -24,7 +33,7 @@ wait_healthy() {
 api() { # api METHOD PATH [curl args...]: prints the body, then the status on its own line
 	method=$1 path=$2
 	shift 2
-	curl -sS -b "$jar" -c "$jar" -X "$method" -w '\n%{http_code}' "$@" "$base$path"
+	curl -sS --max-time 15 -b "$jar" -c "$jar" -X "$method" -w '\n%{http_code}' "$@" "$base$path"
 }
 
 body() { # body RESPONSE: the response without its status line

@@ -19,15 +19,17 @@ import (
 
 // Config is the server's configuration.
 type Config struct {
-	DataDir        string // POSTELMD_DATA_DIR, --data; default /data. Not in config.yaml: it holds the file
-	Listen         string // listen, POSTELMD_LISTEN, --listen; default :8080
-	AllowNetworkFS bool   // allow_network_fs, POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
+	DataDir            string // POSTELMD_DATA_DIR, --data; default /data. Not in config.yaml: it holds the file
+	Listen             string // listen, POSTELMD_LISTEN, --listen; default :8080
+	AllowNetworkFS     bool   // allow_network_fs, POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
+	AllowEphemeralData bool   // allow_ephemeral_data, POSTELMD_ALLOW_EPHEMERAL_DATA: start with no volume
 }
 
 // file is config.yaml. Pointers tell a setting that's absent from one set to its zero value.
 type file struct {
-	Listen         *string `yaml:"listen"`
-	AllowNetworkFS *bool   `yaml:"allow_network_fs"`
+	Listen             *string `yaml:"listen"`
+	AllowNetworkFS     *bool   `yaml:"allow_network_fs"`
+	AllowEphemeralData *bool   `yaml:"allow_ephemeral_data"`
 }
 
 // Load reads flags from args, the environment, then the data directory's config.yaml.
@@ -67,12 +69,17 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	if v := getenv("POSTELMD_LISTEN"); v != "" {
 		c.Listen = v
 	}
-	if v := getenv("POSTELMD_ALLOW_NETWORK_FS"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return c, fmt.Errorf("config: POSTELMD_ALLOW_NETWORK_FS=%q isn't a boolean", v)
+	for name, dst := range map[string]*bool{
+		"POSTELMD_ALLOW_NETWORK_FS":     &c.AllowNetworkFS,
+		"POSTELMD_ALLOW_EPHEMERAL_DATA": &c.AllowEphemeralData,
+	} {
+		if v := getenv(name); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return c, fmt.Errorf("config: %s=%q isn't a boolean", name, v)
+			}
+			*dst = b
 		}
-		c.AllowNetworkFS = b
 	}
 	if set["listen"] {
 		c.Listen = flagListen
@@ -106,6 +113,9 @@ func (c *Config) readFile() error {
 	}
 	if f.AllowNetworkFS != nil {
 		c.AllowNetworkFS = *f.AllowNetworkFS
+	}
+	if f.AllowEphemeralData != nil {
+		c.AllowEphemeralData = *f.AllowEphemeralData
 	}
 	return nil
 }

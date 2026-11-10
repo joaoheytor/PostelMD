@@ -23,17 +23,22 @@ import (
 // shutdownDeadline bounds a graceful stop (architecture §8; Docker's --stop-timeout is 60).
 const shutdownDeadline = 45 * time.Second
 
-// serve runs the server until ctx ends. The startup order is: layout and the state
-// filesystem check → instance lock → auth state → vault (temp sweep, rename probe) → the
-// vault's git repository (adopted, or created empty) → HTTP.
+// layoutOptions are the operator's overrides of the data directory checks.
+func layoutOptions(cfg config.Config) layout.Options {
+	return layout.Options{AllowNetworkFS: cfg.AllowNetworkFS, AllowEphemeralData: cfg.AllowEphemeralData}
+}
+
+// serve runs the server until ctx ends. The startup order is: layout and the filesystem
+// checks of the state and vault directories → instance lock → auth state → vault (temp
+// sweep, rename probe) → the vault's git repository (adopted, or created empty) → HTTP.
 // ready, if set, gets the listening address.
 func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(addr string)) error {
 	log := slog.New(slog.NewJSONHandler(stdout, nil))
-	paths, durability, err := layout.Prepare(cfg.DataDir, cfg.AllowNetworkFS)
+	paths, durability, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg))
 	if err != nil {
 		return err
 	}
-	if durability == layout.Ephemeral {
+	if durability != layout.Persistent {
 		log.Warn("the data directory is not persistent: notes are lost when the container is removed; mount a volume at /data")
 	}
 	lk, err := lock.Acquire(paths.Lock)
@@ -52,6 +57,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = v.Close() }()
+	v.SetLogger(log)
 	created, err := v.EnableGit()
 	if err != nil {
 		return err

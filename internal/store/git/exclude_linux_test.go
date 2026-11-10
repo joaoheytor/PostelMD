@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
@@ -109,6 +110,61 @@ func TestEnsureExcludeSurvivesEveryCrashPoint(t *testing.T) {
 		if completed {
 			return
 		}
+	}
+}
+
+// TestEnsureExcludeKeepsTheMode: the rewritten info/exclude keeps the user's permissions.
+func TestEnsureExcludeKeepsTheMode(t *testing.T) {
+	g, dir := newRepo(t)
+	path := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.EnsureExclude(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o400 {
+		t.Fatalf("mode = %v, %v; want 0400", fi.Mode(), err)
+	}
+}
+
+// TestExcludeNotARegularFile: a symlinked or special info/exclude is never followed or
+// rewritten; Exclude reports ErrExcludeNotRegular so the caller can warn and go on.
+func TestExcludeNotARegularFile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		make func(path string) error
+	}{
+		{"symlink", func(p string) error { return os.Symlink("/dev/null", p) }},
+		{"fifo", func(p string) error { return syscall.Mkfifo(p, 0o600) }},
+		{"directory", func(p string) error { return os.Mkdir(p, 0o700) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, dir := newRepo(t)
+			path := filepath.Join(dir, ".git", "info", "exclude")
+			_ = os.RemoveAll(path)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.make(path); err != nil {
+				t.Fatal(err)
+			}
+			if b, err := g.Exclude(); !errors.Is(err, ErrExcludeNotRegular) || b != nil {
+				t.Fatalf("Exclude = %q, %v; want ErrExcludeNotRegular", b, err)
+			}
+			if err := g.EnsureExclude(); !errors.Is(err, ErrExcludeNotRegular) {
+				t.Fatalf("EnsureExclude = %v; want ErrExcludeNotRegular", err)
+			}
+			if fi, err := os.Lstat(path); err != nil || fi.Mode().IsRegular() {
+				t.Fatalf("info/exclude was replaced: %v, %v", fi, err)
+			}
+		})
 	}
 }
 

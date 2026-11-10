@@ -74,9 +74,10 @@ func (v *Vault) EnableGit() (bool, error) {
 	if err != nil {
 		return created, err
 	}
-	if err := repo.EnsureExclude(); err != nil { // an adopted repository may lack them
-		_ = repo.Close()
-		return created, err
+	// An adopted repository may lack the reserved folders in info/exclude. Best effort: a
+	// read-only or symlinked one only means the user's own git may list the trash.
+	if err := repo.EnsureExclude(); err != nil {
+		v.log.Warn("couldn't add PostelMD's folders to .git/info/exclude", "err", err)
 	}
 	v.git = repo
 	return created, nil
@@ -111,14 +112,10 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 	if err != nil {
 		return nil, head, nil, err
 	}
-	exclude, err := v.git.Exclude()
-	if err != nil {
-		return nil, head, nil, err
-	}
 	st := &Status{Branch: branch, Changes: []Change{}}
 	content := map[string][]byte{}
 	seen := map[string]bool{}
-	err = v.walkForCommit(exclude, committed, func(p string, size int64, ignored bool) error {
+	err = v.walkForCommit(committed, func(p string, size int64, ignored bool) error {
 		old, tracked := committed[p]
 		if ignored && !tracked {
 			return nil // ignored and untracked: not a change; a tracked file stays tracked

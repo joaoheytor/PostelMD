@@ -52,6 +52,18 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - An optional settings file, `.postelmd/config.yaml` in the data directory. Flags and
   `POSTELMD_*` environment variables still win over it. An unknown key stops the server with
   its name, so a typo is never silently ignored.
+- One log line for every write to the API (saves, creates, moves, deletes, commits, logins):
+  the method, the route, the status and how long it took, never the note's path or content.
+  Conflicts (412) and server errors can be counted from the logs.
+- The server refuses to start when no volume is mounted at `/data`, since the next
+  `docker rm` (every upgrade) would delete everything. It says how to add one;
+  `POSTELMD_ALLOW_EPHEMERAL_DATA=true` (or `allow_ephemeral_data` in `config.yaml`) starts it
+  anyway for a throwaway try.
+- The notes folder's filesystem is checked like the data directory's: an adopted folder on a
+  Windows path (9p) or a FUSE share (such as Docker Desktop's on macOS) is refused, with the
+  fix.
+- A runbook for running v0.1: backups, a restore drill, logs, upgrade and rollback, and
+  recovering from a lost password, a git lock or a deleted note.
 
 ### Changed
 - The conflict banner shows a line diff between your text and the other version, and says
@@ -79,4 +91,7 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   `.git/info/exclude` ignore (such as `.env` or `node_modules/`), as `git add -A` does;
   files already in the history stay tracked. An existing repository you adopt also gets
   PostelMD's trash folder added to `.git/info/exclude`, so your own `git add -A` no longer
-  commits deleted notes.
+  commits deleted notes. Patterns are matched exactly as git matches them, including
+  `!` re-includes, `**`, character classes and `core.ignorecase`. If
+  `.git/info/exclude` is a symlink, commits stop with a message asking you to replace it
+  with a regular file, rather than skip the patterns it holds.
