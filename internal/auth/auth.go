@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -28,11 +29,26 @@ var (
 	ErrBadProfile   = errors.New("auth: the name and email must be set, without control characters")
 )
 
-// WaitError: this source must wait before trying a password again.
-type WaitError struct{ Wait time.Duration }
+// WaitError: this source must wait before trying a password again. Checked is set when this
+// attempt's password was checked and wrong (it is then also ErrBadPassword); otherwise the
+// attempt was refused unchecked.
+type WaitError struct {
+	Wait    time.Duration
+	Checked bool
+}
 
 func (e *WaitError) Error() string {
+	if e.Checked {
+		return fmt.Sprintf("auth: wrong password, retry in %s", e.Wait)
+	}
 	return fmt.Sprintf("auth: too many attempts, retry in %s", e.Wait)
+}
+
+func (e *WaitError) Unwrap() error {
+	if e.Checked {
+		return ErrBadPassword
+	}
+	return nil
 }
 
 // Service is the single user's authentication.
@@ -43,7 +59,8 @@ type Service struct {
 	sess  *sessions
 	bo    *backoff
 
-	hashMu sync.Mutex // one argon2id at a time: each takes 64 MB
+	hashMu sync.Mutex   // one argon2id at a time: each takes 64 MB
+	hashes atomic.Int64 // argon2id runs, so tests can tell which requests cost one
 
 	ownsRoot bool // opened by OpenDir; closed by Close
 
@@ -121,6 +138,11 @@ func (s *Service) NewSetupToken() (string, error) {
 func (s *Service) CheckSetupToken(ctx context.Context, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.checkToken(ctx, token)
+}
+
+// checkToken is CheckSetupToken with s.mu held.
+func (s *Service) checkToken(ctx context.Context, token string) error {
 	if s.cred != nil {
 		return ErrAlreadySetUp
 	}
@@ -133,8 +155,13 @@ func (s *Service) CheckSetupToken(ctx context.Context, token string) error {
 }
 
 // Setup sets the password and the git author with the setup token, and returns a session.
+// The token is checked before the 64 MiB hash, so the setup route, which stays open, can't
+// be used to queue hashes, and again after it, as a parallel setup may have finished.
 func (s *Service) Setup(ctx context.Context, token, password, name, email string) (string, error) {
 	if err := checkProfile(name, email); err != nil {
+		return "", err
+	}
+	if err := s.CheckSetupToken(ctx, token); err != nil {
 		return "", err
 	}
 	hash, err := s.hash(password)
@@ -143,13 +170,8 @@ func (s *Service) Setup(ctx context.Context, token, password, name, email string
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cred != nil {
-		return "", ErrAlreadySetUp
-	}
-	if s.setupToken == "" || !s.now().Before(s.setupExpires) ||
-		subtle.ConstantTimeCompare([]byte(token), []byte(s.setupToken)) != 1 {
-		s.audit.Record(ctx, "setup.rejected")
-		return "", ErrBadToken
+	if err := s.checkToken(ctx, token); err != nil {
+		return "", err
 	}
 	c := &credential{PasswordHash: hash, Epoch: 1, Name: name, Email: email}
 	if err := saveCredential(s.root, c); err != nil {
@@ -226,9 +248,8 @@ func (s *Service) Author() (name, email string) {
 
 // verify checks a password under the per-IP backoff and returns the current epoch.
 func (s *Service) verify(ctx context.Context, ip, password string) (uint64, error) {
-	if d := s.bo.wait(ip); d > 0 {
-		s.audit.Record(ctx, "login.throttled", slog.String("ip", ip))
-		return 0, &WaitError{Wait: d}
+	if err := s.throttled(ctx, ip); err != nil {
+		return 0, err
 	}
 	s.mu.Lock()
 	cred := s.cred
@@ -237,23 +258,49 @@ func (s *Service) verify(ctx context.Context, ip, password string) (uint64, erro
 		return 0, ErrNotSetUp
 	}
 	s.hashMu.Lock()
+	defer s.hashMu.Unlock()
+	// Check again: parallel attempts all passed the first check while earlier ones queued
+	// here, and their failures since then count. The outcome is recorded before the next
+	// attempt may hash. A request that gave up while it waited doesn't cost a hash.
+	if err := s.throttled(ctx, ip); err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.hashes.Add(1)
 	ok, err := VerifyPassword(cred.PasswordHash, password)
-	s.hashMu.Unlock()
 	if err != nil {
 		return 0, err
 	}
 	if !ok {
 		s.bo.fail(ip)
 		s.audit.Record(ctx, "login.failed", slog.String("ip", ip))
+		if d := s.bo.wait(ip); d > 0 {
+			return 0, &WaitError{Wait: d, Checked: true}
+		}
 		return 0, ErrBadPassword
 	}
 	s.bo.success(ip)
 	return cred.Epoch, nil
 }
 
+// throttled is a WaitError if ip must wait before its next attempt.
+func (s *Service) throttled(ctx context.Context, ip string) error {
+	if d := s.bo.wait(ip); d > 0 {
+		s.audit.Record(ctx, "login.throttled", slog.String("ip", ip))
+		return &WaitError{Wait: d}
+	}
+	return nil
+}
+
 func (s *Service) hash(password string) (string, error) {
+	if err := CheckPassword(password); err != nil {
+		return "", err
+	}
 	s.hashMu.Lock()
 	defer s.hashMu.Unlock()
+	s.hashes.Add(1)
 	return HashPassword(password)
 }
 

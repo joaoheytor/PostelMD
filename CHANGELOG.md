@@ -95,3 +95,22 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   `!` re-includes, `**`, character classes and `core.ignorecase`. If
   `.git/info/exclude` is a symlink, commits stop with a message asking you to replace it
   with a regular file, rather than skip the patterns it holds.
+
+### Security
+- PostelMD answers only to `localhost`, IP addresses and the host names in the new
+  `allowed_hosts` setting (`POSTELMD_ALLOWED_HOSTS`); any other name gets
+  `421 Misdirected Request`, which stops DNS-rebinding attacks from a web page. **If you reach
+  PostelMD by a host name, add it to `allowed_hosts`.**
+- Responses carry `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy`
+  (`same-origin`).
+- The setup page checks the token before hashing the password, and parallel wrong
+  passwords from one address can no longer get past the login backoff: neither can be
+  used to keep the server busy hashing and slow down your own login.
+- The wrong password that starts the login wait now says how long to wait, instead of a
+  plain "Wrong password." the next attempt would contradict.
+- The secret warning no longer freezes the tab on a crafted note: its patterns used to take
+  seconds on some 200 KB inputs, and now take milliseconds.
+- A diagram's SVG is sanitized in the app before it becomes an image, in case the sandboxed
+  renderer is ever compromised.
+- The startup message prints the setup page's full address (for example
+  `http://localhost:8080/setup`), with the token kept out of the URL.

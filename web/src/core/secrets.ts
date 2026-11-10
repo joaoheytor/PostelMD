@@ -19,23 +19,30 @@ interface Rule {
 }
 
 // After the gitleaks rules of the same names, simplified. Each is anchored on a fixed prefix
-// or structure, so ordinary prose doesn't match.
+// or structure, so ordinary prose doesn't match. Every repeat is bounded: an unbounded one
+// that a near-miss can restart at every position makes the scan quadratic, and a crafted
+// note would freeze the tab on paste or save.
 const rules: Rule[] = [
   { name: "AWS access key ID", re: /\b(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b/g },
   { name: "GitHub token", re: /\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\b/g },
   { name: "GitLab token", re: /\bglpat-[A-Za-z0-9_-]{20}\b/g },
-  { name: "Slack token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/g },
-  { name: "Slack webhook", re: /hooks\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9+/]{43,}/g },
+  { name: "Slack token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,256}/g },
+  { name: "Slack webhook", re: /hooks\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9+/]{43,256}/g },
   { name: "Private key", re: /-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----/g },
   { name: "Google API key", re: /\bAIza[0-9A-Za-z_-]{35}\b/g },
   { name: "Stripe key", re: /\b(?:sk|rk)_(?:test|live|prod)_[A-Za-z0-9]{10,99}\b/g },
   { name: "npm token", re: /\bnpm_[A-Za-z0-9]{36}\b/g },
-  { name: "OpenAI key", re: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}T3BlbkFJ[A-Za-z0-9_-]{20,}/g },
-  { name: "Anthropic key", re: /\bsk-ant-[a-z]+\d*-[A-Za-z0-9_-]{80,}/g },
-  { name: "JSON Web Token", re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
-  { name: "Kubernetes client key", re: /\bclient-key-data:\s*[A-Za-z0-9+/=]{20,}/g },
+  { name: "OpenAI key", re: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,256}T3BlbkFJ[A-Za-z0-9_-]{20,256}/g },
+  { name: "Anthropic key", re: /\bsk-ant-[a-z]{1,32}\d{0,8}-[A-Za-z0-9_-]{80,256}/g },
+  {
+    // (?=(…))\1 is an atomic group: a segment never contains ".", so giving characters back
+    // can't help, and not trying makes a run of "eyJ-eyJ-…" linear.
+    name: "JSON Web Token",
+    re: /\beyJ(?=([A-Za-z0-9_-]{10,256}))\1\.eyJ(?=([A-Za-z0-9_-]{10,2048}))\2\.[A-Za-z0-9_-]{10,1024}/g,
+  },
+  { name: "Kubernetes client key", re: /\bclient-key-data:[ \t]{0,16}[A-Za-z0-9+/=]{20,256}/g },
   // user:password@ in a URL; a password starting like a placeholder (<…>, ${…}, $VAR, ***) isn't one.
-  { name: "Password in a URL", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:(?![<$*{])[^\s/@]{3,}@/g },
+  { name: "Password in a URL", re: /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]{1,256}:(?![<$*{])[^\s/@]{3,256}@/g },
 ];
 
 /** Documentation's example values (AWS's AKIA…EXAMPLE keys) aren't secrets. */

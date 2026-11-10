@@ -63,3 +63,40 @@ describe("scanSecrets", () => {
     expect(scanSecrets("# Restart the API\n\nkubectl rollout restart deploy/api -n prod\n")).toEqual([]);
   });
 });
+
+// The scan runs on paste and on every save: a note crafted so a rule restarts a long match at
+// every position must not freeze the tab. Each input is ~200 KB of one rule's near-miss.
+const size = 200_000;
+const fill = (unit: string) => unit.repeat(Math.ceil(size / unit.length));
+const adversarial: [string, string][] = [
+  ["URL scheme", fill("a.")],
+  ["URL user", `a://${fill("b")}`],
+  ["URL password", `a://b:${fill("c")}`],
+  ["URL users", fill("a://b:c")],
+  ["AWS", fill("AKIA")],
+  ["GitHub", fill("ghp_")],
+  ["GitHub PAT", fill("github_pat_")],
+  ["GitLab", fill("glpat-")],
+  ["Slack", fill("xoxb-")],
+  ["Slack webhook", fill("hooks.slack.com/services/")],
+  ["private key", fill("-----BEGIN ")],
+  ["Google", fill("AIza-")],
+  ["Stripe", fill("sk_test_")],
+  ["npm", fill("npm_")],
+  ["OpenAI", fill("sk-")],
+  ["OpenAI project", fill("sk-proj-")],
+  ["Anthropic", fill("sk-ant-a")],
+  ["Anthropic dashes", fill("sk-ant-a-")],
+  ["JWT", fill("eyJ-")],
+  ["JWT segments", fill("eyJaaaaaaaaaaa.")],
+  ["Kubernetes", fill("client-key-data: ")],
+  ["Kubernetes spaces", `client-key-data:${fill(" ")}`],
+];
+
+describe("scanSecrets on hostile input", () => {
+  it.each(adversarial)("stays linear on %s", (_, text) => {
+    const start = performance.now();
+    scanSecrets(text);
+    expect(performance.now() - start).toBeLessThan(200);
+  });
+});

@@ -89,6 +89,9 @@ func securityHeaders(next stdhttp.Handler) stdhttp.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Content-Security-Policy", csp)
+		// No other origin may hold a window reference to the app, or embed its responses.
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
 }

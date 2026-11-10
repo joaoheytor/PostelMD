@@ -25,12 +25,7 @@ export class LoginForm extends LightElement {
       await this.app.login(fields(form)["password"] ?? "");
       this.error = "";
     } catch (err) {
-      this.error =
-        err instanceof ApiError && err.status === 401
-          ? "Wrong password."
-          : err instanceof ApiError && err.status === 429
-            ? `Too many attempts. Try again in ${Math.ceil(err.retryAfterMs / 1000)} s.`
-            : message(err);
+      this.error = loginError(err);
       form.querySelector("input")?.select();
     } finally {
       this.busy = false;
@@ -51,3 +46,12 @@ export class LoginForm extends LightElement {
   }
 }
 customElements.define("pm-login", LoginForm);
+
+/** What a failed login tells the user. A wrong password can also start the wait (Retry-After). */
+function loginError(err: unknown): string {
+  if (!(err instanceof ApiError)) return message(err);
+  const wait = `Try again in ${Math.ceil(err.retryAfterMs / 1000)} s.`;
+  if (err.status === 401) return err.retryAfterMs > 0 ? `Wrong password. ${wait}` : "Wrong password.";
+  if (err.status === 429) return `Too many attempts. ${wait}`;
+  return message(err);
+}

@@ -105,11 +105,25 @@ func TestServeEndToEnd(t *testing.T) {
 	if strings.Contains(r.out.String(), `"`+m[1]+`"`) {
 		t.Fatal("the setup token appeared in a structured log record")
 	}
+	if !strings.Contains(r.out.String(), " "+r.origin+"/setup ") || strings.Contains(r.out.String(), "/setup?") {
+		t.Fatalf("the setup page's full URL, without the token, wasn't printed:\n%s", r.out.String())
+	}
 	if resp := post(t, r.origin+"/api/v1/setup", `{"token":"`+m[1]+`","password":"correct horse battery","name":"Ada","email":"ada@example.invalid"}`); resp.StatusCode != 201 {
 		t.Fatalf("setup = %d", resp.StatusCode)
 	}
 	if err := healthcheck(r.cfg); err != nil {
 		t.Fatalf("healthcheck: %v", err)
+	}
+	// A name nobody configured is refused (DNS rebinding).
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, r.origin+"/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "rebind.example"
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusMisdirectedRequest {
+		t.Fatalf("a request for an unknown host = %v, %v; want 421", resp, err)
+	} else {
+		_ = resp.Body.Close()
 	}
 
 	// One writer: a second server, or reset-password, on the same data is refused.
@@ -145,6 +159,20 @@ func TestServeEndToEnd(t *testing.T) {
 	}
 	if resp := post(t, again.origin+"/api/v1/session", `{"password":"correct horse battery"}`); resp.StatusCode != 401 {
 		t.Fatalf("login with the old password = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestSetupURL(t *testing.T) {
+	for _, tc := range []struct{ listen, actual, want string }{
+		{":8080", "[::]:8080", "http://localhost:8080/setup"},
+		{"0.0.0.0:8080", "0.0.0.0:8080", "http://localhost:8080/setup"},
+		{"[::]:9000", "[::]:9000", "http://localhost:9000/setup"},
+		{"127.0.0.1:0", "127.0.0.1:41234", "http://127.0.0.1:41234/setup"},
+		{"[::1]:8080", "[::1]:8080", "http://[::1]:8080/setup"},
+	} {
+		if got := setupURL(tc.listen, tc.actual); got != tc.want {
+			t.Errorf("setupURL(%q, %q) = %q, want %q", tc.listen, tc.actual, got, tc.want)
+		}
 	}
 }
 

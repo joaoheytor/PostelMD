@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,6 +114,45 @@ func TestSetup(t *testing.T) {
 	}
 }
 
+// Each argon2id run takes 64 MiB and one at a time is allowed: a request that will be
+// refused anyway must not run one, or anyone can queue them and starve the owner's login.
+func TestSetupChecksBeforeHashing(t *testing.T) {
+	e := newEnv(t)
+	s := e.open(t)
+	tok, _ := s.NewSetupToken()
+	if _, err := s.Setup(ctx, tok+"x", pw, "Ada", "a@b"); !errors.Is(err, ErrBadToken) {
+		t.Fatalf("wrong token = %v", err)
+	}
+	if n := s.hashes.Load(); n != 0 {
+		t.Fatalf("a wrong setup token ran %d hashes, want 0", n)
+	}
+	if _, err := s.Setup(ctx, tok, pw, "Ada", "ada@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Setup(ctx, tok, pw, "Eve", "e@x"); !errors.Is(err, ErrAlreadySetUp) {
+		t.Fatalf("setup after setup = %v", err)
+	}
+	if n := s.hashes.Load(); n != 1 {
+		t.Fatalf("setup ran %d hashes, want 1 (none after setup)", n)
+	}
+}
+
+// Parallel wrong passwords from one IP all pass the backoff check before any of them fails;
+// each must check again once it may hash.
+func TestParallelLoginsKeepTheBackoff(t *testing.T) {
+	e := newEnv(t)
+	s, _ := setUp(t, e)
+	s.hashes.Store(0)
+	var wg sync.WaitGroup
+	for range 4 * freeFailures {
+		wg.Go(func() { _, _ = s.Login(ctx, "198.51.100.1", "wrong password!") })
+	}
+	wg.Wait()
+	if n := s.hashes.Load(); n > freeFailures+1 {
+		t.Fatalf("%d parallel guesses ran %d hashes, want at most %d", 4*freeFailures, n, freeFailures+1)
+	}
+}
+
 func TestLoginAndBackoff(t *testing.T) {
 	e := newEnv(t)
 	s, _ := setUp(t, e)
@@ -124,10 +164,12 @@ func TestLoginAndBackoff(t *testing.T) {
 			t.Fatalf("failure %d = %v", i, err)
 		}
 	}
+	var w *WaitError
 	if _, err := s.Login(ctx, "198.51.100.1", "wrong again!!"); !errors.Is(err, ErrBadPassword) {
 		t.Fatal("the sixth failure should still be checked")
+	} else if !errors.As(err, &w) || w.Wait != time.Second {
+		t.Fatalf("the failure that starts the backoff = %v, want the 1 s wait with it", err)
 	}
-	var w *WaitError
 	if _, err := s.Login(ctx, "198.51.100.1", pw); !errors.As(err, &w) || w.Wait != time.Second {
 		t.Fatalf("right after six failures = %v, want a 1 s wait", err)
 	}
