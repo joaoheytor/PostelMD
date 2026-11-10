@@ -47,6 +47,8 @@ export class Workspace {
   readonly noteDrafts = new Store<Draft[]>([]);
   /** What the last scan of the open note found: it runs on every save and on paste. */
   readonly secrets = new Store<SecretWarning>(noSecrets);
+  /** Counts open() calls, so a slower, earlier one can tell it was superseded. */
+  private opens = 0;
 
   useDrafts(drafts: Drafts): void {
     this.drafts = drafts;
@@ -63,14 +65,21 @@ export class Workspace {
     return !doc.dirty;
   }
 
-  /** Closes the open note, whatever it holds (call saveOpen first), and opens path. */
+  /**
+   * Closes the open note, whatever it holds (call saveOpen first), and opens path. When opens
+   * overlap, the last one wins: an earlier one that finishes later changes nothing.
+   */
   async open(path: string): Promise<void> {
+    const seq = ++this.opens;
     this.state.value.open?.doc.dispose();
     this.state.set({});
     this.noteDrafts.set([]);
     this.secrets.set(noSecrets);
     try {
       const note = await api.readNote(path);
+      if (seq !== this.opens) return;
+      const offered = (await this.drafts?.offered(path)) ?? [];
+      if (seq !== this.opens) return;
       const read = () => this.reader?.() ?? note.content;
       const draft = this.drafts?.forNote(path);
       // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
@@ -79,11 +88,11 @@ export class Workspace {
         return api.saveNote(p, content, base);
       };
       const doc = new DocumentSession(path, note.etag, { save, read, ...(draft && { draft }) });
-      this.noteDrafts.set((await this.drafts?.offered(path)) ?? []);
+      this.noteDrafts.set(offered);
       this.state.set({ open: { doc, initial: note.content } });
       await this.tree.reveal(path); // the tree shows it, however it was opened
     } catch (err) {
-      this.state.set({ error: `Couldn't open ${path}: ${message(err)}` });
+      if (seq === this.opens) this.state.set({ error: `Couldn't open ${path}: ${message(err)}` });
     }
   }
 

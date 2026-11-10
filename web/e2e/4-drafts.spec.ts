@@ -76,14 +76,22 @@ test("a reload offers the draft the page had, instead of writing over it", async
   await serverDown(context, page);
   await typeAtEnd(page, "reload.md", "drain the node");
   await expect(page.getByRole("status")).toHaveText(/^Not saved/);
+  // The reload flushes the edit, as it should; a request sent while the page navigates can
+  // escape the routes (#87). Changing the note first makes such a save fail its If-Match
+  // with 412 instead of landing, so only the draft can hold the edit.
+  const elsewhere = "# Reload\nedited elsewhere\n";
+  writeFileSync(vault("reload.md"), elsewhere);
   page.on("dialog", (d) => void d.accept()); // "leave the page?", then "discard the draft?"
   await page.reload();
+  await expect(page.getByRole("textbox", { name: "Text of reload.md" })).toContainText("edited elsewhere");
   const banner = page.getByRole("region", { name: "This note has an unsaved draft" });
   await expect(banner).toBeVisible();
+  await banner.getByRole("button", { name: "Compare" }).click();
+  await expect(banner.getByLabel("Changes from the current text to the draft")).toContainText("+ drain the node");
   await banner.getByRole("button", { name: "Discard draft" }).click();
   await expect(banner).toBeHidden();
   await expect(page.getByRole("button", { name: /Unsaved drafts/ })).toHaveCount(0);
-  expect(readFileSync(vault("reload.md"), "utf8")).toBe("# Reload\n");
+  expect(readFileSync(vault("reload.md"), "utf8")).toBe(elsewhere);
 });
 
 test("the draft of a note deleted meanwhile can be saved as a new note", async ({ page, context }) => {

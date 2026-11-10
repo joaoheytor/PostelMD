@@ -35,7 +35,11 @@ func changes(t *testing.T, v *Vault) []Change {
 	t.Helper()
 	st, err := v.Status(ctx)
 	must(t, err)
-	return st.Changes
+	out := []Change{}
+	for _, c := range st.Changes { // path and kind only; commit_gate_linux_test checks the rest
+		out = append(out, Change{Path: c.Path, Kind: c.Kind})
+	}
+	return out
 }
 
 func TestAdoptCommitAndHistory(t *testing.T) {
@@ -51,7 +55,7 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	if n, err := v.PendingImport(ctx); err != nil || n != 1 {
 		t.Fatalf("PendingImport = %d, %v", n, err)
 	}
-	want := []Change{{"notes/a.md", Added}}
+	want := []Change{{Path: "notes/a.md", Kind: Added}}
 	if got := changes(t, v); !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %v, want %v", got, want)
 	}
@@ -74,7 +78,7 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	if got := gitCLI(t, dir, "status", "--porcelain", "--untracked-files=all"); got != "" {
 		t.Fatalf("git sees changes after a commit: %q", got)
 	}
-	if _, err := v.Commit(ctx, "again", "Ada", "a@b"); !errors.Is(err, ErrNothingToCommit) {
+	if _, err := commitAll(v, "again", "Ada", "a@b"); !errors.Is(err, ErrNothingToCommit) {
 		t.Fatalf("empty commit = %v", err)
 	}
 
@@ -82,18 +86,18 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	must(t, err)
 	_, err = v.Create(ctx, "c.md", []byte("C"))
 	must(t, err)
-	want = []Change{{"c.md", Added}, {"notes/a.md", Modified}}
+	want = []Change{{Path: "c.md", Kind: Added}, {Path: "notes/a.md", Kind: Modified}}
 	if got := changes(t, v); !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %v, want %v", got, want)
 	}
-	_, err = v.Commit(ctx, "Edit", "Ada", "ada@example.invalid")
+	_, err = commitAll(v, "Edit", "Ada", "ada@example.invalid")
 	must(t, err)
 	_, err = v.Delete(ctx, "c.md")
 	must(t, err)
-	if got := changes(t, v); !reflect.DeepEqual(got, []Change{{"c.md", Deleted}}) {
+	if got := changes(t, v); !reflect.DeepEqual(got, []Change{{Path: "c.md", Kind: Deleted}}) {
 		t.Fatalf("status after a delete = %v", got)
 	}
-	_, err = v.Commit(ctx, "Remove c", "Ada", "ada@example.invalid")
+	_, err = commitAll(v, "Remove c", "Ada", "ada@example.invalid")
 	must(t, err)
 
 	hist, err = v.History("notes/a.md", 10)
@@ -142,14 +146,14 @@ func TestAdoptAnExistingRepository(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 	must(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("A2"), 0o600))
-	_, err = v.Commit(ctx, "from PostelMD", "Ada", "ada@example.invalid")
+	_, err = commitAll(v, "from PostelMD", "Ada", "ada@example.invalid")
 	must(t, err)
 	if got := gitCLI(t, dir, "log", "--format=%s", "trunk"); got != "from PostelMD\nfrom the host" {
 		t.Fatalf("git log = %q", got)
 	}
 
 	gitCLI(t, dir, "checkout", "-q", "--detach")
-	if _, err := v.Commit(ctx, "x", "Ada", "a@b"); !errors.Is(err, ErrDetached) {
+	if _, err := commitAll(v, "x", "Ada", "a@b"); !errors.Is(err, ErrDetached) {
 		t.Fatalf("commit on a detached HEAD = %v", err)
 	}
 }
@@ -160,7 +164,7 @@ func TestGitLockNeedsTheUser(t *testing.T) {
 	must(t, err)
 	lock := filepath.Join(dir, ".git", "refs", "heads", "main.lock")
 	must(t, os.WriteFile(lock, []byte("left by a crash\n"), 0o600))
-	if _, err := v.Commit(ctx, "x", "Ada", "a@b"); !errors.Is(err, ErrGitLocked) {
+	if _, err := commitAll(v, "x", "Ada", "a@b"); !errors.Is(err, ErrGitLocked) {
 		t.Fatalf("commit with a lock = %v, want ErrGitLocked", err)
 	}
 	if _, err := os.Stat(lock); err != nil {
@@ -181,7 +185,7 @@ func TestGitLockNeedsTheUser(t *testing.T) {
 	if locks, _ := v.GitLocks(); len(locks) != 0 {
 		t.Fatalf("locks left: %+v", locks)
 	}
-	if _, err := v.Commit(ctx, "after the lock", "Ada", "a@b"); err != nil {
+	if _, err := commitAll(v, "after the lock", "Ada", "a@b"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -214,7 +218,7 @@ func TestCommitCrashEverywhere(t *testing.T) {
 		hook.n, hook.step = n, 0
 		_, err = v.EnableGit()
 		if err == nil {
-			_, err = v.Commit(ctx, "first", "Ada", "a@b")
+			_, err = commitAll(v, "first", "Ada", "a@b")
 		}
 		_ = v.Close()
 		killed := hook.step > n
@@ -236,10 +240,10 @@ func TestCommitCrashEverywhere(t *testing.T) {
 			t.Fatalf("an uninterrupted commit left changes: %v", st.Changes)
 		}
 		if len(st.Changes) != 0 {
-			_, err = v.Commit(ctx, "retry", "Ada", "a@b")
+			_, err = commitAll(v, "retry", "Ada", "a@b")
 			if errors.Is(err, ErrGitLocked) { // the user confirms no other git is running
 				must(t, v.RemoveGitLocks(ctx))
-				_, err = v.Commit(ctx, "retry", "Ada", "a@b")
+				_, err = commitAll(v, "retry", "Ada", "a@b")
 			}
 			must(t, err)
 		}

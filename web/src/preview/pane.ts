@@ -113,7 +113,7 @@ export class Preview implements Disposable {
    * code stays, with the error under it as text.
    */
   private async diagram(pre: HTMLElement, source: string): Promise<void> {
-    this.diagrams ??= new Diagrams();
+    this.diagrams ??= new Diagrams((url) => [...this.el.querySelectorAll<HTMLImageElement>("img.pm-diagram")].some((img) => img.src === url));
     const d = await this.diagrams.render(source);
     if (this.disposed || !pre.isConnected) return;
     if (!d.ok) {

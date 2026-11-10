@@ -99,11 +99,11 @@ func TestIgnoredButTrackedFilesStayTracked(t *testing.T) {
 		".gitignore": "*.log\ndir/\n", "t.log": "2", "dir/x.md": "2", "dir/new.md": "new", "new.log": "new",
 	})
 	must(t, os.Remove(filepath.Join(dir, "gone.log")))
-	want := []Change{{".gitignore", Added}, {"dir/x.md", Modified}, {"gone.log", Deleted}, {"t.log", Modified}}
+	want := []Change{{Path: ".gitignore", Kind: Added}, {Path: "dir/x.md", Kind: Modified}, {Path: "gone.log", Kind: Deleted}, {Path: "t.log", Kind: Modified}}
 	if got := changes(t, v); !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %v, want %v", got, want)
 	}
-	_, err = v.Commit(ctx, "edit ignored but tracked files", "Ada", "ada@example.invalid")
+	_, err = commitAll(v, "edit ignored but tracked files", "Ada", "ada@example.invalid")
 	must(t, err)
 	if got := gitCLI(t, dir, "ls-tree", "-r", "--name-only", "HEAD"); got != ".gitignore\ndir/x.md\nnotes/a.md\nt.log" {
 		t.Fatalf("committed files = %q", got)
@@ -182,7 +182,7 @@ func TestUnwritableOrOddExcludeDoesntStopGit(t *testing.T) {
 				if _, err := v.Status(ctx); !errors.Is(err, ErrUnsafeExclude) {
 					t.Fatalf("Status = %v, want ErrUnsafeExclude", err)
 				}
-				if _, err := v.Commit(ctx, "x", "Ada", "a@b"); !errors.Is(err, ErrUnsafeExclude) {
+				if _, err := commitAll(v, "x", "Ada", "a@b"); !errors.Is(err, ErrUnsafeExclude) {
 					t.Fatalf("Commit = %v, want ErrUnsafeExclude", err)
 				}
 				if got := gitCLI(t, dir, "rev-list", "--all"); got != "" {
