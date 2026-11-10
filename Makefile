@@ -1,6 +1,6 @@
 # Local parity with CI: `make ci` runs what the `required` check runs, except signing and
 # publishing (docs/ci-cd.md). Tools: Go (go.mod), Node 24, Docker with buildx, golangci-lint,
-# actionlint, shellcheck, yamllint.
+# yamllint; actionlint and shellcheck run from pinned images (ACTIONLINT_IMAGE, SHELLCHECK_IMAGE).
 .DEFAULT_GOAL := help
 SHELL := /bin/sh
 
@@ -11,6 +11,12 @@ IMAGE     ?= postelmd:dev
 PLATFORMS ?= linux/amd64,linux/arm64
 # Trivy v0.76.1, its cosign signature verified against aquasecurity/trivy's release workflow.
 TRIVY_IMAGE ?= ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+# The linters run from these images, locally and in CI, so both see the same findings: the
+# actionlint image bundles the shellcheck it runs on workflow scripts (0.11.0, the same as
+# SHELLCHECK_IMAGE). Bump both together, to releases at least two weeks old (ADR-0015).
+ACTIONLINT_IMAGE ?= docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+SHELLCHECK_IMAGE ?= docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+LINT_RUN = docker run --rm --network none -v "$(CURDIR):/repo:ro" -w /repo
 # image-push and image-gate (candidate.yaml)
 REPO        ?=
 DIGEST_FILE ?= bin/image-digest
@@ -79,9 +85,10 @@ test-web: web-deps
 e2e: build ## Playwright smoke tests against bin/postelmd (once: `cd web && npx playwright install --with-deps chromium`)
 	cd web && npx playwright test
 
-test-scripts: ## Tests for release scripts and git hooks (throwaway repos and SSH keys)
+test-scripts: ## Tests for release scripts, git hooks and the agent guard hook (throwaway repos and SSH keys)
 	scripts/verify-release-tag_test.sh
 	scripts/pre-commit-adr_test.sh
+	python3 -B -m unittest discover -s .claude/hooks -p '*_test.py'
 
 fuzz: ## Every Go fuzz target for FUZZTIME (default 30s)
 	scripts/fuzz.sh
@@ -96,8 +103,8 @@ lint-web: web-deps
 
 lint-repo:
 	scripts/check-file-size.sh
-	actionlint
-	shellcheck scripts/*.sh .githooks/*
+	$(LINT_RUN) $(ACTIONLINT_IMAGE)
+	$(LINT_RUN) $(SHELLCHECK_IMAGE) scripts/*.sh .githooks/*
 	yamllint --strict .
 
 perf: build ## PRD budgets for one user against bin/postelmd (SAMPLES sessions per mode, default 30)

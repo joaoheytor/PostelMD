@@ -16,7 +16,7 @@ with the gaps.
    per assertion.
 2. **Find candidate tests** for each criterion: Go tests (`internal/**/*_test.go`), failure
    scenarios (crash tests in `internal/vault/*_test.go` and `internal/store/*/…_test.go`,
-   harness in `internal/store/fs/faultfs`; `test/scenarios/` once it exists), Vitest (`web/src/**/*.test.ts`), Playwright (`web/e2e/`),
+   harness in `internal/store/fs/faultfs`), Vitest (`web/src/**/*.test.ts`), Playwright (`web/e2e/`),
    script tests (`scripts/*_test.sh`) and the CI-only checks (`.github/workflows/`,
    `Makefile`). For a large milestone, fan the search out to a read-only `Explore` agent per
    area; it returns candidate file:line locations, not verdicts.

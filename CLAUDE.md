@@ -34,8 +34,6 @@ web/
   src/templates/       note template starter pack
   public/frames/       the sandboxed Mermaid frame page (ADR-0021)
 packages/plugin-api/   @postelmd/plugin-api (types + runtime contract, Apache-2.0)
-test/scenarios/        planned (`make scenarios`); failure scenarios live with the code
-                       today (Testing conventions)
 test/perf/editor/      editor benchmark spike (#33)
 test/perf/app/         real-app benchmark of the v0.1 budgets (`make perf`)
 scripts/               image smoke and scan, file-size check, fuzz, release-tag verification
@@ -45,8 +43,8 @@ docs/operations/       runbooks (backup, restore, fencing, key compromise, upgra
 CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleased]
 .githooks/             commit-msg + pre-commit (enable: git config core.hooksPath .githooks)
 .claude/               shared agent config: settings.json, hooks/postelmd_guard.py, skills/
-                       (new-adr, changelog, design-review, pr-slice, milestone-audit);
-                       *.local.* files are git-ignored
+                       (new-adr, changelog, design-review, pr-slice, pr-review,
+                       milestone-audit), agents/ (reviewer personas); *.local.* git-ignored
 ```
 
 ## Hard rules
@@ -87,13 +85,15 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 14. **Crash-safe mutations.** Any operation with more than one side effect (filesystem + DB,
     git, structural ops, backup, restore, migration) writes a **durable intent before its
     first side effect**. It also needs an operation-specific recovery table in its ADR and a
-    failure-scenario test for every crash point (Testing conventions). Never infer what
+    crash test for every crash point, next to the code (Testing conventions). Never infer what
     happened from a single signal (HEAD alone, a hash match alone, a timeout).
 15. **Secrets and logs:** never log note content, secret values, tokens or passwords. Secret
     scanning runs on the exact bytes and metadata being committed or pushed, and cached
     detections never stand in for authorization decisions (ADR-0010). Security-relevant
     actions go through the audit package, which writes to the DB **and** the external sink
-    (the MVP has no DB: stdout only; ADR-0020).
+    (the MVP has no DB: stdout only; ADR-0020). Log unexpected errors with `pathless`
+    (`internal/http/pathless.go`), never `err.Error()`: it quotes paths (CodeQL
+    go/log-injection, #109).
 16. **Authorization per request:** check membership and role on every request and every SSE
     event delivery. Never cache roles in sessions (ADR-0018). In the MVP (one user), check the
     session's signature, expiry and epoch on every request (ADR-0020).
@@ -109,7 +109,9 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 - **Versioning:** SemVer. Before 1.0 a breaking change bumps the minor version (GOVERNANCE.md).
 - **ADRs are Proposed** until the first code that depends on one is merged; that PR flips it to
   Accepted. Accepted decisions only change by being superseded; clarifications are
-  append-only (`docs/adr/README.md`).
+  append-only (`docs/adr/README.md`). Changing anything in an Accepted Decision, even one
+  bullet, is a new ADR that supersedes only that part (e.g. ADR-0022 → 0020's trash);
+  a clarification only adds rationale, links or typo fixes (`new-adr` skill).
 - **Agents never** push to `main`, create tags or releases, or change repository settings or
   secrets without the maintainer's explicit go-ahead in the conversation.
 - **GitHub Actions:** pin actions by commit SHA, set least-privilege `permissions:`, never use
@@ -129,7 +131,8 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   anything that looks private, and turns every outward-facing command (push, tag, release,
   PR, issue, repo settings) into a permission prompt for the maintainer.
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
-  acceptance criteria to the tests that assert them.
+  acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
+  in `.claude/agents/` for a PR.
 
 ## Worktrees and parallel agents
 
@@ -139,7 +142,9 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 - Sequential only: anything touching save, sync, git or recovery code (rules 4 and 14), or
   depending on another open slice.
 - Agents write repository files with Write/Edit, not shell redirection, so the guard hook
-  sees them.
+  sees them (it asks before `sed -i`, `perl -pi`, `tee` and `>` into repository files).
+- The maintainer's shell is zsh: it doesn't word-split `$VAR` and expands a leading `=`
+  (`echo ==` fails). Run loops and word splitting under `bash -c '…'`.
 
 ## Definition of Done
 
@@ -170,8 +175,7 @@ make perf       # the PRD budgets for one user against bin/postelmd (test/perf/a
                 # PRs that touch the benchmark
 ```
 
-Planned, with the code that needs them: `make dev` (go run + Vite dev server),
-`make scenarios` (test/scenarios).
+Planned, with the code that needs it: `make dev` (go run + Vite dev server).
 
 ## Testing conventions
 
@@ -183,7 +187,10 @@ Planned, with the code that needs them: `make dev` (go run + Vite dev server),
   they cover: the harness in `internal/store/fs/faultfs`, store-level crash tests in
   `internal/store/*/…_test.go` (e.g. `store/fs/crash_linux_test.go`), and operation-level
   ones in `internal/vault/*_test.go` (`crash_linux_test.go`, `commit_powerloss_linux_test.go`).
-  `make test` runs them all.
+  `make test` runs them all; there is no separate `test/scenarios/` suite.
+- Timing tests measure growth, never a wall-clock bound (PR #102 failed CI on a 200 ms
+  bound): warm up, take the median of several runs at n and 4n, assert their ratio under a
+  threshold, and keep only a generous hang guard as an absolute limit.
 - Frontend: Vitest for `core/` (no DOM needed). Playwright uses role- and label-based
   locators only; no CSS or structure selectors.
 - Prove each new test can fail: break or disable the behaviour, see the test fail, restore
