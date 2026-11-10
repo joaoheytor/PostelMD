@@ -215,7 +215,14 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
 CodeMirror 6, the sanitized live preview in a Worker (ADR-0007), Mermaid, copy buttons, the
 file tree, a fuzzy finder over the file list, and the runbook/postmortem/ADR templates. A
 **secret warning** runs on save and paste (a regex scan with a small rule set, not stored).
-It only warns, because nothing leaves the machine in the MVP.
+It only warns, because nothing leaves the machine in the MVP. It runs in the browser
+(`web/src/core/secrets.ts`): a paste rescans the note at once, and every save scans the exact
+text it sends. The rules are a few high-precision patterns after gitleaks' (cloud and SaaS
+tokens, private keys, JWTs, kubeconfig client keys, passwords in URLs), and documentation
+placeholders don't match. A finding names the rule, the line and the first four characters,
+never the secret; nothing is stored or logged. A dismissed warning stays hidden until the
+findings change. The server-side scan, stored findings and the commit and push gates of
+ADR-0010 come with remotes in v0.2.
 
 ### Kept as designed
 The single-binary image with the embedded SPA, the instance lock (ADR-0014, CLAUDE.md

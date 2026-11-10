@@ -31,6 +31,8 @@ export interface EditorOptions {
   onEdit(): void;
   /** The text changed, by the user or replace(): the preview follows both. */
   onChange(): void;
+  /** The user pasted (or dropped) text in. */
+  onPaste?(): void;
 }
 
 // Colours come from the page's custom properties, which inherit into the shadow root, so the
@@ -64,7 +66,7 @@ const highlight = HighlightStyle.define([
  * Mounts CodeMirror 6 in root, a shadow root: there its styles use constructable
  * stylesheets, which the CSP's style-src 'self' allows (ADR-0019).
  */
-export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange }: EditorOptions): Editor {
+export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange, onPaste }: EditorOptions): Editor {
   const view = new EditorView({
     root,
     parent: root,
@@ -82,6 +84,7 @@ export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange }: 
           if (!u.docChanged) return;
           onChange();
           if (!u.transactions.some((t) => t.annotation(external))) onEdit();
+          if (u.transactions.some((t) => t.isUserEvent("input.paste") || t.isUserEvent("input.drop"))) onPaste?.();
         }),
       ],
     }),
