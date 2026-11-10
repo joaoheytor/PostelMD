@@ -135,7 +135,7 @@ func TestEnsureExcludeKeepsTheMode(t *testing.T) {
 }
 
 // TestExcludeNotARegularFile: a symlinked or special info/exclude is never followed or
-// rewritten; Exclude reports ErrExcludeSkipped so the caller can warn and go on.
+// rewritten; Exclude reports ErrExcludeNotRegular so the caller can warn and go on.
 func TestExcludeNotARegularFile(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -155,11 +155,11 @@ func TestExcludeNotARegularFile(t *testing.T) {
 			if err := tc.make(path); err != nil {
 				t.Fatal(err)
 			}
-			if b, err := g.Exclude(); !errors.Is(err, ErrExcludeSkipped) || b != nil {
-				t.Fatalf("Exclude = %q, %v; want ErrExcludeSkipped", b, err)
+			if b, err := g.Exclude(); !errors.Is(err, ErrExcludeNotRegular) || b != nil {
+				t.Fatalf("Exclude = %q, %v; want ErrExcludeNotRegular", b, err)
 			}
-			if err := g.EnsureExclude(); !errors.Is(err, ErrExcludeSkipped) {
-				t.Fatalf("EnsureExclude = %v; want ErrExcludeSkipped", err)
+			if err := g.EnsureExclude(); !errors.Is(err, ErrExcludeNotRegular) {
+				t.Fatalf("EnsureExclude = %v; want ErrExcludeNotRegular", err)
 			}
 			if fi, err := os.Lstat(path); err != nil || fi.Mode().IsRegular() {
 				t.Fatalf("info/exclude was replaced: %v, %v", fi, err)

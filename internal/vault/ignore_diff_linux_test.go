@@ -12,11 +12,13 @@ import (
 
 // ignoreCases are trees whose untracked, non-ignored files PostelMD must list exactly as
 // the host's git does. Every file not named ".gitignore" holds "x".
-var ignoreCases = []struct {
+type ignoreCase struct {
 	name    string
 	ignores map[string]string // .gitignore paths (or ".git/info/exclude") to content
 	files   []string
-}{
+}
+
+var ignoreCases = []ignoreCase{
 	{"names, dirs, negation, nested scope",
 		map[string]string{".gitignore": ".env\nsecrets/\n*.log\n!keep.log\n# c\n\n", "sub/.gitignore": "local.md\n"},
 		[]string{".env", "secrets/k.md", "secrets.md", "x.log", "deep/z.log", "keep.log", "sub/local.md", "sub/n.md", "local.md"}},
@@ -70,6 +72,25 @@ var ignoreCases = []struct {
 		map[string]string{".gitignore": "logs/\n", "app/.gitignore": "!logs/\n"},
 		[]string{"logs/a", "app/logs/b", "app/x/logs/c"}},
 	{"star doesn't cross a slash", map[string]string{".gitignore": "a/*.md\n"}, []string{"a/x.md", "a/b/x.md"}},
+	// Git trims trailing spaces only: a trailing tab is part of the pattern.
+	{"trailing tab", map[string]string{".gitignore": ".env\t\nb.md \t \nc.md\t \n"}, []string{".env", "b.md", "c.md", "c.md\t", "b.md \t"}},
+	{"escaped trailing tab and space", map[string]string{".gitignore": "t\\\t\ns\\ \n"}, []string{"t\t", "t", "s ", "s"}},
+	{"POSIX classes",
+		map[string]string{".gitignore": "[[:blank:]]b.md\n[[:punct:]]p.md\n[[:graph:]]g.md\n[[:print:]]r.md\n[[:cntrl:]]c.md\n[[:space:]]s.md\n"},
+		[]string{" b.md", "ab.md", "_p.md", "ap.md", "-p.md", "ag.md", " g.md", " r.md", "ar.md", "ac.md", " s.md", "as.md"}},
+	{"an unknown or unclosed POSIX class", map[string]string{".gitignore": "[[:nope:]]n.md\n[[:alpha:]m.md\n"},
+		[]string{"an.md", "[n.md", ":n.md", "am.md", "[m.md"}},
+	{"brackets: ] first, ranges, escapes", map[string]string{".gitignore": "[]a]1\n[a-]2\n[\\]]3\n[!]]4\n"},
+		[]string{"]1", "a1", "b1", "-2", "a2", "]3", "a3", "]4", "b4"}},
+	{"* and ? stay within one directory", map[string]string{".gitignore": "*/x\n?/y\n"}, []string{"a/x", "a/b/x", "b/y", "bb/y"}},
+}
+
+// ignoreCaseCases run with core.ignorecase=true.
+var ignoreCaseCases = []ignoreCase{
+	{"names fold", map[string]string{".gitignore": "*.MD\nDocs/\nReadMe\n"}, []string{"a.md", "b.MD", "docs/a", "readme", "README"}},
+	{"classes fold", map[string]string{".gitignore": "[A-C].txt\n[B]x\n[[:upper:]]u\n[[:lower:]]l\n[!a]n\n"},
+		[]string{"a.txt", "B.txt", "d.txt", "bx", "Bx", "au", "Au", "al", "Al", "An", "bn"}},
+	{"negation folds", map[string]string{".gitignore": "*.log\n!KEEP.log\n"}, []string{"keep.log", "x.LOG"}},
 }
 
 // TestIgnoreMatchesGit: for every case, Status's untracked files are exactly
@@ -79,25 +100,36 @@ func TestIgnoreMatchesGit(t *testing.T) {
 		t.Skip("git isn't installed")
 	}
 	for _, tc := range ignoreCases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			gitCLI(t, dir, "init", "-q", "-b", "main")
-			for _, f := range tc.files {
-				writeFiles(t, dir, map[string]string{f: "x"})
-			}
-			writeFiles(t, dir, tc.ignores)
-			v, err := Open(dir)
-			must(t, err)
-			defer func() { _ = v.Close() }()
-			_, err = v.EnableGit()
-			must(t, err)
-			got := paths(changes(t, v))
-			want := strings.Split(gitCLI(t, dir, "-c", "core.quotePath=false", "ls-files", "-z", "--others", "--exclude-standard"), "\x00")
-			want = want[:len(want)-1]
-			sort.Strings(want)
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("PostelMD lists %q\n          git lists %q", got, want)
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { checkAgainstGit(t, tc, false) })
+	}
+	for _, tc := range ignoreCaseCases {
+		t.Run("ignorecase/"+tc.name, func(t *testing.T) { checkAgainstGit(t, tc, true) })
+	}
+}
+
+func checkAgainstGit(t *testing.T, tc ignoreCase, fold bool) {
+	dir := t.TempDir()
+	gitCLI(t, dir, "init", "-q", "-b", "main")
+	if fold {
+		gitCLI(t, dir, "config", "core.ignorecase", "true")
+	}
+	for _, f := range tc.files {
+		writeFiles(t, dir, map[string]string{f: "x"})
+	}
+	writeFiles(t, dir, tc.ignores)
+	v, err := Open(dir)
+	must(t, err)
+	defer func() { _ = v.Close() }()
+	_, err = v.EnableGit()
+	must(t, err)
+	got := paths(changes(t, v))
+	// Not gitCLI: its TrimSpace would eat a leading space of the first name.
+	out, err := exec.Command("git", "-C", dir, "ls-files", "-z", "--others", "--exclude-standard").Output()
+	must(t, err)
+	want := strings.Split(string(out), "\x00")
+	want = want[:len(want)-1]
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("PostelMD lists %q\n          git lists %q", got, want)
 	}
 }

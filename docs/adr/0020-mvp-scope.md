@@ -192,9 +192,13 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
 - A commit, and the initial import, take what `git add -A` would: an untracked file that
   a `.gitignore` (each scoped to its directory) or `.git/info/exclude` ignores is neither a
   change nor committed, and an ignored directory isn't walked. A tracked file stays tracked
-  even if a pattern matches it, so its edits and its deletion are committed. A global
-  `core.excludesFile` isn't read (the container has none). The editor's tree and file list
-  still show ignored files.
+  even if a pattern matches it, so its edits and its deletion are committed. Patterns match
+  as git's wildmatch does, `core.ignorecase` included; a test compares the result with the
+  host's `git ls-files --others --exclude-standard`. A global `core.excludesFile` isn't read
+  (the container has none). If `.git/info/exclude` is a symlink or not a regular file,
+  status and commit fail closed with an error that asks the user to replace it: git would
+  follow it, and PostelMD never follows a symlink that may leave the vault. The editor's tree
+  and file list still show ignored files.
 - A commit is built from bytes (#39), its objects are durable before the ref moves (#56),
   and the ref is moved with git's lockfile protocol (#54). After a crash, the branch is the
   old or the new commit. Files whose commit didn't land are still uncommitted changes, so the
@@ -206,7 +210,7 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
   when it is opened (written aside and renamed into place; its other lines are kept), so a
   host `git add -A` never commits the trash. This is best effort: if `.git/info` is
   read-only, or `info/exclude` is a symlink or not a regular file (never followed or
-  replaced, and then its patterns don't apply), the server logs a warning and starts. A repository is
+  replaced), the server logs a warning and starts. A repository is
   created in the vault's temp folder and renamed into place, so a crash never leaves half a
   `.git`.
 - **A leftover git lock needs the user.** A crash during the ref or index update can leave

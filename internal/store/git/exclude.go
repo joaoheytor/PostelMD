@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
+	"strings"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
@@ -17,9 +18,10 @@ const (
 // reservedExcludes keep PostelMD's own folders out of the user's git (`git add -A`).
 var reservedExcludes = []string{"/.postelmd-trash/", "/.postelmd-tmp/"}
 
-// ErrExcludeSkipped: .git/info/exclude is a symlink or not a regular file, so it is neither
-// followed nor rewritten, and its patterns don't apply. Callers warn and go on.
-var ErrExcludeSkipped = errors.New("store/git: info/exclude isn't a regular file; its patterns are not applied")
+// ErrExcludeNotRegular: .git/info/exclude is a symlink or not a regular file. It is never
+// followed (it may point outside the vault) or rewritten. Git would apply its patterns, so
+// callers that decide what to commit must fail closed.
+var ErrExcludeNotRegular = errors.New("store/git: info/exclude is a symlink or not a regular file")
 
 // Exclude returns .git/info/exclude, or nil if there is none. A symlink isn't followed.
 func (g *Repo) Exclude() ([]byte, error) {
@@ -28,7 +30,7 @@ func (g *Repo) Exclude() ([]byte, error) {
 		return nil, nil
 	}
 	if errors.Is(err, fs.ErrSymlink) || errors.Is(err, fs.ErrNotRegular) || errors.Is(err, fs.ErrNotDir) {
-		return nil, fmt.Errorf("%w: %w", ErrExcludeSkipped, err)
+		return nil, fmt.Errorf("%w: %w", ErrExcludeNotRegular, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store/git: read %s: %w", excludeFile, err)
@@ -104,4 +106,24 @@ func (g *Repo) excludeMode() uint32 {
 		}
 	}
 	return 0o644
+}
+
+// IgnoreCase reports the repository's core.ignorecase (read from .git/config through
+// go-git): ignore patterns then match regardless of case, as git does.
+func (g *Repo) IgnoreCase() (bool, error) {
+	cfg, err := g.r.Config()
+	if err != nil {
+		return false, fmt.Errorf("store/git: read config: %w", err)
+	}
+	opts := cfg.Raw.Section("core").Options
+	for k := len(opts) - 1; k >= 0; k-- {
+		if opts[k].IsKey("ignorecase") {
+			switch strings.ToLower(opts[k].Value) {
+			case "", "true", "yes", "on", "1": // a bare key is true
+				return true, nil
+			}
+			return false, nil
+		}
+	}
+	return false, nil
 }

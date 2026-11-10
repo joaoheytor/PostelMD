@@ -4,8 +4,12 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
 func TestSetupImportsTheExistingFiles(t *testing.T) {
@@ -117,6 +121,17 @@ func TestGitAPI(t *testing.T) {
 	}
 	if _, body := get("/api/v1/notes/a.md"); body != "A" {
 		t.Fatalf("after restore the note is %q", body)
+	}
+}
+
+// TestUnsafeExcludeIsExplained: the commit dialog shows why status and commit refuse a
+// symlinked or special .git/info/exclude, and how to fix it.
+func TestUnsafeExcludeIsExplained(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/git/commit", nil)
+	(&GitAPI{}).fail(rec, req, fmt.Errorf("wrapped: %w", vault.ErrUnsafeExclude))
+	if body := rec.Body.String(); rec.Code != 409 || !strings.Contains(body, ".git/info/exclude") || !strings.Contains(body, "regular file") {
+		t.Fatalf("fail = %d %s", rec.Code, body)
 	}
 }
 
