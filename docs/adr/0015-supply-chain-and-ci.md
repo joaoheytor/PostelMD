@@ -34,6 +34,7 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   | `modernc.org/sqlite` | `store/sql` | server | Pure-Go SQLite with FTS5, keeping `CGO_ENABLED=0` (ADR-0002) | planned v0.1 |
   | `sqlc` | `store/sql` | no (code generator) | Type-checked queries without a runtime ORM | planned v0.1 |
   | gitleaks (`zricethezav/gitleaks/v8`) | `secrets` | server | A maintained, widely used rule set; writing our own detectors would lag it (ADR-0010). Footprint is checked when it is added | planned v0.1 |
+  | `go.yaml.in/yaml/v3` | `config` | server | Reads `config.yaml` (ADR-0009); the stdlib has no YAML parser. The YAML organisation's maintained continuation of `gopkg.in/yaml.v3`; strict decoding (`KnownFields`) rejects unknown keys | in use |
   | `golang.org/x/crypto` | `auth` | server | argon2id isn't in the stdlib (ADR-0005). Already a transitive dependency of go-git | planned v0.1 |
   | `go-webauthn/webauthn` | `auth` | server | WebAuthn attestation and assertion parsing is large and security-critical (ADR-0005) | planned v0.1 |
   | `alexedwards/scs` | `auth` | server | Server-side sessions with rotation, idle and absolute timeouts, SQLite store (ADR-0005, ADR-0018) | planned v0.1 |
