@@ -106,10 +106,17 @@ export interface SetupForm {
   email: string;
 }
 
-/** Runs the first-run setup; returns how many files the initial commit imported. */
-export async function setup(form: SetupForm): Promise<number> {
+/** What the initial commit imported, and how many files it left out for their size. */
+export interface SetupResult {
+  imported: number;
+  skipped: number;
+}
+
+/** Runs the first-run setup. */
+export async function setup(form: SetupForm): Promise<SetupResult> {
   const resp = await ok(await request("POST", "/api/v1/setup", json(form)));
-  return ((await resp.json()) as { imported: number }).imported;
+  const r = (await resp.json()) as { imported: number; skipped?: number };
+  return { imported: r.imported, skipped: r.skipped ?? 0 };
 }
 
 // Notes and folders.

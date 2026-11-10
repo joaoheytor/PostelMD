@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/joaoheytor/PostelMD/internal/auth"
+	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
 // Auth is what the HTTP layer needs from authentication. *auth.Service implements it.
@@ -27,7 +28,7 @@ type Auth interface {
 // Importer makes the first commit when setup adopts a folder (ADR-0020).
 type Importer interface {
 	PendingImport(ctx context.Context) (int, error)
-	ImportInitial(ctx context.Context, name, email string) (int, error)
+	ImportInitial(ctx context.Context, name, email string) (vault.Import, error)
 }
 
 // Cookie names. Over TLS the __Host- prefix pins the cookie to this host, with Secure and
@@ -40,7 +41,7 @@ const (
 // AuthAPI serves:
 //
 //	POST   /api/v1/setup/check       {token}: the token is valid; {files} the import will commit
-//	POST   /api/v1/setup             {token, password, name, email}: first run only; {imported}
+//	POST   /api/v1/setup             {token, password, name, email}: first run only; {imported, skipped}
 //	GET    /api/v1/session           204 with a valid session, else 401
 //	POST   /api/v1/session           {password}: log in
 //	DELETE /api/v1/session           log out this browser
@@ -123,11 +124,15 @@ func (a *AuthAPI) setup(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	setSession(w, r, cookie)
 	// An adopted folder's files become the first commit (ADR-0020). Setup already
 	// succeeded; if the import fails, the files stay uncommitted changes the user commits.
-	imported, err := a.importer.ImportInitial(r.Context(), req.Name, req.Email)
+	imp, err := a.importer.ImportInitial(r.Context(), req.Name, req.Email)
 	if err != nil {
 		a.log.Error("initial import", "err", oneLine(err.Error()))
 	}
-	writeJSON(w, stdhttp.StatusCreated, map[string]int{"imported": imported})
+	// skipped: files over the commit size limit, left out of git; the notice says so.
+	writeJSON(w, stdhttp.StatusCreated, struct {
+		Imported int `json:"imported"`
+		Skipped  int `json:"skipped,omitempty"`
+	}{imp.Files, len(imp.Skipped)})
 }
 
 // checkSetup lets the setup page check the token and show how many files the setup will

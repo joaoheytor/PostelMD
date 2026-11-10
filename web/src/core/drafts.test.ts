@@ -36,6 +36,17 @@ describe("Drafts (ADR-0003 §7)", () => {
     expect((await backend.all()).map((d) => d.esid)).toEqual(["other"]);
   });
 
+  it("a closed session's late save never clears the draft of the note reopened since", async () => {
+    const { backend, drafts } = await setup();
+    const closed = drafts.forNote("a.md");
+    closed.write("old", '"e0"', 5); // closed mid-save at gen 5
+    const reopened = drafts.forNote("a.md"); // its generations start again from 0
+    reopened.write("new edit", '"e1"', 1);
+    closed.saved(5); // the old save lands: it covers "old", not the reopened session's edit
+    await drafts.idle();
+    expect((await backend.all()).map((d) => d.text)).toEqual(["new edit"]);
+  });
+
   it("applies a tab's writes and clears in order", async () => {
     const { backend, drafts } = await setup();
     const mine = drafts.forNote("a.md");

@@ -1,6 +1,7 @@
 // Package vault is the MVP's note store (ADR-0020): reads, conditional saves, creates,
 // moves and trash deletes on one vault, serialized by one mutex. Every mutation is a single
-// atomic rename, so none needs an intent (CLAUDE.md rule 14). All file I/O goes through
+// atomic rename, so none needs an intent (CLAUDE.md rule 14); a delete first makes the
+// empty trash folder it renames into, and that folder is its intent (see Delete). All file I/O goes through
 // internal/store/fs, and every path a caller supplies is checked with fs.IsReserved.
 package vault
 
@@ -15,6 +16,8 @@ import (
 	"log/slog"
 	"path"
 	"sort"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
@@ -37,7 +40,12 @@ var (
 	ErrBusy       = errors.New("vault: busy, retry")
 	ErrTooLarge   = errors.New("vault: note too large")
 	ErrIntoItself = errors.New("vault: a folder can't move into itself")
+	// ErrNameTooLong: a new name has a part over MaxNameBytes, the filesystem's limit.
+	ErrNameTooLong = errors.New("vault: a file or folder name can be at most 255 bytes")
 )
+
+// MaxNameBytes is the longest file or folder name the filesystem takes (Linux NAME_MAX).
+const MaxNameBytes = 255
 
 // ConflictError is a failed save precondition. It carries the current note for the
 // conflict view.
@@ -183,10 +191,25 @@ func checkPath(p string) error {
 	return nil
 }
 
+// checkNewPath is checkPath for a path a create, mkdir or move is about to make: a part
+// longer than the filesystem takes is ErrNameTooLong, the user's to fix, not an internal error.
+func checkNewPath(p string) error {
+	if err := checkPath(p); err != nil {
+		return err
+	}
+	for _, part := range strings.Split(p, "/") {
+		if len(part) > MaxNameBytes {
+			return fmt.Errorf("%w: %d bytes", ErrNameTooLong, len(part))
+		}
+	}
+	return nil
+}
+
 // notFound maps every "there's nothing usable at that path" error from the store to
-// ErrNotFound: missing, the wrong kind, or reached through a symlink (never followed).
+// ErrNotFound: missing, the wrong kind, reached through a symlink (never followed), or a
+// name too long to exist on disk.
 func notFound(err error) error {
-	for _, e := range []error{iofs.ErrNotExist, fs.ErrNotRegular, fs.ErrNotDir, fs.ErrSymlink, fs.ErrEscape, fs.ErrInvalidPath} {
+	for _, e := range []error{iofs.ErrNotExist, fs.ErrNotRegular, fs.ErrNotDir, fs.ErrSymlink, fs.ErrEscape, fs.ErrInvalidPath, syscall.ENAMETOOLONG} {
 		if errors.Is(err, e) {
 			return fmt.Errorf("%w: %w", ErrNotFound, err)
 		}

@@ -71,11 +71,11 @@ func TestCommitSkipsIgnoredFiles(t *testing.T) {
 			if n, err := v.PendingImport(ctx); err != nil || n != len(tc.want) {
 				t.Fatalf("PendingImport = %d, %v", n, err)
 			}
-			n, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid")
+			imp, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid")
 			must(t, err)
 			committed := strings.Split(gitCLI(t, dir, "ls-tree", "-r", "--name-only", "HEAD"), "\n")
-			if !reflect.DeepEqual(committed, tc.want) || n != len(committed) {
-				t.Fatalf("ImportInitial = %d, committed %v, want %v", n, committed, tc.want)
+			if !reflect.DeepEqual(committed, tc.want) || imp.Files != len(committed) {
+				t.Fatalf("ImportInitial = %+v, committed %v, want %v", imp, committed, tc.want)
 			}
 			if got := gitCLI(t, dir, "status", "--porcelain", "--untracked-files=all"); got != "" {
 				t.Fatalf("the host's git sees changes PostelMD didn't commit: %q", got)

@@ -334,3 +334,21 @@ design.
 | No auth for a single user | Auth stays on (ADR-0005, FrankMD lesson); one password costs little. |
 | A few trusted accounts with equal access | Not needed yet: the maintainer is the only user. Accounts come with roles in v0.3. |
 | Push in the MVP, without the secret gate | Pushing a secret to a remote is the one MVP-sized mistake we can't undo; push waits for the gate. |
+
+## Clarifications
+- **2026-11-10, trash names (fix/save-path-bugs).**
+  - A delete moves the item to `.postelmd-trash/<timestamp>/<name>`, not
+    `<timestamp>-<name>`: a prefix pushed a name near the filesystem's 255-byte limit over
+    it, and the delete failed. Shortening the name instead would lose it, and the name is the
+    only record of what was deleted until the trash has a record (v0.2). This is ADR-0003
+    §2's layout (`<op-id>/<basename>`), with the timestamp as the op ID. Entries made in the
+    old layout stay as they are, and a restore reads both.
+  - The delete is now a `mkdir` of the timestamp folder, synced, then the one
+    `RENAME_NOREPLACE` into it. The `mkdir` fails if the folder exists, so a second delete in
+    the same instant, or a folder left by a crash, gets `-1`, `-2`… and is never reused.
+    Recovery: a crash after the `mkdir` leaves an empty timestamp folder and the item in
+    place. It holds no data, the trash is reserved (never listed or committed), and nothing
+    needs repair; a crash after the rename is a finished delete. A failed rename removes
+    the empty folder it made. The crash tests cover every step.
+  - A new name (create, new folder, move or rename destination) with a part over 255 bytes
+    is refused with `400` and a plain message, not an internal error.

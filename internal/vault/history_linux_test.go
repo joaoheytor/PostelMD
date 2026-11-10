@@ -59,11 +59,11 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	if got := changes(t, v); !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %v, want %v", got, want)
 	}
-	if n, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil || n != 1 {
-		t.Fatalf("ImportInitial = %d, %v", n, err)
+	if imp, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil || imp.Files != 1 {
+		t.Fatalf("ImportInitial = %+v, %v", imp, err)
 	}
-	if n, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil || n != 0 {
-		t.Fatalf("a second ImportInitial = %d, %v; want 0", n, err)
+	if imp, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil || imp.Files != 0 {
+		t.Fatalf("a second ImportInitial = %+v, %v; want 0", imp, err)
 	}
 	hist, err := v.History("notes/a.md", 1)
 	must(t, err)

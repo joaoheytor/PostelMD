@@ -25,7 +25,7 @@ type Listed struct {
 // ErrChangesDiffer and commits nothing. The check and the commit hold one acquisition of
 // the vault mutex and use one read of the files, so the commit has the bytes checked.
 func (v *Vault) Commit(ctx context.Context, msg, name, email string, listed []Listed) (git.Hash, error) {
-	return v.commit(ctx, msg, name, email, func(st *Status) error { return sameChanges(st.Changes, listed) })
+	return v.commit(ctx, msg, name, email, func(st *Status, _ git.Hash) error { return sameChanges(st.Changes, listed) })
 }
 
 // sameChanges reports whether listed names exactly changes: the same paths, a deletion
@@ -55,7 +55,7 @@ func sameChanges(changes []Change, listed []Listed) error {
 // the vault mutex from reading the files to moving the branch, so the commit has exactly the
 // bytes on disk. A crash leaves the branch on the old or the new commit; uncommitted files
 // stay uncommitted changes, so the next commit includes them (ADR-0020: no intent needed).
-func (v *Vault) commit(ctx context.Context, msg, name, email string, check func(*Status) error) (git.Hash, error) {
+func (v *Vault) commit(ctx context.Context, msg, name, email string, check func(st *Status, head git.Hash) error) (git.Hash, error) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" || len(msg) > 10000 || strings.ContainsRune(msg, 0) {
 		return git.Hash{}, ErrBadMessage
@@ -70,7 +70,7 @@ func (v *Vault) commit(ctx context.Context, msg, name, email string, check func(
 		return git.Hash{}, err
 	}
 	if check != nil {
-		if err := check(st); err != nil {
+		if err := check(st, head); err != nil {
 			return git.Hash{}, err
 		}
 		if v.afterCheck != nil {

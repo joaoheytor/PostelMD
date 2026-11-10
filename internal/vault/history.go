@@ -207,19 +207,39 @@ func (v *Vault) PendingImport(ctx context.Context) (int, error) {
 	return len(st.Changes), nil
 }
 
+// Import is what the initial import committed: how many files, and the ones left out for
+// being over MaxCommitFile.
+type Import struct {
+	Files   int
+	Skipped []string
+}
+
+var errHasCommits = errors.New("vault: the repository has commits")
+
 // ImportInitial commits every file of a repository without commits as "Initial import"
-// and returns how many it committed; a repository with commits is left alone (0).
-func (v *Vault) ImportInitial(ctx context.Context, name, email string) (int, error) {
-	n, err := v.PendingImport(ctx)
-	if err != nil || n == 0 {
-		return 0, err
+// and reports what it committed; a repository with commits is left alone (zero Import).
+// The count and the "no commits" check come from the status the commit itself uses, under
+// the same acquisition of the vault mutex, so the count is exactly the commit's files.
+func (v *Vault) ImportInitial(ctx context.Context, name, email string) (Import, error) {
+	var imp Import
+	// Unchecked for secrets: the user saw the count at setup, and the notice asks them to
+	// check the files before pushing (ADR-0020).
+	_, err := v.commit(ctx, InitialImportMessage, name, email, func(st *Status, head git.Hash) error {
+		if !head.IsZero() {
+			return errHasCommits
+		}
+		imp = Import{Files: len(st.Changes), Skipped: st.Skipped}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errHasCommits):
+		return Import{}, nil
+	case errors.Is(err, ErrNothingToCommit):
+		return Import{Skipped: imp.Skipped}, nil
+	case err != nil:
+		return Import{}, err
 	}
-	// Unchecked: the user saw the count at setup, and the notice asks them to check the
-	// files for secrets before pushing (ADR-0020).
-	if _, err := v.commit(ctx, InitialImportMessage, name, email, nil); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return imp, nil
 }
 
 // ParseCommit parses a full hex commit ID; anything else is ErrNotFound.

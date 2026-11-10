@@ -62,6 +62,7 @@ func revA() string { return etag(vault.RevOf([]byte("A"))) }
 
 func TestNotesAPI(t *testing.T) {
 	srv, dir := newAPI(t)
+	long := strings.Repeat("x", 253) // with ".md", one byte over the filesystem's 255
 	tests := []struct {
 		name       string
 		call       call
@@ -96,6 +97,12 @@ func TestNotesAPI(t *testing.T) {
 			header: map[string]string{"Content-Type": "application/json"}}, 409, "", ""},
 		{"move a folder into itself", call{method: "POST", path: "/api/v1/move", body: `{"from":"notes","to":"notes/sub/notes"}`,
 			header: map[string]string{"Content-Type": "application/json"}}, 400, `{"error":"a folder can't move into itself"}`, ""},
+		{"create with a name over 255 bytes", call{method: "PUT", path: "/api/v1/notes/notes/" + long + ".md", body: "N",
+			header: map[string]string{"If-None-Match": "*"}}, 400, "at most 255 bytes", ""},
+		{"mkdir with a name over 255 bytes", call{method: "POST", path: "/api/v1/folders/" + long + ".md"}, 400, "at most 255 bytes", ""},
+		{"move to a name over 255 bytes", call{method: "POST", path: "/api/v1/move", body: `{"from":"notes/new.md","to":"notes/` + long + `.md"}`,
+			header: map[string]string{"Content-Type": "application/json"}}, 400, "at most 255 bytes", ""},
+		{"read a name over 255 bytes", call{method: "GET", path: "/api/v1/notes/notes/" + long + ".md"}, 404, "", ""},
 		{"list root", call{method: "GET", path: "/api/v1/folders/"}, 200, `{"entries":[{"name":"archive","kind":"folder"},{"name":"notes","kind":"folder"}]}`, ""},
 		{"delete", call{method: "DELETE", path: "/api/v1/notes/archive/a.md"}, 200, "trashName", ""},
 		{"delete a folder", call{method: "DELETE", path: "/api/v1/folders/notes"}, 200, "trashName", ""},
