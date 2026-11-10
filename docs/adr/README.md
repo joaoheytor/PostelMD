@@ -40,5 +40,5 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0016](0016-git-repository-state-and-recovery.md) | Git repository state model and recovery | Proposed |
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
-| [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Proposed |
+| [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Accepted |
 | [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Proposed |
