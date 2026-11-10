@@ -242,3 +242,17 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   minimum release age. `npm run lint` passes with it. `test/perf/app` and `test/perf/editor`
   don't depend on `minimatch`. The override goes when ESLint and `typescript-eslint` accept
   minimatch 11 (#101).
+- **2026-11-10, the release workflows** (`prerelease.yaml`, `release.yaml`). No new
+  dependency: they reuse `candidate.yaml`'s actions and tools, plus crane v0.22.1 pinned as
+  above.
+  - **Binaries follow the image:** built once by `prerelease.yaml`, gated with it, attested
+    there (build provenance on the binaries and SBOM files) and attached to the pre-release.
+    `release.yaml` verifies each against the exact RC identity and commit, attaches them to
+    the release, and signs a `SHA256SUMS` with `cosign sign-blob` under the release identity
+    (the "blob signatures plus checksums" above). No GoReleaser until there are archives
+    for more platforms. A released binary reports the RC's version.
+  - **The release re-checks the vulnerability thresholds** (Trivy on both platform digests,
+    `govulncheck` on the tagged source) instead of trusting the RC's results alone: a CVE
+    published since the RC blocks the release.
+  - **No caches in release builds**, and harden-runner **blocks** egress in both workflows,
+    with per-job allow-lists (`docs/ci-cd.md` §3).

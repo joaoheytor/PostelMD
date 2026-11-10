@@ -1,0 +1,283 @@
+# Releases (docs/ci-cd.md §3-§5, ADR-0015). PROMOTES, NEVER REBUILDS. On a signed tag vX.Y.Z
+# on main, `verify` (no secrets) finds the highest vX.Y.Z-rc.N on the same commit, takes its
+# index digest from that RC's GitHub pre-release record (never from the mutable -rc tag),
+# verifies its signature, provenance and per-platform SBOMs against
+# prerelease.yaml@refs/tags/vX.Y.Z-rc.N and the tagged commit, and re-checks the
+# vulnerability thresholds (Trivy on both platform digests, govulncheck on the tagged
+# source): a CVE published since the RC blocks the release, deliberately.
+#
+# `publish` (environment `release`: the maintainer approves; it alone holds the Docker Hub
+# token) then, in this order: signs at GHCR; copies the index and the RC's verified bundles
+# to Docker Hub and signs there; verifies both exact addresses; applies X.Y.Z and moves X.Y
+# if X.Y.Z is the highest X.Y.*; creates the GitHub Release. It never creates build
+# provenance. Every step is idempotent and a re-run redoes all of them: a failed or cancelled
+# run is re-run, never patched by hand (docs/operations/releasing.md).
+#
+# harden-runner blocks egress: the allowed endpoints are those candidate.yaml's and ci.yaml's
+# runs on main reached, plus Docker Hub, the GitHub release upload, GitHub's Sigstore TUF
+# root and govulncheck's database. A missing endpoint fails closed; the fix is a workflow
+# commit and a new RC.
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GHCR_REPO: ghcr.io/joaoheytor/postelmd
+  HUB_REPO: docker.io/joaoheytor/postelmd
+  COSIGN_VERSION: v3.1.4
+  COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+  # crane v0.22.1: the tarball's hash matches the release's checksums.txt, and its SLSA
+  # provenance verified against slsa-github-generator (ADR-0015, "How crane is pinned").
+  CRANE_VERSION: v0.22.1
+  CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      attestations: read
+    outputs:
+      rc: ${{ steps.rc.outputs.rc }}
+      commit: ${{ steps.rc.outputs.commit }}
+      digest: ${{ steps.rc.outputs.digest }}
+      amd64: ${{ steps.platforms.outputs.amd64 }}
+      arm64: ${{ steps.platforms.outputs.arm64 }}
+      version: ${{ steps.tag.outputs.version }}
+      minor: ${{ steps.tag.outputs.minor }}
+      move-minor: ${{ steps.tag.outputs.move-minor }}
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443 api.github.com:443 release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443 *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            proxy.golang.org:443 sum.golang.org:443 storage.googleapis.com:443 go.dev:443
+            dl.google.com:443 vuln.go.dev:443
+            ghcr.io:443 pkg-containers.githubusercontent.com:443 mirror.gcr.io:443
+            check.trivy.dev:443
+            tuf-repo-cdn.sigstore.dev:443 tuf-repo.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify the tag (signed by a trusted key, annotated, on main)
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$TAG:refs/tags/$TAG" \
+            refs/heads/main:refs/remotes/origin/main
+          scripts/verify-release-tag.sh "$TAG"
+          scripts/release-meta.sh parse "$TAG" > "$RUNNER_TEMP/tag.env"
+          grep -qx kind=stable "$RUNNER_TEMP/tag.env" || { echo "::error::$TAG is not a stable tag"; exit 1; }
+          version=$(sed -n 's/^version=//p' "$RUNNER_TEMP/tag.env")
+          # The release notes are CHANGELOG.md's [X.Y.Z] section; fail now, not after signing.
+          scripts/release-meta.sh notes "$version" CHANGELOG.md > /dev/null
+          git fetch --no-tags --force origin 'refs/tags/v*:refs/tags/v*'
+          move=$(git tag --list 'v*' | scripts/release-meta.sh is-highest "$version")
+          { cat "$RUNNER_TEMP/tag.env"; echo "move-minor=$move"; } >> "$GITHUB_OUTPUT"
+      - name: Find the RC on this commit and its pre-release record
+        id: rc
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          rc=$(git tag --points-at "$commit" --list "v$VERSION-rc.*" | scripts/release-meta.sh latest-rc "$VERSION")
+          scripts/verify-release-tag.sh "$rc"
+          [ "$(git rev-parse "refs/tags/$rc^{commit}")" = "$commit" ] || { echo "::error::$rc moved"; exit 1; }
+          gh release view "$rc" --repo "$GITHUB_REPOSITORY" --json isPrerelease,isDraft,body > "$RUNNER_TEMP/rc.json"
+          jq -e '.isPrerelease and (.isDraft | not)' "$RUNNER_TEMP/rc.json" > /dev/null \
+            || { echo "::error::$rc has no published pre-release record"; exit 1; }
+          digest=$(jq -r .body "$RUNNER_TEMP/rc.json" | scripts/release-meta.sh digest)
+          { echo "commit=$commit"; echo "rc=$rc"; echo "digest=$digest"; } >> "$GITHUB_OUTPUT"
+          echo "### Promoting $rc: \`$GHCR_REPO@$digest\` ($commit)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install cosign and crane
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -sSfL -o "$RUNNER_TEMP/tools/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/tools/cosign" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/tools/cosign"
+          curl -sSfL -o "$RUNNER_TEMP/crane.tar.gz" \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  $RUNNER_TEMP/crane.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/crane.tar.gz" -C "$RUNNER_TEMP/tools" crane
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Resolve the platform digests
+        id: platforms
+        env:
+          DIGEST: ${{ steps.rc.outputs.digest }}
+        run: |
+          crane manifest "$GHCR_REPO@$DIGEST" > "$RUNNER_TEMP/index.json"
+          for arch in amd64 arm64; do
+            d=$(jq -r --arg a "$arch" '[.manifests[]
+                | select(.platform.os == "linux" and .platform.architecture == $a) | .digest]
+                | if length == 1 then .[0] else "" end' "$RUNNER_TEMP/index.json")
+            printf '%s\n' "$d" | grep -qE '^sha256:[0-9a-f]{64}$' || { echo "::error::no single linux/$arch"; exit 1; }
+            echo "$arch=$d" >> "$GITHUB_OUTPUT"
+          done
+      - name: Verify the RC at GHCR (signature, provenance, SBOMs; exact RC identity)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.rc.outputs.digest }}
+          AMD64: ${{ steps.platforms.outputs.amd64 }}
+          ARM64: ${{ steps.platforms.outputs.arm64 }}
+          RC: ${{ steps.rc.outputs.rc }}
+          COMMIT: ${{ steps.rc.outputs.commit }}
+        run: scripts/release-verify-image.sh "$GHCR_REPO" "$DIGEST" "$AMD64" "$ARM64" "$RC" "$COMMIT"
+      - name: Vulnerability thresholds again (Trivy on each platform digest)
+        env:
+          AMD64: ${{ steps.platforms.outputs.amd64 }}
+          ARM64: ${{ steps.platforms.outputs.arm64 }}
+        run: |
+          TRIVY_IMAGE=$(make -s print-trivy-image)
+          export TRIVY_IMAGE
+          scan() { docker pull -q --platform "linux/$1" "$GHCR_REPO@$2" && scripts/image-scan.sh "$GHCR_REPO@$2"; }
+          scan amd64 "$AMD64"
+          scan arm64 "$ARM64"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Vulnerability thresholds again (govulncheck on the tagged source)
+        run: go tool govulncheck ./...
+
+  publish:
+    if: github.repository == 'joaoheytor/PostelMD'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: write # the GitHub Release
+      packages: write
+      id-token: write # keyless signatures; it attests nothing (no attestations: write)
+      attestations: read
+    concurrency:
+      group: ghcr-referrers
+      cancel-in-progress: false
+    env:
+      TAG: ${{ github.ref_name }}
+      RC: ${{ needs.verify.outputs.rc }}
+      COMMIT: ${{ needs.verify.outputs.commit }}
+      DIGEST: ${{ needs.verify.outputs.digest }}
+      AMD64: ${{ needs.verify.outputs.amd64 }}
+      ARM64: ${{ needs.verify.outputs.arm64 }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      MINOR: ${{ needs.verify.outputs.minor }}
+      MOVE_MINOR: ${{ needs.verify.outputs.move-minor }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443 api.github.com:443 uploads.github.com:443
+            release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+            *.actions.githubusercontent.com:443 *.blob.core.windows.net:443
+            ghcr.io:443 pkg-containers.githubusercontent.com:443
+            index.docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+            production.cloudfront.docker.com:443
+            fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443 tuf-repo.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cosign and crane
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -sSfL -o "$RUNNER_TEMP/tools/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/tools/cosign" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/tools/cosign"
+          curl -sSfL -o "$RUNNER_TEMP/crane.tar.gz" \
+            "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  $RUNNER_TEMP/crane.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/crane.tar.gz" -C "$RUNNER_TEMP/tools" crane
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      # Credentials go to the docker config, which crane and cosign read, only via stdin.
+      - name: Log in to GHCR and Docker Hub
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          HUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          printf '%s' "$TOKEN" | crane auth login ghcr.io -u "$ACTOR" --password-stdin
+          [ -n "$HUB_USER" ] && [ -n "$HUB_TOKEN" ] \
+            || { echo "::error::DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not set in the release environment"; exit 1; }
+          printf '%s' "$HUB_TOKEN" | crane auth login index.docker.io -u "$HUB_USER" --password-stdin
+      - name: "1. GHCR: sign, then verify"
+        run: |
+          cosign sign --yes --recursive "$GHCR_REPO@$DIGEST"
+          cosign verify "$GHCR_REPO@$DIGEST" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "https://github.com/joaoheytor/PostelMD/.github/workflows/release.yaml@refs/tags/$TAG" \
+            --certificate-github-workflow-sha "$COMMIT" > /dev/null
+      - name: "2. Docker Hub: copy the index untagged, copy the verified bundles, sign"
+        run: |
+          crane copy "$GHCR_REPO@$DIGEST" "$HUB_REPO@$DIGEST"
+          got=$(crane digest "$HUB_REPO@$DIGEST")
+          [ "$got" = "$DIGEST" ] || { echo "::error::Docker Hub has $got, not $DIGEST"; exit 1; }
+          scripts/release-copy-bundles.sh "$GHCR_REPO" "$HUB_REPO" "$DIGEST" "$AMD64" "$ARM64" "$RC" "$COMMIT"
+          cosign sign --yes --recursive "$HUB_REPO@$DIGEST"
+      - name: "3. Verify both exact addresses"
+        run: |
+          for repo in "$GHCR_REPO" "$HUB_REPO"; do
+            scripts/release-verify-image.sh "$repo" "$DIGEST" "$AMD64" "$ARM64" "$RC" "$COMMIT" "$TAG"
+          done
+      - name: "4. Tags: X.Y.Z, and X.Y if X.Y.Z is the highest X.Y.*"
+        run: |
+          tags=$VERSION
+          if [ "$MOVE_MINOR" = true ]; then tags="$tags $MINOR"; else
+            echo "a higher $MINOR.* release exists: $MINOR stays where it is"; fi
+          for repo in "$GHCR_REPO" "$HUB_REPO"; do
+            for t in $tags; do
+              crane tag "$repo@$DIGEST" "$t"
+              got=$(crane digest "$repo:$t")
+              [ "$got" = "$DIGEST" ] || { echo "::error::$repo:$t is $got, not $DIGEST"; exit 1; }
+            done
+          done
+          echo "### Released \`$DIGEST\` as: $tags (Docker Hub and GHCR)" >> "$GITHUB_STEP_SUMMARY"
+      - name: "5. GitHub Release: the RC's verified binaries and SBOMs, signed checksums"
+        run: |
+          mkdir dist
+          gh release download "$RC" --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern 'postelmd-linux-*'
+          for f in postelmd-linux-amd64 postelmd-linux-arm64 \
+            postelmd-linux-amd64.spdx.json postelmd-linux-arm64.spdx.json; do
+            gh attestation verify "dist/$f" --repo joaoheytor/PostelMD --deny-self-hosted-runners \
+              --cert-identity "https://github.com/joaoheytor/PostelMD/.github/workflows/prerelease.yaml@refs/tags/$RC" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --source-ref "refs/tags/$RC" --source-digest "$COMMIT" > /dev/null
+          done
+          [ "$(find dist -type f | wc -l)" -eq 4 ] || { echo "::error::unexpected assets in $RC"; exit 1; }
+          (cd dist && sha256sum postelmd-* > SHA256SUMS)
+          cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS > /dev/null
+          scripts/release-meta.sh notes "$VERSION" CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --draft=false \
+              --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
+          fi
+      - name: Forget the registry credentials
+        if: always()
+        run: rm -f "$HOME/.docker/config.json"

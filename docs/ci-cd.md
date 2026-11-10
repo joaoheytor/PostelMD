@@ -44,8 +44,17 @@
 | `perf-noise.yaml` | `workflow_dispatch`; `pull_request` touching `test/perf/editor/**` | Runs the editor benchmark (`test/perf/editor`, PRD procedure) on 10 runners in parallel and summarizes the noise between and within runners (#33). Informational, not required. | `contents: read` |
 | `perf.yaml` | `workflow_dispatch`; `pull_request` touching `test/perf/app/**` | Runs the PRD budgets for one user against the real binary (`test/perf/app`, `make perf`): typing with the preview open against a `<textarea>` control, saves while typing, cold start and idle RSS on a 10,000-note vault. Fails on a missed budget; not a required check until the v0.2 regression gate |
 | `candidate.yaml` (from v0.1) | `push` to `main`; `pull_request` touching the image build (`build` job only) | Builds and publishes **candidate** images (`:sha-<short>`, `:main`) to GHCR only: signed (`cosign sign --recursive`), with build provenance and a per-platform SBOM attested (§4, *Candidates*). Publish job in concurrency group `ghcr-referrers`. | `build`: `contents: read`; `publish`: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` |
-| `prerelease.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+` | **The only workflow that builds a release image.** Test jobs (no secrets, `contents: read`) build and gate; a publish job (concurrency group `ghcr-referrers`) pushes the digest **untagged** to GHCR, signs it (`--recursive`), attests build provenance (index) and an SBOM per platform (the only build provenance a release has; §4), applies `:X.Y.Z-rc.N`, and creates a GitHub *pre-release* that records the index digest. Never touches Docker Hub or the stable tags; no `release` environment. | test jobs: `contents: read`; publish job: `contents: write`, `packages: write`, `id-token: write`, `attestations: write` |
-| `release.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+` (stable only; RC tags don't match) | **Promotes, never rebuilds.** A `verify` job (no secrets) finds the latest `vX.Y.Z-rc.N` on the same commit, takes its digest from that pre-release record, checks its signature, attestations and gate results pinned to that exact RC, and checks the vulnerability thresholds again. A `publish` job (environment `release`, concurrency group `ghcr-referrers`) then signs at GHCR, copies the digest and the RC's verified bundles to Docker Hub and signs there, verifies both addresses, moves the stable tags and creates the GitHub Release (binaries, SBOMs, checksums; chart from v0.3). It never creates build provenance (§4). | `verify`: `contents: read` (+ `attestations: read` if `gh attestation verify` needs it); `publish`: `contents: write`, `packages: write`, `id-token: write` (no `attestations: write`: it attests nothing) |
+| `prerelease.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+` | **The only workflow that builds a release image.** A `build` job (no secrets, no caches) checks the tag (`scripts/verify-release-tag.sh`), builds the binaries once and gates each platform digest on a registry on the runner, as `candidate.yaml` does. A `publish` job (concurrency group `ghcr-referrers`) pushes the same bytes **untagged** to GHCR and fails unless the digest equals the gated one, signs it (`--recursive`), attests build provenance (index) and an SBOM per platform (the only build provenance a release has; §4), attests build provenance on the binaries and SBOM files, applies `:X.Y.Z-rc.N`, and creates a GitHub *pre-release* that records the index digest (a `postelmd-image-digest:` line) and carries those files as assets. A re-run that reaches a different digest fails: that is a new RC. Never touches Docker Hub or the stable tags; no `release` environment. | `build`: `contents: read`; `publish`: `contents: write`, `packages: write`, `id-token: write`, `attestations: write` |
+| `release.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+` (stable only; RC tags don't match) | **Promotes, never rebuilds.** A `verify` job (no secrets) checks the tag, finds the highest `vX.Y.Z-rc.N` on the same commit (and checks that tag too), takes its digest from that pre-release record, checks its signature, provenance and SBOMs pinned to that exact RC, checks the vulnerability thresholds again (§4) and that `CHANGELOG.md` has the release's section. A `publish` job (environment `release`, concurrency group `ghcr-referrers`) then signs at GHCR, copies the digest and the RC's verified bundles to Docker Hub and signs there, verifies both addresses, moves the stable tags and creates the GitHub Release (the RC's binaries and SBOMs, each verified against the RC identity, and a `SHA256SUMS` signed with `cosign sign-blob`; chart from v0.3). It never creates build provenance (§4). | `verify`: `contents: read`, `attestations: read`; `publish`: `contents: write`, `packages: write`, `id-token: write`, `attestations: read` (no `attestations: write`: it attests nothing) |
+
+`prerelease.yaml` and `release.yaml` run harden-runner with `egress-policy: block`. Each job's
+`allowed-endpoints` are the hosts the `candidate.yaml` and `ci.yaml` runs on `main` reached
+(harden-runner's post-step log), plus what only these jobs need: a cold Go and npm cache,
+Docker Hub, GitHub release uploads, Sigstore and GitHub's Sigstore trust root (for `gh
+attestation verify`), and `vuln.go.dev`. A missing endpoint fails closed; the fix is a
+workflow commit and a new RC ([releasing](operations/releasing.md)). The text logic both
+workflows share (tag parsing, choosing the RC, reading the digest record, the `X.Y` rule, the
+release notes) is `scripts/release-meta.sh`, tested by `make test-scripts`.
 
 Every workflow sets top-level `permissions: {}` and grants per job; `contents: read` is listed
 explicitly wherever a job checks out code.
@@ -127,6 +136,12 @@ branch, so fork PRs can't poison `main`'s cache.
   - `--certificate-identity https://github.com/joaoheytor/PostelMD/.github/workflows/prerelease.yaml@refs/tags/vX.Y.Z-rc.N`;
   - `--certificate-github-workflow-sha <tagged commit>` (for `gh`: `--source-ref` and
     `--source-digest`).
+
+  The RC's own gate results (smoke tests, Trivy, SBOMs) are what its pre-release record
+  stands for: `prerelease.yaml` writes the record only after the gates passed and the image
+  was signed and attested. `verify` then **re-runs** the vulnerability thresholds (Trivy on
+  both platform digests, `govulncheck` on the tagged source). This is deliberate: a CVE
+  published between the RC and the release blocks the release, and the fix is a new RC.
 - **Order, re-runs and rollback.** `publish` runs these steps in order:
   1. **GHCR:** sign, then verify.
   2. **Docker Hub:** copy the index untagged and check the digest is equal; copy the
@@ -135,7 +150,11 @@ branch, so fork PRs can't poison `main`'s cache.
      `cosign verify-attestation` for provenance and per-platform SBOMs (the RC identity), and
      `gh attestation verify --bundle-from-oci`.
   4. **Tags:** apply `X.Y.Z`. Move `X.Y` only if `X.Y.Z` is the highest `X.Y.*` release.
-  5. **GitHub Release.**
+  5. **GitHub Release:** the RC's binaries and per-platform SBOMs, downloaded from the
+     pre-release and each verified (`gh attestation verify`) against the exact RC identity
+     and commit; a `SHA256SUMS` of them, signed with `cosign sign-blob --bundle` under the
+     release identity; notes from `CHANGELOG.md`. The binaries report the RC's version
+     (`X.Y.Z-rc.N`): they are the bytes that were tested, not a rebuild.
 
   Every step is idempotent. A re-run redoes **every** step and never skips one because it
   "looks done": one signal, such as a tag already present, proves nothing (the same rule as
