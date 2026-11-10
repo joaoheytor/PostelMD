@@ -3,7 +3,7 @@ import { DocumentSession } from "./document";
 import type { Draft, Drafts } from "./drafts";
 import { Store } from "./store";
 import { sameFindings, scanSecrets, type SecretFinding } from "./secrets";
-import { join, rebase, Tree } from "./tree";
+import { join, parent, rebase, Tree } from "./tree";
 import { fill, localDate, type Template } from "./templates";
 
 /** The note open in the editor, with the text it was loaded with. */
@@ -86,6 +86,7 @@ export class Workspace {
       const doc = new DocumentSession(path, note.etag, { save, read, ...(draft && { draft }) });
       this.noteDrafts.set((await this.drafts?.offered(path)) ?? []);
       this.state.set({ open: { doc, initial: note.content } });
+      await this.tree.reveal(path); // the tree shows it, however it was opened
     } catch (err) {
       this.state.set({ error: `Couldn't open ${path}: ${message(err)}` });
     }
@@ -124,6 +125,12 @@ export class Workspace {
    * it moved.
    */
   async move(from: string, to: string): Promise<boolean> {
+    // Never creates folders on the way: a move has no contract for that (CLAUDE.md rule 4).
+    const into = parent(to);
+    if (await this.tree.missing(into)) {
+      this.state.update((s) => ({ ...s, error: `Folder ${into} doesn't exist. Create it first with New folder.` }));
+      return false;
+    }
     const open = this.state.value.open;
     const reopen = open && rebase(open.doc.path, from, to);
     if (open && reopen) {
@@ -138,7 +145,7 @@ export class Workspace {
     try {
       await api.move(from, to);
     } catch (err) {
-      const why = err instanceof api.ApiError && err.status === 409 ? `${to} already exists` : message(err);
+      const why = moveError(err, from, to);
       if (open && reopen) await this.open(open.doc.path); // reopening clears the error
       this.state.update((s) => ({ ...s, error: `Couldn't move ${from}: ${why}` }));
       return false;
@@ -276,6 +283,14 @@ export class Workspace {
   dismissError(): void {
     this.state.update((s) => ({ ...s, error: undefined }));
   }
+}
+
+/** Why a move failed, in words: the server's 404 doesn't say which side is missing. */
+function moveError(err: unknown, from: string, to: string): string {
+  if (!(err instanceof api.ApiError)) return message(err);
+  if (err.status === 409) return `${to} already exists`;
+  if (err.status === 404) return `${from} or the folder ${parent(to) || "it goes into"} doesn't exist any more`;
+  return message(err);
 }
 
 function recoveredPath(path: string): string {

@@ -19,6 +19,12 @@ export function parent(path: string): string {
   return i < 0 ? "" : path.slice(0, i);
 }
 
+/** The folders above path, from the vault root down ("a/b/c.md" → "", "a", "a/b"). */
+export function ancestors(path: string): string[] {
+  const parts = path.split("/").slice(0, -1);
+  return ["", ...parts.map((_, i) => parts.slice(0, i + 1).join("/"))];
+}
+
 /** Where path is after from moved to to, or undefined if the move didn't touch it. */
 export function rebase(path: string, from: string, to: string): string | undefined {
   if (path === from) return to;
@@ -48,8 +54,44 @@ export class Tree {
       const entries = await this.list(path);
       this.state.update((s) => ({ ...s, folders: new Map(s.folders).set(path, entries), error: undefined }));
     } catch (err) {
-      this.state.update((s) => ({ ...s, error: `Couldn't list ${path || "the vault"}: ${String(err)}` }));
+      const why = err instanceof Error ? err.message : String(err);
+      this.state.update((s) => ({ ...s, error: `Couldn't list ${path || "the vault"}: ${why}` }));
     }
+  }
+
+  /**
+   * Shows path's entry: expands every folder above it, loading those not loaded yet. Folders
+   * the user collapsed elsewhere stay as they are.
+   */
+  async reveal(path: string): Promise<void> {
+    const above = ancestors(path);
+    this.state.update((s) => ({ ...s, expanded: new Set([...s.expanded, ...above]) }));
+    await Promise.all(above.filter((f) => !this.state.value.folders.has(f)).map((f) => this.load(f)));
+  }
+
+  /**
+   * Whether folder surely doesn't exist: a listing on the way to it lacks the next folder, even
+   * after loading that listing again (something may have created it since). False when it
+   * exists, or when no loaded listing can tell.
+   */
+  async missing(folder: string): Promise<boolean> {
+    const gap = this.gap(folder);
+    if (gap === undefined) return false;
+    await this.load(gap);
+    return this.state.value.error === undefined && this.gap(folder) !== undefined; // a failed listing tells nothing
+  }
+
+  /** The loaded folder whose listing lacks the next folder on the way to folder, if any. */
+  private gap(folder: string): string | undefined {
+    if (folder === "") return undefined;
+    let at = "";
+    for (const name of folder.split("/")) {
+      const entries = this.state.value.folders.get(at);
+      if (!entries) return undefined;
+      if (!entries.some((e) => e.kind === "folder" && e.name === name)) return at;
+      at = join(at, name);
+    }
+    return undefined;
   }
 
   async toggle(path: string): Promise<void> {

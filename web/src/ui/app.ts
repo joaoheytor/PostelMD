@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import type { App } from "../core/app";
 import { DisposableStore } from "../core/disposable";
+import { parent } from "../core/tree";
 import { LightElement, listen, StoreController } from "./base";
 import "./commit";
 import "./drafts";
@@ -8,6 +9,7 @@ import "./finder";
 import "./editor";
 import "./login";
 import "./setup";
+import type { FileTree } from "./tree";
 import "./tree";
 
 /** The workspace: the file tree beside the open note. */
@@ -29,6 +31,7 @@ export class WorkspaceView extends LightElement {
 
   private readonly ws = new StoreController(this, () => this.app?.workspace.state);
   private readonly offered = new StoreController(this, () => this.app?.workspace.offered);
+  private readonly appState = new StoreController(this, () => this.app?.state);
 
   constructor() {
     super();
@@ -75,6 +78,7 @@ export class WorkspaceView extends LightElement {
   protected override render() {
     const w = this.app.workspace;
     const error = this.ws.value?.error;
+    const notice = this.appState.value?.notice;
     return html`
       <header class="pm-top">
         <span class="pm-top-name">PostelMD</span>
@@ -90,9 +94,19 @@ export class WorkspaceView extends LightElement {
             ${error} <button type="button" @click=${() => w.dismissError()}>Dismiss</button>
           </p>`
         : nothing}
+      ${notice
+        ? html`<p class="pm-top-notice" role="status">
+            ${notice} <button type="button" @click=${() => this.app.dismissNotice()}>Dismiss</button>
+          </p>`
+        : nothing}
       <div class="pm-main">
         <pm-tree class="pm-side" .workspace=${w}></pm-tree>
-        <main class="pm-note"><pm-editor .workspace=${w}></pm-editor></main>
+        <main class="pm-note">
+          <pm-editor
+            .workspace=${w}
+            .afterDelete=${(path: string) => this.querySelector<FileTree>("pm-tree")?.focusFolder(parent(path))}
+          ></pm-editor>
+        </main>
       </div>
       ${this.committing
         ? html`<pm-commit .git=${this.app.git} .onClose=${() => (this.committing = false)}></pm-commit>`
@@ -125,9 +139,9 @@ export class AppView extends LightElement {
       case "failed":
         return html`<p class="pm-error" role="alert">${s.error}</p>`;
       case "setup":
-        return html`<pm-setup .app=${this.app}></pm-setup>`;
+        return html`<main><pm-setup .app=${this.app}></pm-setup></main>`;
       case "login":
-        return html`<pm-login .app=${this.app}></pm-login>`;
+        return html`<main><pm-login .app=${this.app}></pm-login></main>`;
       case "ready":
         return html`
           <pm-workspace .app=${this.app}></pm-workspace>

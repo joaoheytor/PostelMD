@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { html, type PropertyValues } from "lit";
 import { ApiError } from "../core/api";
 import * as api from "../core/api";
 import type { App } from "../core/app";
@@ -30,6 +30,11 @@ export class SetupForm extends LightElement {
     this.files = 0;
     this.error = "";
     this.busy = false;
+  }
+
+  /** autofocus works only for the first form: the second one is rendered later. */
+  protected override updated(changed: PropertyValues<this>): void {
+    if (changed.has("token") && this.token) this.querySelector<HTMLInputElement>("input[name=password]")?.focus();
   }
 
   private async run(e: SubmitEvent, step: (f: Record<string, string>) => Promise<void>): Promise<void> {
@@ -80,7 +85,11 @@ export class SetupForm extends LightElement {
             ? "The notes folder is empty."
             : `The notes folder has ${this.files} file${this.files === 1 ? "" : "s"}; they become the first git commit.`}
         </p>
-        <label>Password <input name="password" type="password" autocomplete="new-password" minlength="12" required autofocus /></label>
+        <label
+          >Password
+          <input name="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="setup-password-help"
+        /></label>
+        <p id="setup-password-help" class="pm-help">At least 12 characters. A few unrelated words make a good one.</p>
         <label>Repeat the password <input name="confirm" type="password" autocomplete="new-password" required /></label>
         <fieldset>
           <legend>Git author for your commits</legend>

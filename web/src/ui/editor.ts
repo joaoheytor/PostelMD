@@ -8,6 +8,7 @@ import { type Editor, mountEditor } from "../editor/editor";
 import { Preview } from "../preview/pane";
 import { ScrollSync } from "../preview/sync";
 import { LightElement, listen, openNote, StoreController } from "./base";
+import { conflictBanner } from "./conflict";
 import "./drafts";
 import "./history";
 import "./move";
@@ -40,13 +41,19 @@ function previewPref(): boolean {
 export class NoteEditor extends LightElement {
   static override properties = {
     workspace: { attribute: false },
+    afterDelete: { attribute: false },
     moving: { state: true },
+    moveTyped: { state: true },
     browsing: { state: true },
     previewing: { state: true },
   };
   declare workspace: Workspace;
+  /** Called with the path of a note just moved to the trash: the owner moves the focus. */
+  declare afterDelete: ((path: string) => void) | undefined;
   /** The rename-or-move form is open. */
   declare moving: boolean;
+  /** What the form held when a move failed: the form is rendered again when the note reopens. */
+  declare moveTyped: string | undefined;
   /** The history dialog is open. */
   declare browsing: boolean;
   /** The preview is shown. While it is hidden, nothing renders it (CLAUDE.md rule 9). */
@@ -196,7 +203,36 @@ export class NoteEditor extends LightElement {
   }
 
   private async trash(path: string): Promise<void> {
-    if (confirm(`Move ${path} to the trash?`)) await this.workspace.trash(path, "file");
+    if (!confirm(`Move ${path} to the trash?`)) return;
+    await this.workspace.trash(path, "file");
+    this.afterDelete?.(path); // the Delete button is gone with the note
+  }
+
+  private startMove(): void {
+    this.moveTyped = undefined;
+    this.moving = true;
+  }
+
+  /**
+   * A move closes the form and the reopened note's editor takes the focus; a cancel gives it
+   * back to the Rename or move button (a new one if a failed move reopened the note).
+   */
+  private moveDone(to?: string): void {
+    this.moving = false;
+    this.moveTyped = undefined;
+    if (!to) void this.updateComplete.then(() => this.querySelector<HTMLElement>(".pm-editor-move")?.focus());
+  }
+
+  /**
+   * The dialog gives the focus back to its opener, unless the opener went away meanwhile (a
+   * restore reopens the note): then the editor gets it.
+   */
+  private historyClosed(): void {
+    this.browsing = false;
+    void this.updateComplete.then(() => {
+      const at = document.activeElement;
+      if (!at || at === document.body) this.editor?.focus();
+    });
   }
 
   protected override render() {
@@ -211,26 +247,27 @@ export class NoteEditor extends LightElement {
         >
         <button type="button" aria-pressed=${this.previewing} @click=${this.togglePreview}>Preview</button>
         <button type="button" @click=${() => (this.browsing = true)}>History</button>
-        <button type="button" @click=${() => (this.moving = true)}>Rename or move</button>
+        <button type="button" class="pm-editor-move" @click=${this.startMove}>Rename or move</button>
         <button type="button" @click=${() => this.trash(note.doc.path)}>Delete</button>
       </header>
-      ${this.browsing
-        ? html`<pm-history .workspace=${this.workspace} .onClose=${() => (this.browsing = false)}></pm-history>`
-        : nothing}
+      ${this.browsing ? html`<pm-history .workspace=${this.workspace} .onClose=${() => this.historyClosed()}></pm-history>` : nothing}
       ${this.moving
-        ? html`<pm-move .workspace=${this.workspace} .path=${note.doc.path} .kind=${"file"} .onDone=${() => (this.moving = false)}></pm-move>`
+        ? html`<pm-move
+            .workspace=${this.workspace}
+            .path=${note.doc.path}
+            .kind=${"file"}
+            .value=${this.moveTyped}
+            .onDone=${(to?: string) => this.moveDone(to)}
+            .onFailed=${(typed: string) => (this.moveTyped = typed)}
+          ></pm-move>`
         : nothing}
       ${st.status === "conflict" && st.conflict
-        ? html`<section class="pm-banner" role="alert" aria-labelledby="pm-conflict-title">
-            <h3 id="pm-conflict-title">This note changed outside this editor</h3>
-            <p>Your edits aren't saved. Keep yours, which replaces the other version, or use the other version, which replaces your edits (Ctrl+Z brings them back).</p>
-            <details>
-              <summary>Show the other version</summary>
-              <pre>${st.conflict.content}</pre>
-            </details>
-            <button type="button" @click=${() => note.doc.keepMine()}>Keep my version</button>
-            <button type="button" @click=${() => this.takeTheirs(note)}>Use the other version</button>
-          </section>`
+        ? conflictBanner(
+            st.conflict,
+            () => this.editor?.text() ?? note.initial,
+            () => note.doc.keepMine(),
+            () => this.takeTheirs(note),
+          )
         : nothing}
       ${this.secretWarning()}
       <pm-draft-banner .workspace=${this.workspace} .put=${(t: string) => this.editor?.replace(t)}></pm-draft-banner>

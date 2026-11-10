@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, expect, login, noSeriousA11yViolations, password, test } from "./helpers";
 
@@ -8,19 +8,29 @@ import { env, expect, login, noSeriousA11yViolations, password, test } from "./h
 test.describe.configure({ mode: "serial" });
 
 test("first-run setup with the server's token", async ({ page }) => {
+  // A note already in the notes folder becomes the first commit.
+  mkdirSync(env("PM_E2E_VAULT"), { recursive: true });
+  writeFileSync(join(env("PM_E2E_VAULT"), "welcome.md"), "# Welcome\n");
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Set up PostelMD" })).toBeVisible();
   await noSeriousA11yViolations(page);
 
   await page.getByLabel("Setup token").fill(env("PM_E2E_TOKEN"));
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Password", { exact: true }).fill(password);
+  const pw = page.getByLabel("Password", { exact: true });
+  await expect(pw).toBeFocused();
+  await expect(pw).toHaveAccessibleDescription("At least 12 characters. A few unrelated words make a good one.");
+  await pw.fill(password);
   await page.getByLabel("Repeat the password").fill(password);
   await page.getByLabel("Name").fill("E2E Tester");
   await page.getByLabel("Email").fill("e2e@example.invalid");
   await page.getByRole("button", { name: "Finish setup" }).click();
 
   await expect(page.getByRole("navigation", { name: "Notes" })).toBeVisible();
+  const notice = page.getByRole("status").filter({ hasText: "Imported" });
+  await expect(notice).toHaveText(/^\s*Imported 1 file from your notes folder as the first commit\.\s*Dismiss\s*$/);
+  await notice.getByRole("button", { name: "Dismiss" }).click();
+  await expect(notice).toHaveCount(0);
 });
 
 test("a wrong password is refused", async ({ page }) => {
@@ -60,7 +70,7 @@ test("an edit made outside the editor is a conflict, not an overwrite", async ({
   await text.press("ControlOrMeta+End");
   await text.pressSequentially(" and in the browser");
 
-  await expect(page.getByRole("heading", { name: "This note changed outside this editor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This note changed in another tab or outside this editor" })).toBeVisible();
   expect(readFileSync(file, "utf8")).toBe("# Changed on disk\n");
 
   await page.getByRole("button", { name: "Keep my version" }).click();
@@ -178,6 +188,8 @@ test("see what changed since an older version, and restore it", async ({ page })
   await versions.getByRole("button", { name: /Add the first runbooks/ }).click();
   const diff = history.getByLabel("Changes from this version to the current text");
   await expect(diff.getByRole("insertion")).toContainText("(v2)");
+  await diff.focus(); // it scrolls when long: the keyboard reaches it (Tab order)
+  await expect(diff).toBeFocused();
   await noSeriousA11yViolations(page);
 
   await history.getByRole("button", { name: "Whole version" }).click();
@@ -186,6 +198,7 @@ test("see what changed since an older version, and restore it", async ({ page })
   page.once("dialog", (d) => void d.accept());
   await history.getByRole("button", { name: "Restore this version" }).click();
   await expect(history).toBeHidden();
+  await expect(text).toBeFocused(); // the History button went with the old note: the editor gets the focus
   await expect(text).toContainText("and in the browser");
   await expect(text).not.toContainText("(v2)");
   expect(readFileSync(join(env("PM_E2E_VAULT"), "ops", "runbook.md"), "utf8")).not.toContain("(v2)");

@@ -11,6 +11,8 @@ export interface AppState {
   /** The session expired while working: ask for the password over the open workspace. */
   reauth: boolean;
   error?: string | undefined;
+  /** Said once, until dismissed: what setup imported. */
+  notice?: string | undefined;
 }
 
 /** The app's top-level state: which screen shows, and the workspace once logged in. */
@@ -51,8 +53,13 @@ export class App {
   /** First-run setup; returns how many files the initial commit imported. */
   async setup(form: api.SetupForm): Promise<number> {
     const imported = await api.setup(form);
-    this.state.set({ phase: "ready", reauth: false });
+    const notice = imported > 0 ? `Imported ${imported} file${imported === 1 ? "" : "s"} from your notes folder as the first commit.` : undefined;
+    this.state.set({ phase: "ready", reauth: false, notice });
     return imported;
+  }
+
+  dismissNotice(): void {
+    this.state.update((s) => ({ ...s, notice: undefined }));
   }
 
   async logout(): Promise<void> {

@@ -1,25 +1,32 @@
-import { html } from "lit";
+import { html, type PropertyValues } from "lit";
 import { moveTarget } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 import { fields, LightElement } from "./base";
 
 /**
- * Renames or moves a note or folder: one field with its full path. The owner shows it and
- * hides it again through onDone, which gets the new path after a move and nothing after a
- * cancel. A failed move stays open; the workspace reports why.
+ * Renames or moves a note or folder: one field with its full path, focused and selected when
+ * the form opens. The owner shows it and hides it again through onDone, which gets the new
+ * path after a move and nothing after a cancel. A failed move stays open with what was typed;
+ * the workspace reports why. An owner that renders a new form meanwhile (the open note is
+ * reopened after a failed move) gets the typed text through onFailed and passes it as value.
  */
 export class MoveForm extends LightElement {
   static override properties = {
     workspace: { attribute: false },
     path: { attribute: false },
     kind: { attribute: false },
+    value: { attribute: false },
     onDone: { attribute: false },
+    onFailed: { attribute: false },
     busy: { state: true },
   };
   declare workspace: Workspace;
   declare path: string;
   declare kind: "file" | "folder";
+  /** The field's text; the path when unset. */
+  declare value: string | undefined;
   declare onDone: (to?: string) => void;
+  declare onFailed: ((typed: string) => void) | undefined;
   declare busy: boolean;
 
   constructor() {
@@ -27,13 +34,30 @@ export class MoveForm extends LightElement {
     this.busy = false;
   }
 
+  private input(): HTMLInputElement | null {
+    return this.querySelector("input");
+  }
+
+  protected override firstUpdated(): void {
+    const input = this.input();
+    input?.focus();
+    if (this.value === undefined) input?.select();
+  }
+
+  protected override updated(changed: PropertyValues<this>): void {
+    if (changed.has("value")) this.input()?.focus(); // the owner put back what was typed
+  }
+
   private async submit(e: SubmitEvent): Promise<void> {
     e.preventDefault();
-    const to = moveTarget(this.path, fields(e.target as HTMLFormElement)["to"] ?? "", this.kind);
+    const typed = fields(e.target as HTMLFormElement)["to"] ?? "";
+    const to = moveTarget(this.path, typed, this.kind);
     if (to === "" || to === this.path) return this.onDone();
     this.busy = true;
     try {
-      if (await this.workspace.move(this.path, to)) this.onDone(to);
+      if (await this.workspace.move(this.path, to)) return this.onDone(to);
+      this.onFailed?.(typed);
+      this.input()?.focus();
     } finally {
       this.busy = false;
     }
@@ -46,9 +70,8 @@ export class MoveForm extends LightElement {
           >New path for ${this.path}
           <input
             name="to"
-            .value=${this.path}
+            .value=${this.value ?? this.path}
             required
-            autofocus
             spellcheck="false"
             @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.onDone()}
           />
