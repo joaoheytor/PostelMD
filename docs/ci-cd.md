@@ -64,7 +64,7 @@ explicitly wherever a job checks out code.
 | `scenarios` | The failure-scenario suite (fault injection, real temp dirs); enabled with the first `internal/store` package | v0.0 |
 | `vuln` | `govulncheck`, `npm audit --omit=dev` | v0.0 |
 | `e2e` | Playwright smoke tests against the built binary | v0.1 |
-| `image` | Multi-arch build (`linux/amd64`, `linux/arm64`) with buildx; Trivy (threshold per ADR-0015); size check (< 40 MB); `docker run` smoke test, including the duplicate-writer refusal; **not pushed** | v0.1 |
+| `image` | Multi-arch build (`linux/amd64`, `linux/arm64`) with buildx; Trivy (threshold per ADR-0015: no critical, no high with a fix; `make image-scan`), run from its image pinned by digest (`TRIVY_IMAGE` in the Makefile), which is bumped only after its cosign signature verifies against aquasecurity/trivy's release workflow; size check (< 40 MB); `docker run` smoke test, including the duplicate-writer refusal; **not pushed** | v0.1 |
 | `perf` | Performance budgets (PRD procedure): base and head are measured **in the same job** on the same runner, interleaved, and the job fails on a > 10% regression of the median (a v0.0 spike measures runner noise first) | v0.2 |
 | `backup` | `backup --verify` from v0.2; full backup → restore round-trip from v0.3 (when `restore` ships) | v0.2 |
 | `helm` | `helm lint`, `kubeconform`, kind install with an RWOP PVC, N-1 upgrade | v0.3 |

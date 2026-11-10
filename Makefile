@@ -9,13 +9,15 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 IMAGE     ?= postelmd:dev
 PLATFORMS ?= linux/amd64,linux/arm64
+# Trivy v0.76.1, its cosign signature verified against aquasecurity/trivy's release workflow.
+TRIVY_IMAGE ?= ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
 
-.PHONY: help ci build web-build image-bins image image-multiarch image-smoke test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci build web-build image-bins image image-multiarch image-smoke image-scan test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-ci: lint test vuln build e2e image-multiarch image-smoke ## Everything the CI `required` check runs (needs Docker)
+ci: lint test vuln build e2e image-multiarch image-smoke image-scan ## Everything the CI `required` check runs (needs Docker)
 
 build: web-build ## Build the postelmd binary, with the web app embedded, into bin/
 	CGO_ENABLED=0 go build -trimpath -tags webui -ldflags "$(LDFLAGS)" -o bin/postelmd ./cmd/postelmd
@@ -39,6 +41,9 @@ image-multiarch: image-bins ## Build the image for every release platform (not l
 
 image-smoke: image ## `docker run` smoke test of $(IMAGE) (ADR-0009)
 	scripts/image-smoke.sh $(IMAGE)
+
+image-scan: image ## Trivy gate of ADR-0015 on $(IMAGE): no critical, no high with a fix
+	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/image-scan.sh $(IMAGE)
 
 test: test-go test-web test-scripts ## Go, web and script tests
 

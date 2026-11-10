@@ -168,7 +168,7 @@ jobs:
 
   image:
     # Builds every release platform (not pushed), then the `docker run` smoke test of
-    # ADR-0009 on this runner's platform.
+    # ADR-0009 and the Trivy gate of ADR-0015 on this runner's platform.
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -192,6 +192,7 @@ jobs:
           driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
       - run: make image-multiarch
       - run: make image-smoke
+      - run: make image-scan
 
   e2e:
     # Playwright smoke tests against the built binary (role and label locators, axe scan).
