@@ -165,19 +165,11 @@ func (a *NotesAPI) mkdir(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 }
 
 func (a *NotesAPI) move(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-	// JSON only: a cross-site form can't send this content type without a preflight.
-	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		writeError(w, stdhttp.StatusUnsupportedMediaType, "send application/json")
-		return
-	}
 	var req struct {
 		From string `json:"from"`
 		To   string `json:"to"`
 	}
-	dec := json.NewDecoder(stdhttp.MaxBytesReader(w, r.Body, 8<<10))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, stdhttp.StatusBadRequest, "invalid JSON body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if err := a.notes.Move(r.Context(), req.From, req.To); err != nil {
@@ -228,4 +220,21 @@ func writeError(w stdhttp.ResponseWriter, status int, msg string) {
 func oneLine(s string) string {
 	s = strings.ReplaceAll(s, "\n", `\n`)
 	return strings.ReplaceAll(s, "\r", `\r`)
+}
+
+// decodeJSON reads a small JSON body into v, refusing other content types (a cross-site
+// form can't send application/json without a preflight) and unknown fields. On failure it
+// has already answered.
+func decodeJSON(w stdhttp.ResponseWriter, r *stdhttp.Request, v any) bool {
+	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		writeError(w, stdhttp.StatusUnsupportedMediaType, "send application/json")
+		return false
+	}
+	dec := json.NewDecoder(stdhttp.MaxBytesReader(w, r.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	return true
 }

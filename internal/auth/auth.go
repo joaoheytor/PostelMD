@@ -45,6 +45,8 @@ type Service struct {
 
 	hashMu sync.Mutex // one argon2id at a time: each takes 64 MB
 
+	ownsRoot bool // opened by OpenDir; closed by Close
+
 	mu           sync.Mutex
 	cred         *credential // nil before setup
 	setupToken   string
@@ -65,6 +67,29 @@ func Open(root *fs.Root, a *audit.Log) (*Service, error) {
 	s.sess = newSessions(secret, func() time.Time { return s.now() })
 	s.bo = newBackoff(func() time.Time { return s.now() })
 	return s, nil
+}
+
+// OpenDir is Open on the state directory dir; Close releases it.
+func OpenDir(dir string, a *audit.Log) (*Service, error) {
+	root, err := fs.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	s, err := Open(root, a)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	s.ownsRoot = true
+	return s, nil
+}
+
+// Close releases the state directory if OpenDir opened it.
+func (s *Service) Close() error {
+	if s.ownsRoot {
+		return s.root.Close()
+	}
+	return nil
 }
 
 // NeedsSetup reports whether no password has been set yet.

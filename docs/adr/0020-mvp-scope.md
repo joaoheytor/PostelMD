@@ -126,6 +126,22 @@ Paths, not file IDs (ADR-0003 §3's IDs arrive with SQLite):
 A held vault mutex gives `503` with `Retry-After`; a note over 5 MB gives `413`. Reserved and
 malformed paths, and paths through a symlink, give `404`.
 
+Authentication:
+
+| Request | Result |
+|---|---|
+| `POST /api/v1/setup` `{token, password, name, email}` | first run: `201` + session; wrong token `403`; after setup `409` |
+| `POST /api/v1/session` `{password}` | log in: `204` + session; `401`; `429` with `Retry-After` while throttled |
+| `GET /api/v1/session` | `204` with a valid session, else `401` |
+| `DELETE /api/v1/session` | log out this browser |
+| `POST /api/v1/session/revoke` | log out everywhere (bumps the epoch) |
+| `PUT /api/v1/password` `{current, next}` | `204` + a new session; every other session is revoked |
+
+Every notes request needs a session (`401` otherwise). Non-safe cross-origin requests are
+refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints accept only
+`application/json`. Before setup, ADR-0009's routing applies. The session cookie is
+`HttpOnly` and `SameSite=Lax`; over TLS it is `__Host-` prefixed and `Secure`.
+
 ### Git
 - The vault is the git repository: the working tree is `/data/vaults/notes`, and its git
   metadata is `/data/vaults/notes/.git` (the repository setup adopts or creates). `/data`
