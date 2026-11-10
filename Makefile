@@ -39,8 +39,9 @@ image: image-bins ## Build the image for this machine and load it as $(IMAGE)
 image-multiarch: image-bins ## Build the image for every release platform (not loaded or pushed)
 	docker buildx build --platform $(PLATFORMS) --output type=cacheonly .
 
-image-smoke: image ## `docker run` smoke test of $(IMAGE) (ADR-0009)
+image-smoke: image ## `docker run` smoke test of $(IMAGE) (ADR-0009), and adopting a notes folder
 	scripts/image-smoke.sh $(IMAGE)
+	scripts/image-smoke-adopt.sh $(IMAGE)
 
 image-scan: image ## Trivy gate of ADR-0015 on $(IMAGE): no critical, no high with a fix
 	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/image-scan.sh $(IMAGE)
