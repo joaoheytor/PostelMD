@@ -61,7 +61,7 @@ the remote and push rows, and the plugin rows don't apply yet. The MVP adds:
 | T10 | Repository write access acknowledges secrets (imported allow-list) | Allow-list authority lives in the DB; imported changes are inert until an owner approves them | 0010 |
 | T11 | A crash mid-merge is discarded as "didn't happen" | Intent evidence covers the index, working tree and merge state; never discard; recovery copies | 0016 |
 | T12 | Rollback resurrects revoked access | DB-only rollback only before any mutation; otherwise full restore + access revalidation | 0015 |
-| T8 | Tampered image, chart or binary | cosign with pinned identities; SBOM; digest pinning | 0015 |
+| T8 | Tampered image, chart or binary | cosign with pinned identities; SBOM; digest pinning. Images: the release signature (`release.yaml`) is made at each registry address; build provenance and the SBOM are signed only by the builder (`prerelease.yaml`) and copied verbatim, so a promotion can't mint provenance. Both exact addresses verify before any tag moves (ci-cd §4) | 0015 |
 | T8b | A forged or misplaced release tag starts a release | Tag ruleset (admin only); `scripts/verify-release-tag.sh` before any release job: SemVer name, annotated tag, SSH signature from a key in `.github/allowed_signers` on `main` (revocable), tagged commit on `main` | 0015 |
 | R1 | Who changed or deleted a note, or who acknowledged a secret? | Per-author git commits; external changes labelled; append-only audit log (365 days) | 0016, arch §9 |
 | R2 | Audit records edited or removed after the fact | External sink; the `file:` sink is HMAC-chained with a key that stays in `/data`; chain head also logged to `stdout`; `postelmd audit verify` | arch §9 |

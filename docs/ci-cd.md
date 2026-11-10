@@ -1,7 +1,7 @@
 # PostelMD: CI/CD
 
 - **Status:** Draft v0.1
-- **Last updated:** 2026-11-09
+- **Last updated:** 2026-11-10
 - **Decisions:** [ADR-0015](adr/0015-supply-chain-and-ci.md). This document describes the
   pipelines, repository settings and the hand-off to the homelab.
 
@@ -44,8 +44,8 @@
 | `perf-noise.yaml` | `workflow_dispatch`; `pull_request` touching `test/perf/editor/**` | Runs the editor benchmark (`test/perf/editor`, PRD procedure) on 10 runners in parallel and summarizes the noise between and within runners (#33). Informational, not required. | `contents: read` |
 | `perf.yaml` | `workflow_dispatch`; `pull_request` touching `test/perf/app/**` | Runs the PRD budgets for one user against the real binary (`test/perf/app`, `make perf`): typing with the preview open against a `<textarea>` control, saves while typing, cold start and idle RSS on a 10,000-note vault. Fails on a missed budget; not a required check until the v0.2 regression gate |
 | `candidate.yaml` (from v0.1) | `push` to `main` | Builds and publishes **candidate** images (`:sha-<short>`, `:main`), signed, to GHCR only | `contents: read`, `packages: write`, `id-token: write` |
-| `prerelease.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+` | **The only workflow that builds a release image.** Test jobs (no secrets, `contents: read`) build and gate; a publish job pushes the digest **untagged** to GHCR, signs and attests it, then applies `:X.Y.Z-rc.N` and creates a GitHub *pre-release*. Never touches Docker Hub or the stable tags; no `release` environment. | test jobs: `contents: read`; publish job: `contents: write`, `packages: write`, `id-token: write`, `attestations: write` |
-| `release.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+` (stable only; RC tags don't match) | **Promotes, never rebuilds.** A `verify` job (no secrets) finds the latest `vX.Y.Z-rc.N` on the same commit, checks the RC's signature, attestations and gate results, and checks the vulnerability thresholds again. A `publish` job (environment `release`) then signs the same digest with the release identity, publishes it to Docker Hub and GHCR, verifies both addresses, moves the stable tags, and creates the GitHub Release (binaries, SBOM, checksums; chart from v0.3). | `verify`: `contents: read`; `publish`: `contents: write`, `packages: write`, `id-token: write`, `attestations: write` |
+| `prerelease.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+` | **The only workflow that builds a release image.** Test jobs (no secrets, `contents: read`) build and gate; a publish job pushes the digest **untagged** to GHCR, signs it and attests its build provenance and SBOM (the only build provenance a release has; §4), then applies `:X.Y.Z-rc.N` and creates a GitHub *pre-release*. Never touches Docker Hub or the stable tags; no `release` environment. | test jobs: `contents: read`; publish job: `contents: write`, `packages: write`, `id-token: write`, `attestations: write` |
+| `release.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+` (stable only; RC tags don't match) | **Promotes, never rebuilds.** A `verify` job (no secrets) finds the latest `vX.Y.Z-rc.N` on the same commit, checks the RC's signature, attestations and gate results, and checks the vulnerability thresholds again. A `publish` job (environment `release`) then copies the same digest and the RC's signature and attestation bundles to Docker Hub, signs the digest with the release identity at both registries (it never creates build provenance; §4), verifies both addresses, moves the stable tags, and creates the GitHub Release (binaries, SBOM, checksums; chart from v0.3). Runs in a `concurrency` group and serializes every registry write. | `verify`: `contents: read`; `publish`: `contents: write`, `packages: write`, `id-token: write` (no `attestations: write`: it attests nothing) |
 
 Every workflow sets top-level `permissions: {}` and grants per job; `contents: read` is listed
 explicitly wherever a job checks out code.
@@ -88,52 +88,111 @@ branch, so fork PRs can't poison `main`'s cache.
 
 - **Image names:** `docker.io/joaoheytor/postelmd` (canonical)
   and `ghcr.io/joaoheytor/postelmd` (mirror).
-- **Push by digest, sign each address:** the image is pushed by digest to GHCR (RC) and later
-  copied by digest to Docker Hub (release). Signatures and attestations live next to the image
-  **in each registry**, and copy tools may not carry Sigstore bundles stored as OCI referrers.
-  So `release.yaml` **signs and attests at each registry address** (cosign `sign` and
-  `attest-build-provenance` with `push-to-registry` for both), **after** the image is copied
-  there. The v0.1 spike (#31, below) confirmed that `cosign copy` can't replace this.
-- **Verify both addresses before the release finishes:** the job runs `cosign verify` and
-  `cosign verify-attestation` against **both** `docker.io/joaoheytor/postelmd@<digest>` and
-  `ghcr.io/joaoheytor/postelmd@<digest>`. Either failure fails the release, before the stable
-  tags are moved.
+- **What each workflow writes where** (the image is pushed and copied **by digest**, so the
+  digest is identical in both registries):
+
+  | Workflow | Writes | Certificate identity |
+  |---|---|---|
+  | `prerelease.yaml` | **GHCR:** the RC index untagged by digest; a cosign signature; SLSA build provenance and the Syft SPDX SBOM as attestations (`actions/attest`, `push-to-registry: true`), which also go to **GitHub's attestation API**; `:X.Y.Z-rc.N` last | `…/prerelease.yaml@refs/tags/vX.Y.Z-rc.N` |
+  | `release.yaml` | **Docker Hub:** the same index, copied untagged by digest, then the RC's Sigstore bundles (signature, provenance, SBOM) copied **verbatim** as its referrers. **Both registries:** a cosign signature with the release identity. The stable tags last. | `…/release.yaml@refs/tags/vX.Y.Z` (signature only) |
+
+- **Signatures: sign at each address.** `release.yaml` runs `cosign sign` (cosign v3, Sigstore
+  bundle format) against `docker.io/joaoheytor/postelmd@<digest>` and
+  `ghcr.io/joaoheytor/postelmd@<digest>`, after the copy. `cosign copy` doesn't carry v3
+  bundles (spike 1 below), and a separate signature per registry keeps each registry
+  self-contained.
+- **Provenance and SBOM: attest once, at build time; copy the bundles.** Build provenance
+  must name the workflow that built the image. `release.yaml` builds nothing, so it never
+  creates build provenance: an attestation made there would claim a build that didn't happen
+  there. The `prerelease.yaml` bundles are bound to the digest, not to a registry address
+  (spike 2), so `release.yaml` copies the referrer manifests byte for byte to Docker Hub
+  (`crane copy` of each referrer by digest, ADR-0015). GitHub's attestation API is keyed by
+  digest alone, so `gh attestation verify` finds them for either address even without the
+  copy. The copy serves `cosign verify-attestation`, `gh … --bundle-from-oci` and admission
+  controllers (Kyverno), which read the registry. The SBOM file is also a Release asset.
+- **Registries store referrers differently.** Docker Hub serves the OCI 1.1 referrers API
+  (`GET /v2/<name>/referrers/<digest>` returns an OCI index, and holds cosign v3 bundles for
+  other projects). GHCR answers that endpoint with 404 and keeps the bundles in the OCI 1.1
+  **referrers tag schema**: an index tagged `sha256-<digest>`. Every write to that index is
+  a read-modify-write of one tag, so all signing and attesting for one digest runs
+  **sequentially in one job**, never in parallel jobs, and each release workflow has a
+  `concurrency` group so two runs never write the same digest's index at once.
+- **Verify both addresses before the release finishes:** for **both**
+  `docker.io/joaoheytor/postelmd@<digest>` and `ghcr.io/joaoheytor/postelmd@<digest>`, the
+  job runs `cosign verify` (release identity), `cosign verify-attestation` for provenance and
+  the SBOM (`prerelease.yaml` identity), and `gh attestation verify --bundle-from-oci`.
+  Either failure fails the release, before the stable tags are moved.
+- **Re-runs:** every step before the tags is idempotent (same digest, verbatim bundles; a
+  second signature is harmless), and an untagged digest at Docker Hub is invisible to users.
+  A failed release is re-run, never repaired by hand.
 - **Stable aliases** (`X.Y`, and `X` from 1.0) are moved only by `release.yaml`, only for a stable tag, and
   only after both verifications pass. RC tags never move an alias.
-- **Signing and attestations** (keyless cosign via GitHub OIDC) are attached by digest, so they
-  cover both registries: a cosign signature, a Syft SBOM (SPDX) attestation and SLSA build
-  provenance (`actions/attest-build-provenance`).
-- **Signature spike results** (#31, 2026-11-09; cosign v2.6.5 and v3.1.4, crane, two zot
+- **Spike 1, copying signatures** (#31, 2026-11-09; cosign v2.6.5 and v3.1.4, crane, two zot
   v2.1.11 registries with the OCI referrers API and one `registry:3` without it; a test key,
   no transparency log, nothing published):
 
   | Signed with | Stored as | `cosign copy` to another registry | Plain copy (`crane copy`) | Signing at the destination |
   |---|---|---|---|---|
   | cosign v2 (legacy) | `sha256-<digest>.sig` / `.att` tags | Carried; signature and attestation verify there | Lost | Works |
-  | cosign v3 (default) | Sigstore bundle v0.3 as OCI **referrers** (the format `attest-build-provenance` uses too) | **Not carried**, even to a registry with the referrers API | Lost | Works; without the referrers API (`registry:3`), cosign falls back to the OCI 1.1 tag schema |
+  | cosign v3 (default) | Sigstore bundle v0.3 as OCI **referrers** (the format `actions/attest` uses too) | **Not carried**, even to a registry with the referrers API | Lost | Works; without the referrers API (`registry:3`), cosign falls back to the OCI 1.1 tag schema |
+
+- **Spike 2, provenance at a second registry** (#31, 2026-11-10; cosign v3.1.4, gh 2.101.0,
+  crane, `registry:2` and zot v2.1.11 as the second registry; public, keyless-signed images
+  only, no credentials, nothing published). The subject was an image whose provenance
+  `actions/attest` made for its GHCR address; its digest was copied to the second registry:
+
+  | Check at the second address | Plain copy (`registry:2`) | Image + referrer manifests copied by digest (zot) |
+  |---|---|---|
+  | `gh attestation verify oci://…` (GitHub API) | **Passes**: the lookup is `GET /orgs/<owner>/attestations/sha256:<digest>`, by digest only | Passes |
+  | `gh attestation verify --bundle-from-oci` | Fails: no attestations in the registry | **Passes** |
+  | `cosign verify-attestation --type slsaprovenance1` | Fails: no matching attestations | **Passes**; the statement's subject still names `ghcr.io/…` |
+
+  Also observed, read-only, on public data: Docker Hub's referrers API (above), and keyless
+  cosign v3 signatures of another project's image verifying at both `docker.io` and `ghcr.io`
+  for the same digest.
 
   Consequences:
-  - sign and attest **at each address**, after the copy, as above; copying signatures only
-    works for a format we don't use;
-  - verification by digest at both addresses (next bullet) stays the release gate. A
-    signature verifies at an address other than the one it was made at, so the gate must use
-    the exact registry addresses, never a digest alone;
+  - copying signatures only works for a format we don't use, so sign **at each address**;
+  - provenance and the SBOM are made once, by the builder, and copied verbatim; their
+    subject names the GHCR address, and neither verifier checks the name, only the digest;
+  - a signature or attestation verifies at an address other than the one it was made at, so
+    the gate checks the exact registry addresses, never a digest alone;
   - cosign v3 refuses to sign without a transparency log unless told otherwise, so a
     misconfigured release can't silently skip Rekor;
-  - Docker Hub's own handling of referrers wasn't measured (it needs a real push). The first
-    release candidate's promotion is the test: `release.yaml` fails closed if either address
-    doesn't verify.
+  - only keyless signing **into** Docker Hub under our identity is unmeasured (it needs the
+    `release` token and a real push). The first promotion is the test, and `release.yaml`
+    fails closed if either address doesn't verify.
 - **Docker Hub description:** updated by hand for now. Syncing it automatically needs a token
   with *Read, Write, Delete* scope, broader than the push token; revisit later with a separate
   token.
 
 ### Verifying (for users and for the homelab)
 
+Use cosign v3 (cosign v2 needs `--new-bundle-format`). `ghcr.io/joaoheytor/postelmd` works in
+place of `docker.io/joaoheytor/postelmd` in every command; prefer `@sha256:<digest>` to a tag.
+
 ```sh
+# The image's signature: the release identity (stable tags).
 cosign verify docker.io/joaoheytor/postelmd:0.1.0 \
   --certificate-identity-regexp '^https://github\.com/joaoheytor/PostelMD/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Build provenance: the builder's identity (the RC that was promoted).
+cosign verify-attestation docker.io/joaoheytor/postelmd:0.1.0 --type slsaprovenance1 \
+  --certificate-identity-regexp '^https://github\.com/joaoheytor/PostelMD/\.github/workflows/prerelease\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Or with the GitHub CLI (logged in), from GitHub's attestation API:
+gh attestation verify oci://docker.io/joaoheytor/postelmd:0.1.0 --repo joaoheytor/PostelMD \
+  --signer-workflow joaoheytor/PostelMD/.github/workflows/prerelease.yaml --deny-self-hosted-runners
+
+# The SBOM: add --predicate-type https://spdx.dev/Document/v2.3 to the gh command, or use
+# --type https://spdx.dev/Document/v2.3 in place of --type slsaprovenance1 with cosign.
 ```
+
+A release candidate (`ghcr.io/joaoheytor/postelmd:X.Y.Z-rc.N`, GHCR only) carries only
+`prerelease.yaml` signatures: verify it with the `prerelease.yaml` regexp above in
+`cosign verify`.
 
 ## 5. Release flow
 
@@ -143,7 +202,7 @@ flowchart LR
   M -->|candidate.yaml| C[GHCR :sha / :main<br/>signed candidate]
   M -->|maintainer signs tag vX.Y.Z-rc.N| RC[prerelease.yaml<br/>build once, gate, GHCR rc]
   RC -->|homelab dev check (v0.3+)| OK{OK?}
-  OK -->|maintainer signs tag vX.Y.Z<br/>same commit| R[release.yaml<br/>promote rc digest<br/>environment approval]
+  OK -->|maintainer signs tag vX.Y.Z<br/>same commit| R[release.yaml<br/>promote rc digest + bundles<br/>re-sign at both registries<br/>environment approval]
   R --> DH[Docker Hub :X.Y.Z :X.Y]
   R --> GH[GHCR mirror]
   R --> GR[GitHub Release<br/>binaries, SBOM, checksums, chart]

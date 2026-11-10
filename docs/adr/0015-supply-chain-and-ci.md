@@ -56,7 +56,9 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   TypeScript, Vite, Vitest, ESLint with `typescript-eslint`, Playwright (and the a11y scanner
   chosen under ADR-0019), k6, golangci-lint, `govulncheck`, actionlint, shellcheck, yamllint,
   the gitleaks CLI (pre-commit), Helm, kind, kubeconform, GoReleaser, buildx, cosign, Syft,
-  Trivy and Renovate.
+  Trivy, Renovate and `crane` (go-containerregistry, run from its image pinned by digest):
+  `release.yaml` needs a byte-exact copy by digest of the image and of its Sigstore referrer
+  manifests, which neither `cosign copy` (it drops v3 bundles) nor buildx provides (#31).
 - **CI (GitHub Actions)**
   - Public repo: **GitHub-hosted runners only.** Never run fork PRs on the self-hosted ARC
     runners, and never use `pull_request_target` with a checkout of PR code.
@@ -110,6 +112,26 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   `https://github.com/joaoheytor/PostelMD/.github/workflows/release.yaml@refs/tags/vX.Y.Z` (exact regexp in `docs/ci-cd.md` §4) with the
   issuer `https://token.actions.githubusercontent.com`. The same applies to binaries (cosign
   blob signatures plus checksums) and the OCI Helm chart.
+
+  **Signatures and attestations at both registries** (spike #31; evidence in
+  `docs/ci-cd.md` §4):
+  - **build provenance and the SBOM are attested once, by the builder** (`prerelease.yaml`,
+    `actions/attest` with `push-to-registry`), against the digest. They go to GHCR and to
+    GitHub's attestation API, which is keyed by digest, so `gh attestation verify` finds them
+    for either registry address. `release.yaml` builds nothing and **never creates build
+    provenance**; it **copies the RC's Sigstore bundles verbatim** to Docker Hub as referrers
+    of the same digest, so registry-reading verifiers (cosign, Kyverno) work there too;
+  - **the release signature is made at each address**: `release.yaml` signs
+    `docker.io/…@<digest>` and `ghcr.io/…@<digest>` with cosign v3 after the copy;
+  - **both exact addresses are verified** (signature with the release identity, provenance
+    and SBOM with the `prerelease.yaml` identity) before any stable tag moves; a failure
+    fails closed and the release is re-run, never patched by hand;
+  - rejected: `cosign copy` (drops v3 bundles; it carries only the legacy `.sig`/`.att`
+    tags, a format cosign v3 no longer writes by default); attesting again in `release.yaml`
+    (provenance would name a workflow that didn't build the image, and consumers would need
+    two builder identities); legacy tag-based signatures for Docker Hub (Docker Hub serves
+    the OCI referrers API, so they aren't needed); GitHub's attestation API alone (offline
+    and admission-controller verification read the registry).
 - **Upgrades and rollback:**
   - SQLite migrations are forward-only and numbered, and each one runs **in a single
     transaction**. The schema version is checked on startup. An older binary refuses to start
