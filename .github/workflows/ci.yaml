@@ -166,10 +166,37 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: make vuln
 
+  image:
+    # Builds every release platform (not pushed), then the `docker run` smoke test of
+    # ADR-0009 on this runner's platform.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      - run: make image-multiarch
+      - run: make image-smoke
+
   required:
     # Runs even when a dependency fails or is cancelled, so the check can't be bypassed.
     if: always()
-    needs: [pr-title, changelog, lint, test-go, test-web, vuln]
+    needs: [pr-title, changelog, lint, test-go, test-web, vuln, image]
     runs-on: ubuntu-24.04
     permissions: {}
     steps:
