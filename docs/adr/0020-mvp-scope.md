@@ -64,7 +64,10 @@ identity, the watcher, search and multiple users.
   cookie only.
 - **Changing the password requires the current password** in the same request (ADR-0018's
   re-authentication rule, kept). A stolen cookie alone can't lock the owner out.
-- Login failures are slowed down (per-IP backoff, never a lockout; ADR-0005).
+- Login failures are slowed down per source IP (after 5 failures, 1 s doubling up to 15 min;
+  a success resets it). There's no account-wide backoff: with one account and no passkeys,
+  it would let anyone delay the owner's login (ADR-0005's account rule assumes passkeys).
+  Password checks run one at a time, because each argon2id takes 64 MB.
 - argon2id comes from `golang.org/x/crypto`, already in the module graph through go-git; the
   MVP makes it a direct dependency (CLAUDE.md rule 5).
 
