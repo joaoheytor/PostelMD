@@ -70,9 +70,12 @@ func Prepare(dataDir string, allowNetworkFS bool) (Paths, Durability, error) {
 	return p, dur, err
 }
 
+// statfs is unix.Statfs; tests replace it to present filesystems they can't mount.
+var statfs = unix.Statfs
+
 func checkStateFS(dir string, allowNetworkFS bool) (Durability, error) {
 	var st unix.Statfs_t
-	if err := unix.Statfs(dir, &st); err != nil {
+	if err := statfs(dir, &st); err != nil {
 		return 0, fmt.Errorf("layout: statfs %s: %w", dir, err)
 	}
 	magic := int64(st.Type) //nolint:unconvert // Statfs_t.Type is int64 on amd64 but not everywhere
