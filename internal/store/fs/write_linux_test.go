@@ -133,3 +133,28 @@ func TestReadDir(t *testing.T) {
 		t.Fatal("ReadDir on a file succeeded")
 	}
 }
+
+// Info must describe the entry in the root, not whatever the same name resolves to from
+// the process's working directory.
+func TestReadDirInfo(t *testing.T) {
+	r, dir := newVault(t)
+	t.Chdir(t.TempDir())
+	mustDo(t, os.WriteFile("note.md", []byte("a decoy outside the root"), 0o600))
+	entries, err := r.ReadDir("dir")
+	mustDo(t, err)
+	want, err := os.Lstat(filepath.Join(dir, "dir", "note.md"))
+	mustDo(t, err)
+	for _, e := range entries {
+		if e.Name() != "note.md" {
+			continue
+		}
+		info, err := e.Info()
+		mustDo(t, err)
+		if info.Size() != want.Size() || !info.ModTime().Equal(want.ModTime()) || !info.Mode().IsRegular() ||
+			info.Mode().Perm() != want.Mode().Perm() || info.Name() != "note.md" {
+			t.Fatalf("Info = %v %v %v, want %v %v %v", info.Size(), info.ModTime(), info.Mode(), want.Size(), want.ModTime(), want.Mode())
+		}
+		return
+	}
+	t.Fatal("note.md not listed")
+}

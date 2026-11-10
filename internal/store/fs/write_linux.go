@@ -149,6 +149,26 @@ func (r *Root) Remove(rel string) error {
 	return nil
 }
 
+// RemoveDir removes the empty directory rel. It is for app-owned directories, such as a
+// git repository built in the temp directory that a crash left behind. Like any entry
+// change, it is durable only after SyncDir on the parent.
+func (r *Root) RemoveDir(rel string) error {
+	if err := checkRel(rel); err != nil {
+		return err
+	}
+	dir, base := splitParent(rel)
+	dfd, err := r.openat(dir, unix.O_PATH|unix.O_DIRECTORY)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(dfd) }()
+	err = step(r.hook, Op{Kind: OpRemove, Path: rel}, func() error { return unix.Unlinkat(dfd, base, unix.AT_REMOVEDIR) })
+	if err != nil {
+		return mapErr("remove", rel, err)
+	}
+	return nil
+}
+
 // SyncFile fsyncs the regular file rel through a fresh descriptor (on Linux, fsync flushes
 // the file whatever descriptor wrote it). It is for files written by code that can't sync
 // them itself, such as go-git's object writer (ADR-0016, "Durability").

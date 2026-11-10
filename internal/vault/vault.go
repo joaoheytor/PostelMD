@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
+	"github.com/joaoheytor/PostelMD/internal/store/git"
 )
 
 // Reserved directories at the vault root (ADR-0006).
@@ -57,6 +58,9 @@ func RevOf(content []byte) Rev {
 // Vault is one open vault.
 type Vault struct {
 	root *fs.Root
+	dir  string
+	opts []fs.Option
+	git  *git.Repo     // nil until EnableGit
 	mu   chan struct{} // the vault mutex; a channel so waiting is bounded
 	wait time.Duration
 	now  func() time.Time
@@ -70,7 +74,7 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &Vault{root: root, mu: make(chan struct{}, 1), wait: 5 * time.Second, now: time.Now}
+	v := &Vault{root: root, dir: dir, opts: opts, mu: make(chan struct{}, 1), wait: 5 * time.Second, now: time.Now}
 	err = v.sweepTemps()
 	if err == nil {
 		err = v.probeNoReplace()
@@ -102,8 +106,14 @@ func (v *Vault) probeNoReplace() error {
 	return v.root.Remove(probe)
 }
 
-// Close releases the vault's directory handle.
-func (v *Vault) Close() error { return v.root.Close() }
+// Close releases the vault's directory handles.
+func (v *Vault) Close() error {
+	var err error
+	if v.git != nil {
+		err = v.git.Close()
+	}
+	return errors.Join(err, v.root.Close())
+}
 
 func (v *Vault) sweepTemps() error {
 	if err := v.ensureDir(TmpDir); err != nil {
@@ -114,7 +124,11 @@ func (v *Vault) sweepTemps() error {
 		return err
 	}
 	for _, e := range entries {
-		if err := v.root.Remove(TmpDir + "/" + e.Name()); err != nil {
+		rm := v.root.Remove
+		if e.IsDir() { // a repository Init didn't finish
+			rm = v.removeTree
+		}
+		if err := rm(TmpDir + "/" + e.Name()); err != nil {
 			return fmt.Errorf("vault: sweep %s: %w", e.Name(), err)
 		}
 	}

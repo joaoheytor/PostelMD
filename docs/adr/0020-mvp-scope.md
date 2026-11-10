@@ -153,8 +153,14 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
   and the ref is moved with git's lockfile protocol (#54). After a crash, the branch is the
   old or the new commit. Files whose commit didn't land are still uncommitted changes, so the
   next commit includes them. There's no intent.
-- **A leftover ref lock needs the user.** A crash during the ref update can leave
-  `refs/heads/<branch>.lock`, and then every commit fails with `ErrRefLocked`. PostelMD never
+- A commit also resets `.git/index` to the new commit (ADR-0016), before the branch moves
+  and with git's lockfile protocol, so the user's own `git status` on the host shows what
+  PostelMD committed. A repository PostelMD creates lists `.postelmd-trash/` and
+  `.postelmd-tmp/` in `.git/info/exclude`; an adopted one is left as it is. A repository is
+  created in the vault's temp folder and renamed into place, so a crash never leaves half a
+  `.git`.
+- **A leftover git lock needs the user.** A crash during the ref or index update can leave
+  `refs/heads/<branch>.lock` or `.git/index.lock`, and then every commit fails. PostelMD never
   removes that lock by itself: a git process the user runs on the host creates the same file,
   and one signal (the file exists) can't tell the two apart (CLAUDE.md rule 14). Instead:
   - the git panel shows "a git lock is blocking commits", with the lock's path and age;

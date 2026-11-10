@@ -13,7 +13,7 @@ const (
 	OpRenameNoReplace                   // Path renamed to To, failing if To exists
 	OpMkdir                             // directory Path created
 	OpSyncDir                           // fsync of directory Path's entries
-	OpRemove                            // file Path unlinked
+	OpRemove                            // file or empty directory Path unlinked
 )
 
 var opNames = map[OpKind]string{

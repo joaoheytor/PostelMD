@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -95,7 +96,9 @@ func (r *Root) ReadFile(rel string) ([]byte, error) {
 }
 
 // ReadDir lists the directory rel ("." for the root), sorted by name. Entry types come from
-// the directory itself, so a symlink is listed as a symlink and never followed.
+// the directory itself, so a symlink is listed as a symlink and never followed. Each
+// entry's Info is read relative to that directory (fstatat, no follow) while it is open:
+// os.File.ReadDir's own Info would lstat the name relative to the working directory.
 func (r *Root) ReadDir(rel string) ([]iofs.DirEntry, error) {
 	if rel != "." {
 		if err := checkRel(rel); err != nil {
@@ -108,9 +111,20 @@ func (r *Root) ReadDir(rel string) ([]iofs.DirEntry, error) {
 	}
 	f := os.NewFile(uintptr(fd), rel)
 	defer func() { _ = f.Close() }()
-	entries, err := f.ReadDir(-1)
+	names, err := f.Readdirnames(-1)
 	if err != nil {
 		return nil, fmt.Errorf("store/fs: list %s: %w", rel, err)
+	}
+	entries := make([]iofs.DirEntry, 0, len(names))
+	for _, name := range names {
+		var st unix.Stat_t
+		if err := unix.Fstatat(fd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			if errors.Is(err, unix.ENOENT) {
+				continue // removed while listing
+			}
+			return nil, mapErr("list", rel+"/"+name, err)
+		}
+		entries = append(entries, iofs.FileInfoToDirEntry(&statInfo{name: name, st: st}))
 	}
 	slices.SortFunc(entries, func(a, b iofs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	return entries, nil
@@ -167,4 +181,38 @@ func mapErr(op, rel string, err error) error {
 	default:
 		return &iofs.PathError{Op: op, Path: rel, Err: err}
 	}
+}
+
+// statInfo is an fs.FileInfo from an fstatat result.
+type statInfo struct {
+	name string
+	st   unix.Stat_t
+}
+
+func (i *statInfo) Name() string       { return i.name }
+func (i *statInfo) Size() int64        { return i.st.Size }
+func (i *statInfo) ModTime() time.Time { return time.Unix(i.st.Mtim.Unix()) }
+func (i *statInfo) IsDir() bool        { return i.Mode().IsDir() }
+func (i *statInfo) Sys() any           { return &i.st }
+
+func (i *statInfo) Mode() iofs.FileMode {
+	m := iofs.FileMode(i.st.Mode & 0o777)
+	switch i.st.Mode & unix.S_IFMT {
+	case unix.S_IFDIR:
+		m |= iofs.ModeDir
+	case unix.S_IFLNK:
+		m |= iofs.ModeSymlink
+	case unix.S_IFREG:
+	case unix.S_IFIFO:
+		m |= iofs.ModeNamedPipe
+	case unix.S_IFSOCK:
+		m |= iofs.ModeSocket
+	case unix.S_IFCHR:
+		m |= iofs.ModeDevice | iofs.ModeCharDevice
+	case unix.S_IFBLK:
+		m |= iofs.ModeDevice
+	default:
+		m |= iofs.ModeIrregular
+	}
+	return m
 }

@@ -23,7 +23,8 @@ import (
 const shutdownDeadline = 45 * time.Second
 
 // serve runs the server until ctx ends. The startup order is: layout and the state
-// filesystem check → instance lock → auth state → vault (temp sweep, rename probe) → HTTP.
+// filesystem check → instance lock → auth state → vault (temp sweep, rename probe) → the
+// vault's git repository (adopted, or created empty) → HTTP.
 // ready, if set, gets the listening address.
 func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(addr string)) error {
 	log := slog.New(slog.NewJSONHandler(stdout, nil))
@@ -50,6 +51,13 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = v.Close() }()
+	created, err := v.EnableGit()
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Info("created a git repository for the vault", "vault", paths.Vault)
+	}
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
