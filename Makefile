@@ -12,7 +12,7 @@ PLATFORMS ?= linux/amd64,linux/arm64
 # Trivy v0.76.1, its cosign signature verified against aquasecurity/trivy's release workflow.
 TRIVY_IMAGE ?= ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
 
-.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan print-trivy-image test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -45,6 +45,10 @@ image-smoke: image ## `docker run` smoke test of $(IMAGE) (ADR-0009), and adopti
 
 image-scan: image ## Trivy gate of ADR-0015 on $(IMAGE): no critical, no high with a fix
 	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/image-scan.sh $(IMAGE)
+
+# For candidate.yaml, which scans a pushed digest with the same pinned Trivy.
+print-trivy-image:
+	@echo '$(TRIVY_IMAGE)'
 
 test: test-go test-web test-scripts ## Go, web and script tests
 

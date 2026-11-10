@@ -1,0 +1,228 @@
+# Candidate images from main (docs/ci-cd.md §3 and §4): signed, attested, GHCR only.
+# Candidates are not releases: this workflow never touches Docker Hub and never applies a
+# version tag or `latest`. A PR that changes how the image is built runs the `build` job
+# only (no secrets, read-only token), so the PR itself exercises this workflow.
+name: candidate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - .github/workflows/candidate.yaml
+      - Dockerfile
+      - .dockerignore
+      - Makefile
+
+permissions: {}
+
+# PR runs cancel each other. Runs on main never cancel an in-progress run (a half-published
+# candidate would stay unsigned); they queue, so `:main` only moves forward. A newer push
+# replaces a run that is still pending, and that commit then gets no candidate.
+concurrency:
+  group: candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE_REPO: ghcr.io/joaoheytor/postelmd
+  # The release platforms; the same list as PLATFORMS in the Makefile.
+  PLATFORMS: linux/amd64,linux/arm64
+  # Syft v1.55.0: this hash is the one in syft_1.55.0_checksums.txt, whose cosign
+  # signature was verified against anchore/syft's release workflow.
+  SYFT_VERSION: 1.55.0
+  SYFT_SHA256: bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d
+  # cosign v3.1.4: hash of cosign-linux-amd64, as in cosign_checksums.txt, and the binary's
+  # own signature verified against the Sigstore project's release identity.
+  COSIGN_VERSION: v3.1.4
+  COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+
+jobs:
+  build:
+    # The gates, on this commit, without pushing anything: every release platform builds,
+    # then the `docker run` smoke test (ADR-0009), the Trivy gate (ADR-0015) and a Syft SBOM
+    # on this runner's platform. The same Makefile targets as ci.yaml's `image` job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      IMAGE: postelmd:candidate
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      - run: make image-multiarch
+      - run: make image-smoke IMAGE="$IMAGE"
+      - run: make image-scan IMAGE="$IMAGE"
+      - name: Install Syft
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -sSfL -o "$RUNNER_TEMP/syft.tar.gz" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256}  $RUNNER_TEMP/syft.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/syft.tar.gz" -C "$RUNNER_TEMP/tools" syft
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: SBOM (SPDX) of the image
+        env:
+          SYFT_CHECK_FOR_APP_UPDATE: "false"
+        run: |
+          syft scan "docker:$IMAGE" -o "spdx-json=$RUNNER_TEMP/sbom.spdx.json"
+          # The SBOM must list the postelmd binary's own Go modules, not just the base image.
+          jq -e '[.packages[].name] | index("github.com/joaoheytor/PostelMD") != null' \
+            "$RUNNER_TEMP/sbom.spdx.json" >/dev/null \
+            || { echo "::error::the SBOM doesn't list the postelmd module"; exit 1; }
+
+  publish:
+    # Only for a push to main in this repository; a PR never reaches this job, and a PR's
+    # token has no `packages: write` or `id-token: write` anyway.
+    #
+    # Why this job builds again instead of pushing `build`'s output: moving a multi-arch
+    # image between jobs needs an extra tool or artifact round trip, and a rebuild isn't
+    # guaranteed to be bit-identical. So this job follows ADR-0015 stages 9-11 on its own
+    # build: push **untagged, by digest**; run the smoke test and the Trivy gate on that
+    # exact digest; generate the SBOM from it; sign and attest it by digest; only then
+    # apply the `sha-<short>` and `main` tags, and check they resolve to the same digest.
+    # `build` gated the same commit first, so a failing gate never reaches the registry.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'joaoheytor/PostelMD'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      - name: Install Syft and cosign
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl -sSfL -o "$RUNNER_TEMP/syft.tar.gz" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          echo "${SYFT_SHA256}  $RUNNER_TEMP/syft.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/syft.tar.gz" -C "$RUNNER_TEMP/tools" syft
+          curl -sSfL -o "$RUNNER_TEMP/tools/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/tools/cosign" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/tools/cosign"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Build and push untagged, by digest
+        id: push
+        run: |
+          make image-bins
+          docker buildx build --platform "$PLATFORMS" --provenance=false --sbom=false \
+            --metadata-file "$RUNNER_TEMP/build.json" \
+            --output "type=image,name=$IMAGE_REPO,push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true" .
+          digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/build.json")
+          printf '%s\n' "$digest" | grep -qE '^sha256:[0-9a-f]{64}$' \
+            || { echo "::error::no image digest in the build metadata"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "pushed $IMAGE_REPO@$digest"
+      - name: Smoke test and Trivy gate on the pushed digest
+        env:
+          REF: ${{ env.IMAGE_REPO }}@${{ steps.push.outputs.digest }}
+        run: |
+          docker pull "$REF"
+          scripts/image-smoke.sh "$REF"
+          scripts/image-smoke-adopt.sh "$REF"
+          TRIVY_IMAGE=$(make -s print-trivy-image) scripts/image-scan.sh "$REF"
+      - name: SBOM (SPDX) of each platform
+        id: sbom
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SYFT_CHECK_FOR_APP_UPDATE: "false"
+        run: |
+          docker buildx imagetools inspect --raw "$IMAGE_REPO@$DIGEST" > "$RUNNER_TEMP/index.json"
+          for arch in amd64 arm64; do
+            d=$(jq -r --arg a "$arch" \
+              '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a) | .digest' \
+              "$RUNNER_TEMP/index.json")
+            printf '%s\n' "$d" | grep -qE '^sha256:[0-9a-f]{64}$' \
+              || { echo "::error::no linux/$arch manifest in $IMAGE_REPO@$DIGEST"; exit 1; }
+            echo "$arch=$d" >> "$GITHUB_OUTPUT"
+            syft scan "registry:$IMAGE_REPO@$d" -o "spdx-json=$RUNNER_TEMP/sbom-$arch.spdx.json"
+            jq -e '[.packages[].name] | index("github.com/joaoheytor/PostelMD") != null' \
+              "$RUNNER_TEMP/sbom-$arch.spdx.json" >/dev/null \
+              || { echo "::error::the linux/$arch SBOM doesn't list the postelmd module"; exit 1; }
+          done
+      - name: Sign by digest (cosign keyless; the index and each platform manifest)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes --recursive "$IMAGE_REPO@$DIGEST"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPO }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # Storage records exist only for organization-owned repositories.
+          create-storage-record: false
+      - name: Attest the linux/amd64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPO }}
+          subject-digest: ${{ steps.sbom.outputs.amd64 }}
+          sbom-path: ${{ runner.temp }}/sbom-amd64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest the linux/arm64 SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPO }}
+          subject-digest: ${{ steps.sbom.outputs.arm64 }}
+          sbom-path: ${{ runner.temp }}/sbom-arm64.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Tag the signed digest sha-<short> and main
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          short=${GITHUB_SHA::7}
+          docker buildx imagetools create --tag "$IMAGE_REPO:sha-$short" --tag "$IMAGE_REPO:main" \
+            "$IMAGE_REPO@$DIGEST"
+          # Fail if a tag doesn't point at exactly the digest that was gated and signed.
+          for tag in "sha-$short" main; do
+            got=sha256:$(docker buildx imagetools inspect --raw "$IMAGE_REPO:$tag" | sha256sum | cut -d' ' -f1)
+            [ "$got" = "$DIGEST" ] || { echo "::error::$IMAGE_REPO:$tag is $got, not $DIGEST"; exit 1; }
+          done
+          {
+            echo "### Candidate image"
+            echo "\`$IMAGE_REPO@$DIGEST\`, tagged \`sha-$short\` and \`main\`"
+          } >> "$GITHUB_STEP_SUMMARY"
