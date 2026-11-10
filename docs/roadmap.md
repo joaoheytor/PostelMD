@@ -30,7 +30,8 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         `internal/store/fs/faultfs` crashes at any step and models a power loss. The save's
         atomic replace is tested at every crash point, with negative controls proving a
         missing `fsync` is caught. Git refs and objects are crash-tested the same way (#54, #56);
-      - **for the MVP (ADR-0020):** a move and a delete to the trash crashed at every step, the
+      - **for the MVP (ADR-0020):** a move, a delete to the trash and a restore from it
+        (ADR-0024, both trash layouts) crashed at every step, the
         startup temp sweep, saves racing each other and a delete under the vault mutex (these
         are done, in `internal/vault`), a commit crash followed by a restart and the next
         commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
@@ -114,6 +115,8 @@ PostelMD is worth using before building the rest of the design.
 - one password, set on first run with the setup token; signed session cookies with a session
   epoch; `postelmd reset-password`;
 - file tree: create, rename, move (no-clobber) and delete to the trash;
+- trash view: list the trash and restore an item to a folder and name of the user's choice,
+  never over an existing one (ADR-0024; emptying and purging wait for v0.2);
 - CM6 editor, live preview (sanitized, with Mermaid), copy buttons;
 - safe save: content-hash ETag, `If-Match`/`If-None-Match`, atomic replace, conflict view,
   IndexedDB drafts;
@@ -138,14 +141,16 @@ PostelMD is worth using before building the rest of the design.
   deleted"), including a save already waiting on the vault mutex when the delete runs.
 - Moving onto an existing file returns 409, and the destination is unchanged. A delete moves
   the item to the trash.
+- A deleted note is listed in the trash and restored with its content; restoring onto a name
+  in use returns 409, says so, and another name restores it (e2e).
 - A stale save response never clears newer edits (an e2e test with injected latency).
 - Killing the browser mid-edit → the draft is recovered on reopen.
 - Pasting an AWS key → editor warning.
-- Failure scenarios: a crash at every step of a save, a move, a delete to the trash and a git
-  commit, under both the process-kill and the power-loss models; the startup temp sweep. For
-  the commit: crash → restart → next commit either succeeds, or fails with the lock message
-  and succeeds after "Remove the lock", with the branch at the old or the new commit and no
-  change lost.
+- Failure scenarios: a crash at every step of a save, a move, a delete to the trash, a
+  restore from the trash (both layouts) and a git commit, under both the process-kill and
+  the power-loss models; the startup temp sweep. For the commit: crash → restart → next
+  commit either succeeds, or fails with the lock message and succeeds after "Remove the
+  lock", with the branch at the old or the new commit and no change lost.
 - Path lookup, create, move and upload naming `.git/config` or `.postelmd/*` return 404. Fuzz
   tests for path traversal pass. The e2e run produces no CSP violation reports.
 - A session cookie fails after the password changes; a forged or expired cookie is refused;

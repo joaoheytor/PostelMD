@@ -87,6 +87,9 @@ func TestEveryWriteIsLogged(t *testing.T) {
 			header: auth(map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"})}, true, 403, "-", "WARN"},
 		{"delete", call{method: "DELETE", path: "/api/v1/notes/" + secretName, header: auth(nil)},
 			true, 200, "DELETE /api/v1/notes/{path...}", "INFO"},
+		{"trash", call{method: "GET", path: "/api/v1/trash", header: auth(nil)}, false, 200, "", ""},
+		{"restore elsewhere", call{method: "POST", path: "/api/v1/trash/20261110T000000.000000000Z-" + secretName + "/restore",
+			body: `{"name":"` + secretBody + `"}`, header: auth(jsonHeader)}, true, 410, "POST /api/v1/trash/{id}/restore", "WARN"},
 		{"unknown API", call{method: "POST", path: "/api/v1/" + secretName, header: auth(nil)}, true, 404, "/api/", "WARN"},
 	}
 	for _, tt := range tests {

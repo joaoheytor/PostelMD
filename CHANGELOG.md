@@ -68,6 +68,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   changed in another tab or on the host, and shows each finding by file, rule and line
   (never the secret). With a finding, or a file it couldn't check (binary or too large), the
   only way to commit is "Commit anyway".
+- A Trash view in the web app: it lists deleted notes and folders, newest first, with when
+  each was deleted, and restores one to the folder and name you choose (the vault root by
+  default). A restore never overwrites: if the name is taken, it says so and you type
+  another. Emptying the trash comes in v0.2.
 
 ### Changed
 - The conflict banner shows a line diff between your text and the other version, and says
