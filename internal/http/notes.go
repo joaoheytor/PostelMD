@@ -192,6 +192,8 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 		writeError(w, stdhttp.StatusNotFound, "not found")
 	case errors.Is(err, vault.ErrExists):
 		writeError(w, stdhttp.StatusConflict, "already exists")
+	case errors.Is(err, vault.ErrIntoItself):
+		writeError(w, stdhttp.StatusBadRequest, "a folder can't move into itself")
 	case errors.Is(err, vault.ErrTooLarge):
 		writeError(w, stdhttp.StatusRequestEntityTooLarge, "note too large")
 	case errors.Is(err, vault.ErrBusy):

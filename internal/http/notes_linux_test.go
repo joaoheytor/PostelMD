@@ -94,6 +94,8 @@ func TestNotesAPI(t *testing.T) {
 			header: map[string]string{"Content-Type": "application/json"}}, 204, "", ""},
 		{"move onto a note", call{method: "POST", path: "/api/v1/move", body: `{"from":"notes/new.md","to":"archive/a.md"}`,
 			header: map[string]string{"Content-Type": "application/json"}}, 409, "", ""},
+		{"move a folder into itself", call{method: "POST", path: "/api/v1/move", body: `{"from":"notes","to":"notes/sub/notes"}`,
+			header: map[string]string{"Content-Type": "application/json"}}, 400, `{"error":"a folder can't move into itself"}`, ""},
 		{"list root", call{method: "GET", path: "/api/v1/folders/"}, 200, `{"entries":[{"name":"archive","kind":"folder"},{"name":"notes","kind":"folder"}]}`, ""},
 		{"delete", call{method: "DELETE", path: "/api/v1/notes/archive/a.md"}, 200, "trashName", ""},
 		{"delete a folder", call{method: "DELETE", path: "/api/v1/folders/notes"}, 200, "trashName", ""},

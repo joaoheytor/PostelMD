@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // One user and one vault: each test builds on the one before.
@@ -85,4 +85,57 @@ test("an edit made outside the editor is a conflict, not an overwrite", async ({
   await page.getByRole("button", { name: "Keep my version" }).click();
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(readFileSync(file, "utf8")).toContain("and in the browser");
+});
+
+test("rename the open note into a folder; it stays open at its new path", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByLabel("Folder name in the vault").fill("archive");
+  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "Vault" }).click();
+  await page.getByRole("button", { name: "hello.md" }).click();
+
+  await page.getByRole("button", { name: "Rename or move" }).click();
+  await page.getByLabel("New path for hello.md").fill("archive/runbook");
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+
+  await expect(page.getByRole("textbox", { name: "Text of archive/runbook.md" })).toContainText("and in the browser");
+  await expect(page).toHaveURL(/\/notes\/archive\/runbook\.md$/);
+  const vault = env("PM_E2E_VAULT");
+  expect(readFileSync(join(vault, "archive", "runbook.md"), "utf8")).toContain("and in the browser");
+  expect(existsSync(join(vault, "hello.md"))).toBe(false);
+});
+
+test("a move never overwrites an existing note", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByLabel("Note name in the vault").fill("draft");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("textbox", { name: "Text of draft.md" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Rename or move" }).click();
+  await page.getByLabel("New path for draft.md").fill("archive/runbook.md");
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+
+  await expect(page.getByRole("alert")).toContainText("archive/runbook.md already exists");
+  await expect(page.getByRole("textbox", { name: "Text of draft.md" })).toBeVisible();
+  expect(readFileSync(join(env("PM_E2E_VAULT"), "archive", "runbook.md"), "utf8")).toContain("and in the browser");
+});
+
+test("move a folder; its open note follows it", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "archive" }).click();
+  await page.getByRole("button", { name: "runbook.md" }).click();
+  await expect(page.getByRole("textbox", { name: "Text of archive/runbook.md" })).toBeVisible();
+
+  await page.getByRole("button", { name: "archive" }).click(); // selects it (and collapses it)
+  await page.getByRole("button", { name: "Rename or move folder" }).click();
+  await page.getByLabel("New path for archive").fill("ops");
+  await page.getByRole("button", { name: "Move", exact: true }).click();
+
+  await expect(page.getByRole("textbox", { name: "Text of ops/runbook.md" })).toBeVisible();
+  const vault = env("PM_E2E_VAULT");
+  expect(existsSync(join(vault, "ops", "runbook.md"))).toBe(true);
+  expect(existsSync(join(vault, "archive"))).toBe(false);
+  await noSeriousA11yViolations(page);
 });

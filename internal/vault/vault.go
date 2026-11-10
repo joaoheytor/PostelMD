@@ -29,11 +29,12 @@ const (
 const MaxNoteSize = 5 << 20
 
 var (
-	ErrNotFound = errors.New("vault: not found") // also returned for reserved paths
-	ErrExists   = errors.New("vault: already exists")
-	ErrConflict = errors.New("vault: the note changed since it was read")
-	ErrBusy     = errors.New("vault: busy, retry")
-	ErrTooLarge = errors.New("vault: note too large")
+	ErrNotFound   = errors.New("vault: not found") // also returned for reserved paths
+	ErrExists     = errors.New("vault: already exists")
+	ErrConflict   = errors.New("vault: the note changed since it was read")
+	ErrBusy       = errors.New("vault: busy, retry")
+	ErrTooLarge   = errors.New("vault: note too large")
+	ErrIntoItself = errors.New("vault: a folder can't move into itself")
 )
 
 // ConflictError is a failed save precondition. It carries the current note for the

@@ -19,6 +19,24 @@ export function parent(path: string): string {
   return i < 0 ? "" : path.slice(0, i);
 }
 
+/** Where path is after from moved to to, or undefined if the move didn't touch it. */
+export function rebase(path: string, from: string, to: string): string | undefined {
+  if (path === from) return to;
+  return path.startsWith(`${from}/`) ? to + path.slice(from.length) : undefined;
+}
+
+/**
+ * The vault path a typed move target means: trimmed, without leading or trailing slashes. A
+ * note keeps its extension when the new name has none ("a/b.md", "c" → "c.md"). Empty means
+ * nothing usable was typed.
+ */
+export function moveTarget(from: string, typed: string, kind: "file" | "folder"): string {
+  const to = typed.trim().replace(/^\/+|\/+$/g, "");
+  if (to === "" || kind === "folder") return to;
+  const ext = /\.[a-z]+$/i.exec(from)?.[0] ?? "";
+  return /\.[a-z]+$/i.test(to) ? to : to + ext;
+}
+
 /** The file tree: folders load when first expanded and reload after a change in them. */
 export class Tree {
   readonly state = new Store<TreeState>({ folders: new Map(), expanded: new Set([""]) });
@@ -45,9 +63,26 @@ export class Tree {
     if (open && !this.state.value.folders.has(path)) await this.load(path);
   }
 
+  /**
+   * After a move: forgets the moved folder and everything under it (stale listings), then
+   * reloads both parents. The new location starts collapsed.
+   */
+  async moved(from: string, to: string): Promise<void> {
+    const gone = (p: string) => rebase(p, from, to) !== undefined;
+    this.state.update((s) => ({
+      ...s,
+      folders: new Map([...s.folders].filter(([p]) => !gone(p))),
+      expanded: new Set([...s.expanded].filter((p) => !gone(p))),
+    }));
+    await Promise.all([...new Set([parent(from), parent(to)])].map((f) => this.reload(f)));
+  }
+
   /** Reloads the folder that holds path, expanding it. */
   async changed(path: string): Promise<void> {
-    const folder = parent(path);
+    await this.reload(parent(path));
+  }
+
+  private async reload(folder: string): Promise<void> {
     this.state.update((s) => ({ ...s, expanded: new Set(s.expanded).add(folder) }));
     await this.load(folder);
   }

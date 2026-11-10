@@ -1,7 +1,7 @@
 import * as api from "./api";
 import { DocumentSession } from "./document";
 import { Store } from "./store";
-import { join, Tree } from "./tree";
+import { join, rebase, Tree } from "./tree";
 
 /** The note open in the editor, with the text it was loaded with. */
 export interface OpenNote {
@@ -75,6 +75,36 @@ export class Workspace {
       return;
     }
     await this.tree.changed(path);
+  }
+
+  /**
+   * Renames or moves a note or folder; never onto an existing one. An open note inside it is
+   * saved first and reopened at its new path; if it can't be saved, nothing moves. True when
+   * it moved.
+   */
+  async move(from: string, to: string): Promise<boolean> {
+    const open = this.state.value.open;
+    const reopen = open && rebase(open.doc.path, from, to);
+    if (open && reopen) {
+      if (!(await this.saveOpen())) {
+        this.state.update((s) => ({ ...s, error: `Save or resolve ${open.doc.path} before moving it.` }));
+        return false;
+      }
+      // Closed before the move, so no autosave can target the old path.
+      open.doc.dispose();
+      this.state.set({});
+    }
+    try {
+      await api.move(from, to);
+    } catch (err) {
+      const why = err instanceof api.ApiError && err.status === 409 ? `${to} already exists` : message(err);
+      if (open && reopen) await this.open(open.doc.path); // reopening clears the error
+      this.state.update((s) => ({ ...s, error: `Couldn't move ${from}: ${why}` }));
+      return false;
+    }
+    await this.tree.moved(from, to);
+    if (reopen) await this.open(reopen);
+    return true;
   }
 
   /** Moves a note or folder to the trash. An open note inside it is closed unsaved. */
