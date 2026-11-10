@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ import (
 
 func TestPrepare(t *testing.T) {
 	data := t.TempDir()
-	p, _, err := Prepare(data, false)
+	p, _, err := Prepare(data, Options{})
 	if err != nil {
 		t.Skipf("the test's temp filesystem isn't on the allow-list: %v", err)
 	}
@@ -24,57 +25,124 @@ func TestPrepare(t *testing.T) {
 			t.Fatalf("%s: %v %v", d, st, err)
 		}
 	}
-	if _, _, err := Prepare(data, false); err != nil {
+	if _, _, err := Prepare(data, Options{}); err != nil {
 		t.Fatalf("Prepare is not idempotent: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(data, "runbook.MD"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Prepare(data, false); !errors.Is(err, ErrNotesAtRoot) {
+	if _, _, err := Prepare(data, Options{}); !errors.Is(err, ErrNotesAtRoot) {
 		t.Fatalf("notes at the root = %v, want ErrNotesAtRoot", err)
 	}
-	if _, _, err := Prepare(filepath.Join(data, "missing"), false); err == nil {
+	if _, _, err := Prepare(filepath.Join(data, "missing"), Options{}); err == nil {
 		t.Fatal("a missing data directory was accepted")
 	}
 }
 
-func TestStateFilesystemDecisions(t *testing.T) {
+func TestFilesystemDecisions(t *testing.T) {
 	// /dev/shm is tmpfs on Linux: it starts, flagged as not persistent.
-	if d, err := checkStateFS("/dev/shm", false); err != nil || d != Ephemeral {
+	if d, err := checkFS("/dev/shm", false); err != nil || d != Ephemeral {
 		t.Fatalf("tmpfs = %v, %v; want Ephemeral", d, err)
 	}
 	// /proc's magic (0x9FA0) is on no list: refused unless overridden.
-	if _, err := checkStateFS("/proc", false); err == nil {
+	if _, err := checkFS("/proc", false); err == nil {
 		t.Fatal("an unknown filesystem was accepted")
 	}
-	if _, err := checkStateFS("/proc", true); err != nil {
+	if _, err := checkFS("/proc", true); err != nil {
 		t.Fatalf("the override didn't apply: %v", err)
 	}
 }
 
-// TestNetworkFilesystemsAreRefused presents each network filesystem's statfs magic (the
-// test can't mount one): the state directory is refused, naming the filesystem, unless the
-// operator overrides it (ADR-0014 §1).
+// fakeFS presents a filesystem magic per directory (the test can't mount them): the state
+// directory gets state, every other directory gets vault.
+func fakeFS(t *testing.T, state, vault int64) {
+	t.Helper()
+	statfs = func(path string, st *unix.Statfs_t) error {
+		magic := vault
+		if filepath.Base(path) == ".postelmd" {
+			magic = state
+		}
+		// Statfs_t.Type's integer type differs between architectures.
+		reflect.ValueOf(&st.Type).Elem().SetInt(magic)
+		return nil
+	}
+	t.Cleanup(func() { statfs = unix.Statfs })
+}
+
+// TestNetworkFilesystemsAreRefused presents each network filesystem's statfs magic: the
+// directory is refused, naming the filesystem, unless the operator overrides it (ADR-0014
+// §1). A Docker Desktop file share (9p for a Windows path; FUSE, which is what virtiofs on
+// macOS reports) gets the named-volume fix, never the advice to override.
 func TestNetworkFilesystemsAreRefused(t *testing.T) {
-	// Untyped constants: Statfs_t.Type's integer type differs between architectures.
 	for _, tt := range []struct {
-		name  string
-		magic func(*unix.Statfs_t)
+		name      string
+		magic     int64
+		hostShare bool
 	}{
-		{"9p", func(st *unix.Statfs_t) { st.Type = 0x01021997 }},
-		{"fuse", func(st *unix.Statfs_t) { st.Type = 0x65735546 }},
-		{"nfs", func(st *unix.Statfs_t) { st.Type = 0x6969 }},
+		{"9p", 0x01021997, true},
+		{"fuse", 0x65735546, true},
+		{"nfs", 0x6969, false},
+		{"cifs", 0xFF534D42, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			statfs = func(_ string, st *unix.Statfs_t) error { tt.magic(st); return nil }
-			t.Cleanup(func() { statfs = unix.Statfs })
-			_, err := checkStateFS("/data/.postelmd", false)
+			fakeFS(t, tt.magic, tt.magic)
+			_, err := checkFS("/data/vaults/notes", false)
 			if err == nil || !strings.Contains(err.Error(), "is on "+tt.name+",") {
 				t.Fatalf("%s = %v, want a refusal naming it", tt.name, err)
 			}
-			if d, err := checkStateFS("/data/.postelmd", true); err != nil || d != Persistent {
+			if got := strings.Contains(err.Error(), "-v postelmd-data:/data"); got != tt.hostShare {
+				t.Fatalf("%s: named-volume fix in %q = %v, want %v", tt.name, err, got, tt.hostShare)
+			}
+			if got := strings.Contains(err.Error(), "POSTELMD_ALLOW_NETWORK_FS"); got == tt.hostShare {
+				t.Fatalf("%s: override advice in %q = %v, want %v", tt.name, err, got, !tt.hostShare)
+			}
+			if d, err := checkFS("/data/vaults/notes", true); err != nil || d != Persistent {
 				t.Fatalf("%s with the override = %v, %v; want Persistent", tt.name, d, err)
 			}
 		})
+	}
+}
+
+// TestPrepareChecksStateAndVault: the vault can be a separate bind mount (an existing notes
+// folder), so its filesystem is checked like the state directory's; the worse of the two
+// decides. The container's own layer (no volume at /data) is refused unless the operator
+// opts in; tmpfs starts, flagged.
+func TestPrepareChecksStateAndVault(t *testing.T) {
+	const ext4, tmpfs, overlay, p9, fuse = 0xEF53, 0x01021994, 0x794C7630, 0x01021997, 0x65735546
+	for _, tt := range []struct {
+		name         string
+		state, vault int64
+		opts         Options
+		want         Durability
+		wantErr      string // substring; "" for none
+	}{
+		{"both on ext4", ext4, ext4, Options{}, Persistent, ""},
+		{"a Windows-path vault on 9p", ext4, p9, Options{}, 0, "notes is on 9p"},
+		{"a macOS vault on virtiofs (FUSE)", ext4, fuse, Options{}, 0, "notes is on fuse, a FUSE filesystem"},
+		{"state on 9p", p9, ext4, Options{}, 0, ".postelmd is on 9p"},
+		{"a 9p vault, overridden", ext4, p9, Options{AllowNetworkFS: true}, Persistent, ""},
+		{"no volume at /data", overlay, overlay, Options{}, 0, "no volume is mounted at /data"},
+		{"only the vault mounted", overlay, ext4, Options{}, 0, "no volume is mounted at /data"},
+		{"no volume, opted in", overlay, overlay, Options{AllowEphemeralData: true}, ContainerLayer, ""},
+		{"the network override isn't the ephemeral one", overlay, overlay, Options{AllowNetworkFS: true}, 0, "no volume"},
+		{"tmpfs starts, flagged", tmpfs, tmpfs, Options{}, Ephemeral, ""},
+		{"a tmpfs vault flags the whole", ext4, tmpfs, Options{}, Ephemeral, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeFS(t, tt.state, tt.vault)
+			_, got, err := Prepare(t.TempDir(), tt.opts)
+			if tt.wantErr == "" {
+				if err != nil || got != tt.want {
+					t.Fatalf("= %v, %v; want %v", got, err, tt.want)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+			}
+		})
+	}
+	if !strings.Contains(ErrNoVolume.Error(), "-v ~/postelmd:/data") || !strings.Contains(ErrNoVolume.Error(), "POSTELMD_ALLOW_EPHEMERAL_DATA") {
+		t.Fatalf("the no-volume error lacks the fix: %v", ErrNoVolume)
 	}
 }

@@ -52,18 +52,48 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - An optional settings file, `.postelmd/config.yaml` in the data directory. Flags and
   `POSTELMD_*` environment variables still win over it. An unknown key stops the server with
   its name, so a typo is never silently ignored.
+- One log line for every write to the API (saves, creates, moves, deletes, commits, logins):
+  the method, the route, the status and how long it took, never the note's path or content.
+  Conflicts (412) and server errors can be counted from the logs.
+- The server refuses to start when no volume is mounted at `/data`, since the next
+  `docker rm` (every upgrade) would delete everything. It says how to add one;
+  `POSTELMD_ALLOW_EPHEMERAL_DATA=true` (or `allow_ephemeral_data` in `config.yaml`) starts it
+  anyway for a throwaway try.
+- The notes folder's filesystem is checked like the data directory's: an adopted folder on a
+  Windows path (9p) or a FUSE share (such as Docker Desktop's on macOS) is refused, with the
+  fix.
+- A runbook for running v0.1: backups, a restore drill, logs, upgrade and rollback, and
+  recovering from a lost password, a git lock or a deleted note.
 - The commit dialog checks every added or changed file it lists for secrets, including notes
-  changed in another tab or on the host, and shows each finding by file, kind and line
-  (never the secret). With a finding, the only way to commit is "Commit anyway". Files that
-  aren't text are listed as not checked.
+  changed in another tab or on the host, and shows each finding by file, rule and line
+  (never the secret). With a finding, or a file it couldn't check (binary or too large), the
+  only way to commit is "Commit anyway".
 
 ### Changed
+- The conflict banner shows a line diff between your text and the other version, and says
+  what "Keep my version" and "Use the other version" each do.
+- The file tree shows the open note however it was opened (Ctrl+P, a link, "Save it as a new
+  note"): its folders expand, it is marked as current and scrolled into view.
+- Setup shows the password rule (at least 12 characters) under the field, and says how many
+  files from the notes folder became the first commit.
+- Save errors read as plain sentences, e.g. "Not saved: can't reach the server. Retrying;
+  your edits are kept in this browser.", never a raw browser error.
 - A commit takes exactly the changes the dialog listed. If anything changed after the dialog
   listed it, nothing is committed and the dialog lists and checks the changes again.
-- Setup now says that an adopted folder's files are committed as they are, and asks you to
-  check them for secrets before you push the repository anywhere.
+- The commit API now requires the listed `changes`; a tab left open across an upgrade gets
+  422 and must be reloaded.
+- After setup, the notice of the files imported into the first commit asks you to check them
+  for secrets before you push the repository anywhere.
 
 ### Fixed
+- New note, New folder, Rename or move and the second setup step put the focus in their
+  field, so typing a name and pressing Enter works. Cancelling gives the focus back to the
+  button; after Delete it goes to the note's folder, and after a restore to the editor.
+- Moving a note into a folder that doesn't exist says so ("Create it first with New folder")
+  and keeps what was typed, instead of "not found" and a reset field.
+- Error messages in setup, login and the commit dialog are red again, not grey.
+- Accessibility: the login and setup pages have a main landmark, diffs can be scrolled from
+  the keyboard, and text areas, selects and expandable summaries show a focus ring.
 - An idle server no longer keeps about 65 MB after a login: the memory the password hash
   (argon2id) needs is handed back at once, so idle memory stays near 15 MB, well under the
   80 MB budget.

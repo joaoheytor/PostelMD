@@ -1,9 +1,9 @@
-import { html, nothing, type TemplateResult } from "lit";
+import { html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
 import type { Template } from "../core/templates";
-import { join, parent } from "../core/tree";
-import { isNote, type Workspace } from "../core/workspace";
-import { LightElement, openNote, StoreController } from "./base";
+import { isNote, join, parent } from "../core/tree";
+import type { Workspace } from "../core/workspace";
+import { LightElement, openNote, refocus, StoreController } from "./base";
 import "./move";
 import { chosen, templateFields, values } from "./template-fields";
 
@@ -11,7 +11,8 @@ type Creating = "note" | "folder" | undefined;
 
 /**
  * The vault's files as nested lists of native buttons: folders toggle (aria-expanded),
- * notes open. New notes and folders go into the selected folder.
+ * notes open, and the open note is marked (aria-current) and scrolled into view. New notes
+ * and folders go into the selected folder.
  */
 export class FileTree extends LightElement {
   static override properties = {
@@ -32,11 +33,39 @@ export class FileTree extends LightElement {
 
   private readonly tree = new StoreController(this, () => this.workspace?.tree.state);
   private readonly ws = new StoreController(this, () => this.workspace?.state);
+  /** The button that opened the inline form: it gets the focus back when the form closes. */
+  private opener: Element | null = null;
+  /** The open note last scrolled into view. */
+  private shown: string | undefined;
 
   constructor() {
     super();
     this.folder = "";
     this.moving = false;
+  }
+
+  /** Selects folder and focuses its entry (the Vault button for the root), e.g. after a delete. */
+  async focusFolder(folder: string): Promise<void> {
+    this.folder = folder;
+    await this.updateComplete;
+    const at = [...this.querySelectorAll<HTMLElement>("[data-folder]")].find((b) => b.dataset["folder"] === folder);
+    (at ?? this.querySelector<HTMLElement>(".pm-tree-root"))?.focus();
+  }
+
+  protected override updated(changed: PropertyValues<this>): void {
+    if (changed.has("creating") && this.creating) this.querySelector<HTMLInputElement>("form.pm-tree-create input[name=name]")?.focus();
+    const open = this.ws.value?.open?.doc.path;
+    if (open === this.shown) return;
+    const current = this.querySelector('.pm-tree-note[aria-current="page"]');
+    if (open && !current) return; // its folder is still loading: try again on the next render
+    current?.scrollIntoView({ block: "nearest" });
+    this.shown = open;
+  }
+
+  private start(what: "note" | "folder" | "move", e: Event): void {
+    this.opener = e.currentTarget as Element;
+    if (what === "move") this.moving = true;
+    else this.creating = what;
   }
 
   private async open(path: string): Promise<void> {
@@ -56,14 +85,19 @@ export class FileTree extends LightElement {
     if (!name) return;
     const form = e.target as HTMLFormElement;
     const template = chosen(form);
-    if (this.creating === "note") await this.workspace.createNote(this.folder, name, template && { template, values: values(form) });
-    else await this.workspace.createFolder(this.folder, name);
+    if (this.creating === "note") {
+      await this.workspace.createNote(this.folder, name, template && { template, values: values(form) });
+      this.creating = this.template = undefined; // the new note's editor has the focus
+      return;
+    }
+    await this.workspace.createFolder(this.folder, name);
     this.cancel();
   }
 
   private cancel(): void {
     this.creating = undefined;
     this.template = undefined;
+    void refocus(this, this.opener);
   }
 
   private entry(folder: string, e: Entry): TemplateResult {
@@ -71,7 +105,9 @@ export class FileTree extends LightElement {
     if (e.kind === "folder") {
       const open = this.tree.value?.expanded.has(path) ?? false;
       return html`<li>
-        <button type="button" class="pm-tree-folder" aria-expanded=${open} @click=${() => this.toggle(path)}>${e.name}</button>
+        <button type="button" class="pm-tree-folder" data-folder=${path} aria-expanded=${open} @click=${() => this.toggle(path)}>
+          ${e.name}
+        </button>
         ${open ? this.list(path) : nothing}
       </li>`;
     }
@@ -99,11 +135,11 @@ export class FileTree extends LightElement {
     return html`
       <nav aria-label="Notes">
         <div class="pm-tree-actions">
-          <button type="button" @click=${() => (this.creating = "note")}>New note</button>
-          <button type="button" @click=${() => (this.creating = "folder")}>New folder</button>
+          <button type="button" @click=${(e: Event) => this.start("note", e)}>New note</button>
+          <button type="button" @click=${(e: Event) => this.start("folder", e)}>New folder</button>
           ${this.folder === ""
             ? nothing
-            : html`<button type="button" @click=${() => (this.moving = true)}>Rename or move folder</button>`}
+            : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>`}
         </div>
         ${this.moving && this.folder !== ""
           ? html`<pm-move
@@ -113,13 +149,14 @@ export class FileTree extends LightElement {
               .onDone=${(to?: string) => {
                 this.moving = false;
                 if (to) this.folder = to;
+                void refocus(this, this.opener);
               }}
             ></pm-move>`
           : nothing}
         ${this.creating
           ? html`<form class="pm-tree-create" @submit=${this.create}>
               <label>${this.creating === "note" ? "Note" : "Folder"} name in ${where}
-                <input name="name" required autofocus @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.cancel()} />
+                <input name="name" required @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.cancel()} />
               </label>
               ${this.creating === "note"
                 ? templateFields(this.template, () => (this.template = chosen(this.querySelector("form.pm-tree-create") as HTMLFormElement)))

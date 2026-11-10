@@ -28,6 +28,7 @@ jobs:
   pr-title:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions: {}
     steps:
       - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -48,6 +49,7 @@ jobs:
   changelog:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -80,6 +82,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -108,6 +111,7 @@ jobs:
 
   test-go:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -128,6 +132,7 @@ jobs:
 
   test-web:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -147,6 +152,7 @@ jobs:
 
   vuln:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -170,6 +176,7 @@ jobs:
     # Builds every release platform (not pushed), then the `docker run` smoke test of
     # ADR-0009 and the Trivy gate of ADR-0015 on this runner's platform.
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -198,6 +205,7 @@ jobs:
     # The `image` job only builds arm64; this one runs it: the same smoke test and Trivy gate
     # on GitHub's hosted arm64 runner (roadmap v0.1: "runs on amd64 and arm64").
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -229,6 +237,7 @@ jobs:
   e2e:
     # Playwright smoke tests against the built binary (role and label locators, axe scan).
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -264,6 +273,7 @@ jobs:
     if: always()
     needs: [pr-title, changelog, lint, test-go, test-web, vuln, image, image-arm64, e2e]
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions: {}
     steps:
       - name: All needed jobs succeeded (or were skipped where allowed)

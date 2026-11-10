@@ -15,6 +15,13 @@ export class ApiError extends Error {
   }
 }
 
+/** The server didn't answer at all: offline, or not running. fetch's own error is never shown. */
+export class NetworkError extends Error {
+  constructor() {
+    super("can't reach the server");
+  }
+}
+
 let onUnauthorized: () => void = () => {};
 
 /** Sets what happens when any request comes back 401 (the app asks for the password again). */
@@ -28,7 +35,12 @@ export function encodePath(path: string): string {
 }
 
 async function request(method: string, url: string, init: RequestInit = {}): Promise<Response> {
-  const resp = await fetch(url, { ...init, method, credentials: "same-origin", cache: "no-store" });
+  let resp: Response;
+  try {
+    resp = await fetch(url, { ...init, method, credentials: "same-origin", cache: "no-store" });
+  } catch {
+    throw new NetworkError();
+  }
   if (resp.status === 401 && !url.startsWith("/api/v1/session")) onUnauthorized();
   return resp;
 }
@@ -47,6 +59,8 @@ async function errorOf(resp: Response): Promise<ApiError> {
   } catch {
     // Not JSON: keep the status text.
   }
+  if (resp.status === 503) message = "the server is busy; try again in a moment";
+  else if (resp.status >= 500) message = "the server had an error; its log says more";
   const retry = Number(resp.headers.get("Retry-After"));
   return new ApiError(resp.status, message, Number.isFinite(retry) ? retry * 1000 : 0, code);
 }
@@ -142,8 +156,8 @@ export async function saveNote(path: string, content: string, baseETag: string):
       headers: { "If-Match": baseETag, "Content-Type": "text/markdown; charset=utf-8" },
       body: content,
     });
-  } catch (err) {
-    return { kind: "error", message: `offline: ${String(err)}`, retryAfterMs: 0, retry: true };
+  } catch {
+    return { kind: "error", message: `can't reach the server. ${kept}`, retryAfterMs: 0, retry: true };
   }
   if (resp.status === 204) return { kind: "saved", etag: resp.headers.get("ETag") ?? "" };
   if (resp.status === 412) return { kind: "conflict", etag: resp.headers.get("ETag") ?? "", content: await resp.text() };
@@ -152,7 +166,18 @@ export async function saveNote(path: string, content: string, baseETag: string):
   // Busy (503), an expired session (401) and server errors are retried; 413 and other client
   // errors won't get better by themselves.
   const retry = e.status === 401 || e.status === 503 || e.status >= 500;
-  return { kind: "error", message: e.message, retryAfterMs: e.retryAfterMs, retry };
+  return { kind: "error", message: saveError(e), retryAfterMs: e.retryAfterMs, retry };
+}
+
+const kept = "Retrying; your edits are kept in this browser.";
+
+/** Why a save failed, as the end of the status line ("Not saved: …"): never a raw error. */
+function saveError(e: ApiError): string {
+  if (e.status === 401) return "your session expired. Log in again; your edits are kept in this browser.";
+  if (e.status === 503) return `the server is busy. ${kept}`;
+  if (e.status === 413) return "the note is too large to save.";
+  if (e.status >= 500) return `the server had an error. ${kept}`;
+  return e.message;
 }
 
 /** Creates a note (If-None-Match: *); fails with 409 if it exists. */

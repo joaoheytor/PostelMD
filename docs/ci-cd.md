@@ -80,7 +80,7 @@ branch, so fork PRs can't poison `main`'s cache.
 
 | Tag | Where | Meaning |
 |---|---|---|
-| `sha-<short>`, `main` | GHCR | Candidate from `main` (not for users) |
+| `sha-<short>`, `main` | GHCR | Candidate from `main`: for testers until the first release candidate, never for production |
 | `X.Y.Z-rc.N` | GHCR | Release candidate |
 | `X.Y.Z`, `X.Y` | **Docker Hub** + GHCR | Promoted release |
 | `X` (major) | **Docker Hub** + GHCR | **From 1.0 only.** Before 1.0 every minor may break, so docs use `:0.Y`. |
@@ -144,6 +144,8 @@ branch, so fork PRs can't poison `main`'s cache.
 - **Stable aliases** (`X.Y`, and `X` from 1.0) are moved only by `release.yaml`, only for a
   stable tag, and only after both verifications pass. RC tags never move an alias.
 - **User verification** and the spike's evidence: [verify-images](operations/verify-images.md).
+  Running a candidate or a release (backups, logs, upgrade and rollback):
+  [running v0.1](operations/running-v0.1.md).
 - **Docker Hub description:** updated by hand for now. Syncing it automatically needs a token
   with *Read, Write, Delete* scope, broader than the push token; revisit later with a separate
   token.

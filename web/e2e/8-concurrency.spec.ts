@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page, Request, Response } from "@playwright/test";
-import { env, expect, login, test } from "./helpers";
+import { env, expect, login, noSeriousA11yViolations, test } from "./helpers";
 
 // The save protocol's races, in a real browser (ADR-0003 §7, docs/roadmap.md v0.1).
 
@@ -38,7 +38,9 @@ test("two tabs edit the same note: the second save is a conflict, and nothing is
 
   // Tab 2 still has the first version as its base.
   await typeAtEnd(tab2, "shared.md", "from tab two");
-  const conflict = tab2.getByRole("alert").filter({ has: tab2.getByRole("heading", { name: "This note changed outside this editor" }) });
+  const conflict = tab2
+    .getByRole("alert")
+    .filter({ has: tab2.getByRole("heading", { name: "This note changed in another tab or outside this editor" }) });
   await expect(conflict).toBeVisible();
   await expect(tab2.getByRole("status")).toHaveText("Not saved: conflict");
   expect(tab2Saves).toEqual([412]);
@@ -46,8 +48,17 @@ test("two tabs edit the same note: the second save is a conflict, and nothing is
   // Nothing is lost: tab 1's text is on disk, and tab 2 still has its own edit and shows tab 1's.
   expect(readFileSync(vault("shared.md"), "utf8")).toBe("# Shared\nfrom tab one");
   await expect(tab2.getByRole("textbox", { name: "Text of shared.md" })).toContainText("from tab two");
-  await conflict.getByText("Show the other version").click();
-  await expect(conflict).toContainText("from tab one");
+  // The banner shows what differs, and what each way out does.
+  const diff = conflict.getByLabel("Changes from your text to the other version");
+  await expect(diff.getByRole("deletion")).toHaveText("- from tab two");
+  await expect(diff.getByRole("insertion")).toHaveText("+ from tab one");
+  await expect(conflict.getByRole("button", { name: "Keep my version" })).toHaveAccessibleDescription(
+    "saves your text over the other version.",
+  );
+  await expect(conflict.getByRole("button", { name: "Use the other version" })).toHaveAccessibleDescription(
+    "replaces your text in the editor; Ctrl+Z brings it back.",
+  );
+  await noSeriousA11yViolations(tab2);
 
   // Autosave stays stopped until the user chooses.
   await typeAtEnd(tab2, "shared.md", " still");
