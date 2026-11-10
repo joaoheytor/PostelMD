@@ -86,6 +86,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   for secrets before you push the repository anywhere.
 
 ### Fixed
+- A diagram whose renderer can't load now shows an error after 15 seconds instead of waiting
+  forever, and editing a diagram no longer keeps every earlier version of it in memory.
+- Opening two notes in quick succession always shows the one opened last, even when the
+  first one takes longer to load.
 - New note, New folder, Rename or move and the second setup step put the focus in their
   field, so typing a name and pressing Enter works. Cancelling gives the focus back to the
   button; after Delete it goes to the note's folder, and after a restore to the editor.

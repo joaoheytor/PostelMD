@@ -34,7 +34,8 @@ web/
   src/templates/       note template starter pack
   public/frames/       the sandboxed Mermaid frame page (ADR-0021)
 packages/plugin-api/   @postelmd/plugin-api (types + runtime contract, Apache-2.0)
-test/scenarios/        failure-scenario suite (fault injection; one test per recovery contract)
+test/scenarios/        planned (`make scenarios`); failure scenarios live with the code
+                       today (Testing conventions)
 test/perf/editor/      editor benchmark spike (#33)
 test/perf/app/         real-app benchmark of the v0.1 budgets (`make perf`)
 scripts/               image smoke and scan, file-size check, fuzz, release-tag verification
@@ -86,7 +87,7 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 14. **Crash-safe mutations.** Any operation with more than one side effect (filesystem + DB,
     git, structural ops, backup, restore, migration) writes a **durable intent before its
     first side effect**. It also needs an operation-specific recovery table in its ADR and a
-    test in `test/scenarios/` for every crash point. Never infer what happened from a single
+    failure-scenario test for every crash point (Testing conventions). Never infer what happened from a single
     signal (HEAD alone, a hash match alone, a timeout).
 15. **Secrets and logs:** never log note content, secret values, tokens or passwords. Secret
     scanning runs on the exact bytes and metadata being committed or pushed, and cached
@@ -176,9 +177,13 @@ Planned, with the code that needs them: `make dev` (go run + Vite dev server),
 
 - Go: table-driven tests on real `t.TempDir()` vaults. Fuzz path confinement and the save
   protocol (`go test -fuzz`).
-- Failure scenarios (`test/scenarios/`): inject a crash at each recorded step (a kill-point
-  hook in the store layer), simulate `ENOSPC`, external writers and duplicate processes, then
-  assert the recovery table's outcome. These are permanent regression tests.
+- Failure scenarios: inject a crash at each recorded step (a kill-point hook in the store
+  layer), simulate `ENOSPC`, external writers and duplicate processes, then assert the
+  recovery table's outcome. These are permanent regression tests. They live next to the code
+  they cover: the harness in `internal/store/fs/faultfs`, store-level crash tests in
+  `internal/store/*/…_test.go` (e.g. `store/fs/crash_linux_test.go`), and operation-level
+  ones in `internal/vault/*_test.go` (`crash_linux_test.go`, `commit_powerloss_linux_test.go`).
+  `make test` runs them all.
 - Frontend: Vitest for `core/` (no DOM needed). Playwright uses role- and label-based
   locators only; no CSS or structure selectors.
 - Prove each new test can fail: break or disable the behaviour, see the test fail, restore

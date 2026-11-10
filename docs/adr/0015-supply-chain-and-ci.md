@@ -229,3 +229,13 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 |---|---|
 | Self-hosted runners for the public repo | Fork PRs could run code inside the homelab cluster |
 | Hand-vendored or importmap JS | Version drift and manual re-vendoring (a FrankMD lesson) |
+
+## Clarifications
+- **2026-11-10, npm `overrides`.** An `overrides` entry in `web/package.json` is allowed only
+  to lift a vulnerable transitive dependency when no release of its parents accepts the fixed
+  version; it pins an exact version and is removed once the parents catch up. The first one is
+  `minimatch` 11.0.4, for GHSA-g3hv-75wg-m249 (fixed in 11.0.1): it reaches `web` only through
+  ESLint and `typescript-eslint` (dev tooling, never shipped), whose latest releases (eslint
+  10.14.0, `@eslint/config-array` 0.23.5, `typescript-eslint` 8.72.2) still require `^10`.
+  `npm run lint` passes with it. `test/perf/app` and `test/perf/editor` don't depend on
+  `minimatch`.
