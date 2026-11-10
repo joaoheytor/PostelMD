@@ -6,6 +6,7 @@ import { parent } from "../core/tree";
 import { isNote, type OpenNote, type Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
 import { Preview } from "../preview/pane";
+import { ScrollSync } from "../preview/sync";
 import { LightElement, listen, openNote, StoreController } from "./base";
 import "./history";
 import "./move";
@@ -54,7 +55,7 @@ export class NoteEditor extends LightElement {
   private editor: Editor | undefined;
   private mounted: { note: OpenNote; host: Element } | undefined;
   private docSub: Disposable | undefined;
-  private preview: { pane: Preview; el: Element } | undefined;
+  private preview: { pane: Preview; sync: ScrollSync; el: Element } | undefined;
   private listeners: DisposableStore | undefined;
 
   constructor() {
@@ -116,13 +117,12 @@ export class NoteEditor extends LightElement {
     if (note === this.mounted?.note && host === this.mounted?.host) return;
     this.unmount();
     if (!note || !host) return;
-    const editor = mountEditor(
-      host.attachShadow({ mode: "open" }),
-      note.initial,
-      `Text of ${note.doc.path}`,
-      () => note.doc.edit(),
-      () => this.preview?.pane.update(() => editor.text()),
-    );
+    const editor = mountEditor(host.attachShadow({ mode: "open" }), {
+      doc: note.initial,
+      label: `Text of ${note.doc.path}`,
+      onEdit: () => note.doc.edit(),
+      onChange: () => this.preview?.pane.update(() => editor.text()),
+    });
     this.editor = editor;
     this.mounted = { note, host };
     this.workspace.reader = () => editor.text();
@@ -135,13 +135,16 @@ export class NoteEditor extends LightElement {
     const el = this.previewing ? this.querySelector<HTMLElement>(".pm-preview") : null;
     if (el === (this.preview?.el ?? null)) return;
     this.closePreview();
-    if (!el || !this.editor) return;
-    const pane = new Preview(el);
-    this.preview = { pane, el };
+    const host = this.mounted?.host;
+    if (!el || !this.editor || !(host instanceof HTMLElement)) return;
+    const sync = new ScrollSync(this.editor, host, el);
+    const pane = new Preview(el, () => sync.rendered());
+    this.preview = { pane, sync, el };
     pane.show(this.editor.text());
   }
 
   private closePreview(): void {
+    this.preview?.sync.dispose();
     this.preview?.pane.dispose();
     this.preview = undefined;
   }

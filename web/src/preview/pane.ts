@@ -1,4 +1,4 @@
-import { type Disposable, toDisposable } from "../core/disposable";
+import { type Disposable, DisposableStore, toDisposable } from "../core/disposable";
 import type { Block } from "./render";
 import { assetWorker, sanitized } from "./sanitize";
 import type { Reply, Request } from "./worker";
@@ -6,6 +6,8 @@ import workerUrl from "./worker.ts?worker&url";
 
 /** Blocks per sanitize call in the first render, between yields (ADR-0007). */
 const batch = 200;
+
+const copyLabel = "Copy code";
 
 /** Lets the event loop run (input, paint) without setTimeout's clamping. */
 function yieldNow(): Promise<void> {
@@ -22,8 +24,8 @@ function yieldNow(): Promise<void> {
 /**
  * The live preview of one note, rendered into el (ADR-0007): markdown-it in a Worker, then
  * DOMPurify inside the Trusted Types policy. The first render is batched and yields; after
- * that only the blocks whose HTML changed are sanitized and replaced. Create it only while
- * the preview is visible, and dispose it when hidden.
+ * that only the blocks whose HTML changed are sanitized and replaced. Code blocks get a copy
+ * button. Create it only while the preview is visible, and dispose it when hidden.
  */
 export class Preview implements Disposable {
   private readonly worker = assetWorker(workerUrl);
@@ -34,15 +36,24 @@ export class Preview implements Disposable {
   /** Replies are applied one at a time, in order. */
   private applying: Promise<void> = Promise.resolve();
   private disposed = false;
+  /** The copy buttons' "Copied" timers. */
+  private readonly flashes = new DisposableStore();
 
+  /** onRender runs after each render, which can move the blocks (scroll sync follows). */
   constructor(
     private readonly el: HTMLElement,
+    private readonly onRender: () => void = () => {},
     private readonly debounceMs = 300,
   ) {
     this.worker.onmessage = (e: MessageEvent<Reply>) => {
       const reply = e.data;
-      this.applying = this.applying.then(() => this.apply(reply));
+      this.applying = this.applying
+        .then(() => this.apply(reply))
+        .then(() => {
+          if (!this.disposed) this.onRender();
+        });
     };
+    el.addEventListener("click", this.onClick);
   }
 
   /** Renders text now. */
@@ -65,7 +76,32 @@ export class Preview implements Disposable {
   dispose(): void {
     this.disposed = true;
     this.timer?.dispose();
+    this.flashes.dispose();
+    this.el.removeEventListener("click", this.onClick);
     this.worker.terminate();
+  }
+
+  private onClick = (e: MouseEvent) => {
+    const button = (e.target as Element).closest("button.pm-copy");
+    const code = button?.parentElement?.querySelector("code");
+    if (button instanceof HTMLButtonElement && code) void this.copy(button, code);
+  };
+
+  /** Copies a code block. Without clipboard access (plain http off localhost), selects it. */
+  private async copy(button: HTMLButtonElement, code: HTMLElement): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(code.textContent ?? "");
+      this.flash(button, "Copied");
+    } catch {
+      getSelection()?.selectAllChildren(code);
+      this.flash(button, "Selected: press Ctrl+C");
+    }
+  }
+
+  private flash(button: HTMLButtonElement, text: string): void {
+    button.textContent = text;
+    const id = setTimeout(() => (button.textContent = copyLabel), 2000);
+    this.flashes.add(toDisposable(() => clearTimeout(id)));
   }
 
   /** A newer text was sent since this reply's: skip it, or stop working on it. */
@@ -97,10 +133,20 @@ export class Preview implements Disposable {
     while (kids.length > r.blocks.length) this.el.lastElementChild?.remove();
   }
 
-  /** Sanitizes blocks into elements, remembering each one's source HTML. */
+  /**
+   * Sanitizes blocks into elements, remembering each one's source HTML. Copy buttons are
+   * added after sanitizing, with DOM calls: the sanitizer allows no buttons in a note.
+   */
   private render(blocks: Block[]): DocumentFragment {
     const frag = sanitized(blocks.map((b) => `<div class="pm-block" data-line="${b.line}">${b.html}</div>`).join(""));
     [...frag.children].forEach((el, i) => this.source.set(el, blocks[i]?.html ?? ""));
+    for (const pre of frag.querySelectorAll("pre:not(.pm-frontmatter)")) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "pm-copy";
+      button.textContent = copyLabel;
+      pre.append(button);
+    }
     return frag;
   }
 }

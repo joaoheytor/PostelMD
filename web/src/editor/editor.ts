@@ -4,7 +4,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Annotation, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import type { Disposable } from "../core/disposable";
+import { type Disposable, toDisposable } from "../core/disposable";
 
 /** Marks a change the app made (loading the server's copy), so it isn't an edit to save. */
 const external = Annotation.define<boolean>();
@@ -15,6 +15,22 @@ export interface Editor extends Disposable {
   /** Replaces the text without reporting an edit. */
   replace(text: string): void;
   focus(): void;
+  /** The line (0-based) at the top of the visible area. */
+  topLine(): number;
+  /** Scrolls so line (0-based) is at the top. */
+  scrollToLine(line: number): void;
+  /** Calls fn when the text scrolls, until disposed. */
+  onScroll(fn: () => void): Disposable;
+}
+
+export interface EditorOptions {
+  doc: string;
+  /** The text area's accessible name. */
+  label: string;
+  /** The user edited the text: it needs saving. */
+  onEdit(): void;
+  /** The text changed, by the user or replace(): the preview follows both. */
+  onChange(): void;
 }
 
 // Colours come from the page's custom properties, which inherit into the shadow root, so the
@@ -46,11 +62,9 @@ const highlight = HighlightStyle.define([
 
 /**
  * Mounts CodeMirror 6 in root, a shadow root: there its styles use constructable
- * stylesheets, which the CSP's style-src 'self' allows (ADR-0019). onEdit runs for the
- * user's edits (they need saving); onChange for every change of the text, including
- * replace() (the preview follows both).
+ * stylesheets, which the CSP's style-src 'self' allows (ADR-0019).
  */
-export function mountEditor(root: ShadowRoot, doc: string, label: string, onEdit: () => void, onChange: () => void): Editor {
+export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange }: EditorOptions): Editor {
   const view = new EditorView({
     root,
     parent: root,
@@ -78,6 +92,19 @@ export function mountEditor(root: ShadowRoot, doc: string, label: string, onEdit
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, annotations: external.of(true) });
     },
     focus: () => view.focus(),
+    topLine() {
+      const block = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
+      return view.state.doc.lineAt(block.from).number - 1;
+    },
+    scrollToLine(line) {
+      const doc = view.state.doc;
+      const pos = doc.line(Math.min(Math.max(line + 1, 1), doc.lines)).from;
+      view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start" }) });
+    },
+    onScroll(fn) {
+      view.scrollDOM.addEventListener("scroll", fn, { passive: true });
+      return toDisposable(() => view.scrollDOM.removeEventListener("scroll", fn));
+    },
     dispose: () => view.destroy(),
   };
 }

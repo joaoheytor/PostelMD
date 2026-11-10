@@ -45,6 +45,41 @@ test("a relative link in the preview opens the note it points to", async ({ page
   await expect(page.getByRole("textbox", { name: "Text of ops/runbook.md" })).toBeVisible();
 });
 
+test("a code block's copy button copies exactly the code", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  writeFileSync(join(env("PM_E2E_VAULT"), "code.md"), "# Code\n\n```sh\nkubectl rollout restart deploy/api\n```\n");
+  await login(page);
+  await page.getByRole("button", { name: "code.md" }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByRole("region", { name: "Preview of code.md" });
+  await preview.getByRole("button", { name: "Copy code" }).click();
+  await expect(preview.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("kubectl rollout restart deploy/api\n");
+  await noSeriousA11yViolations(page);
+});
+
+test("the editor and the preview scroll together", async ({ page }) => {
+  const sections = Array.from({ length: 200 }, (_, i) => `## Section ${i + 1}\n\nStep ${i + 1} of the runbook.\n`);
+  writeFileSync(join(env("PM_E2E_VAULT"), "long.md"), `# Long\n\n${sections.join("\n")}`);
+  await login(page);
+  await page.getByRole("button", { name: "long.md" }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByRole("region", { name: "Preview of long.md" });
+  const text = page.getByRole("textbox", { name: "Text of long.md" });
+  await expect(preview.getByRole("heading", { name: "Section 200" })).toBeAttached();
+  await expect(text).not.toContainText("## Section 200"); // far below: not rendered yet
+
+  // The preview leads: scrolled to the end, the editor follows.
+  await preview.hover();
+  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 20_000);
+  await expect(text).toContainText("## Section 200");
+
+  // The editor leads: back to the top, the preview follows.
+  await text.press("ControlOrMeta+Home");
+  await expect(preview.getByRole("heading", { name: "Long", level: 1 })).toBeInViewport();
+  await expect(preview.getByRole("heading", { name: "Section 200" })).not.toBeInViewport();
+});
+
 test("hostile HTML in a note never runs in the preview", async ({ page }) => {
   test.info().annotations.push({ type: "hostile-html", description: "sanitizer parsing reports CSP violations (ADR-0007)" });
   const hostile = [

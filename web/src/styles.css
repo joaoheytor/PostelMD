@@ -152,7 +152,7 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 /* Editor and preview side by side */
 .pm-editor-panes { display: flex; flex: 1; min-height: 0; }
 .pm-editor-panes > .pm-editor-host { flex: 1; min-width: 0; }
-.pm-preview { flex: 1; min-width: 0; overflow: auto; padding: 8px 24px 48px; border-left: 1px solid var(--line); line-height: 1.55; }
+.pm-preview { position: relative; flex: 1; min-width: 0; overflow: auto; padding: 8px 24px 48px; border-left: 1px solid var(--line); line-height: 1.55; }
 @media (max-width: 50rem) {
   .pm-editor-panes { flex-direction: column; }
   .pm-preview { border-left: 0; border-top: 1px solid var(--line); }
@@ -160,7 +160,9 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 /* Off-screen blocks cost nothing while typing (ADR-0007). */
 .pm-block { content-visibility: auto; contain-intrinsic-size: auto 2em; }
 .pm-preview :is(h1, h2, h3, h4) { line-height: 1.25; margin: 1.2em 0 0.5em; }
-.pm-preview pre { overflow: auto; padding: 10px 12px; border-radius: 6px; background: var(--warn-bg); }
+.pm-preview pre { position: relative; overflow: auto; padding: 10px 12px; border-radius: 6px; background: var(--warn-bg); }
+.pm-copy { position: absolute; top: 6px; right: 6px; padding: 2px 8px; font-size: 0.75rem; opacity: 0.85; }
+.pm-copy:hover, .pm-copy:focus-visible { opacity: 1; }
 .pm-preview :not(pre) > code { padding: 0.1em 0.3em; border-radius: 4px; background: var(--warn-bg); }
 .pm-preview blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
 .pm-preview table { border-collapse: collapse; }
