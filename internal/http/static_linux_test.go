@@ -36,6 +36,9 @@ func TestWebApp(t *testing.T) {
 		if got := resp.Header.Get("Content-Security-Policy"); got != appCSP {
 			t.Errorf("GET %s: CSP %q, want %q", path, got, appCSP)
 		}
+		if coop, corp := resp.Header.Get("Cross-Origin-Opener-Policy"), resp.Header.Get("Cross-Origin-Resource-Policy"); coop != "same-origin" || corp != "same-origin" {
+			t.Errorf("GET %s: COOP %q, CORP %q; want same-origin for both", path, coop, corp)
+		}
 	}
 	resp, body := do(t, srv, call{method: "GET", path: "/assets/app-1a2b.js"})
 	if resp.StatusCode != 200 || body != "export {}" || !strings.Contains(resp.Header.Get("Cache-Control"), "immutable") {
@@ -64,9 +67,10 @@ const wantDiagramCSP = "sandbox allow-scripts; default-src 'none'; script-src 's
 func TestDiagramFrame(t *testing.T) {
 	srv, svc := newServer(t, false)
 	setup(t, srv, svc)
-	for _, f := range []struct{ path, body, frameOptions string }{
-		{"/frames/diagram", "diagram renderer", "SAMEORIGIN"},
-		{"/frames/diagram.js", "void 0", "DENY"},
+	// The frame's opaque origin loads its script cross-origin; nothing else is.
+	for _, f := range []struct{ path, body, frameOptions, corp string }{
+		{"/frames/diagram", "diagram renderer", "SAMEORIGIN", "same-origin"},
+		{"/frames/diagram.js", "void 0", "DENY", "cross-origin"},
 	} {
 		resp, body := do(t, srv, call{method: "GET", path: f.path})
 		if resp.StatusCode != 200 || !strings.Contains(body, f.body) || resp.Header.Get("Cache-Control") != "no-cache" {
@@ -77,6 +81,9 @@ func TestDiagramFrame(t *testing.T) {
 		}
 		if got := resp.Header.Get("X-Frame-Options"); got != f.frameOptions {
 			t.Errorf("GET %s: X-Frame-Options %q, want %q", f.path, got, f.frameOptions)
+		}
+		if got := resp.Header.Get("Cross-Origin-Resource-Policy"); got != f.corp {
+			t.Errorf("GET %s: CORP %q, want %q", f.path, got, f.corp)
 		}
 	}
 	// Only those two: the rest of frames/ is the app's shell, with the app's CSP.

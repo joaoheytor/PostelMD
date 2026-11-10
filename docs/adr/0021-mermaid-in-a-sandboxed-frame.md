@@ -86,3 +86,16 @@ not only for diagrams.
 | Show each diagram in its own visible sandboxed iframe | One 5 MB script parse per diagram, and frames that must be sized to their content with messages. The hidden frame and images do one parse per preview. |
 | Render in a Worker | Mermaid needs a DOM to measure text. |
 | Render on the server | ADR-0011: the server never executes user content, and it would need a headless browser. |
+
+## Clarifications
+- **2026-11-10, security review.**
+  - The frame's SVG is sanitized in the app (DOMPurify's SVG profile, plus sanitized HTML
+    inside `<foreignObject>`, which Mermaid's labels use) before it becomes a blob URL. An
+    `<img>` runs no script, but the blob has the app's origin, so the same URL opened as a
+    page would be an app-origin document.
+  - "No network" means no fetch, XHR or subresource load (`default-src 'none'`). CSP doesn't
+    govern navigation: the frame can still navigate itself, which the app detects and answers
+    by dropping it. One frame per diagram is a v0.2 follow-up.
+  - The app's responses carry `Cross-Origin-Resource-Policy: same-origin` (ADR-0005), so
+    `/frames/diagram.js` is served with `cross-origin`: the frame's opaque origin loads it
+    as a cross-origin script.

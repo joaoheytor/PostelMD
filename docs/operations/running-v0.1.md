@@ -155,6 +155,15 @@ docker inspect -f '{{.State.Health.Status}}' postelmd   # healthy, starting or u
 docker ps --filter name=postelmd                         # restarts show in STATUS
 ```
 
+## Reaching it by a host name
+
+Reaching PostelMD by a host name? Add it to `allowed_hosts` in
+`~/postelmd/.postelmd/config.yaml` (`allowed_hosts: [notes.example.org]`) or
+`POSTELMD_ALLOWED_HOSTS`, and restart. Until then that name gets `421 Misdirected Request`
+and the log a `WARN` naming the setting; `localhost` and IP addresses always work. Give
+PostelMD its own host name: its session cookie is scoped to the host. Behind a TLS proxy,
+see v0.2's trusted-proxy setting.
+
 ## Upgrade and rollback
 
 v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`.
@@ -183,7 +192,8 @@ docker restart postelmd
 docker logs postelmd 2>&1 | grep -F '(valid' | tail -n 1
 ```
 
-Then open http://127.0.0.1:8080/setup and paste it. After setup no token is printed.
+Then open the address the same message prints (http://localhost:8080/setup, or your `-p`
+host port) and paste it. After setup no token is printed.
 
 ## Forgotten password
 

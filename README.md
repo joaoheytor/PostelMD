@@ -31,8 +31,9 @@ docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
 docker logs postelmd   # prints a one-time setup token
 ```
 
-Open http://127.0.0.1:8080/setup and paste the token from `docker logs postelmd`. The token
-expires after 30 minutes; `docker restart postelmd` prints a new one.
+Open http://localhost:8080/setup (the log prints this address; with another `-p` host port,
+use yours) and paste the token from `docker logs postelmd`. The token expires after 30
+minutes; `docker restart postelmd` prints a new one.
 
 - **Which image.** Until v0.1.0 is released, `ghcr.io/joaoheytor/postelmd:main` is the
   signed candidate built from `main`, for testers until the first release candidate (never
@@ -63,9 +64,18 @@ unnoticed:
 listen: ":8080"              # POSTELMD_LISTEN, --listen
 allow_network_fs: false      # POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
 allow_ephemeral_data: false  # POSTELMD_ALLOW_EPHEMERAL_DATA: start with no volume at /data
+allowed_hosts: []            # POSTELMD_ALLOWED_HOSTS (comma-separated): host names besides
+                             # localhost and IP addresses, e.g. [notes.example.org]
 ```
 
 The data directory itself is set with `--data` or `POSTELMD_DATA_DIR`, never in the file.
+
+- **Reaching PostelMD by a host name?** Add it to `allowed_hosts`. Any other name gets
+  `421 Misdirected Request`: that stops a web page from rebinding its own name to your server
+  (DNS rebinding).
+- **Give PostelMD its own host name**, not a path under a name shared with other apps: its
+  session cookie is scoped to the host. Behind a TLS proxy, see v0.2's trusted-proxy setting;
+  v0.1 trusts no proxy headers.
 
 ## Documentation
 

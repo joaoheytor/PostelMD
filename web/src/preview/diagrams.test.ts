@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiagramReply, DiagramRequest } from "../diagram/protocol";
 import { Diagrams } from "./diagrams";
 
+// DOMPurify needs a DOM, which these tests don't have; the sanitizer has its own e2e test
+// (3-diagrams). The blob URL still goes through URL.createObjectURL, which the tests count.
+vi.mock("./svg", () => ({ svgBlobURL: (svg: string) => URL.createObjectURL(new Blob([svg])) }));
+
 /**
  * A stand-in for the renderer frame: when it loads, it takes the port it's handed and answers
  * every request with an SVG. One that never loads stands for a frame page that can't be fetched.

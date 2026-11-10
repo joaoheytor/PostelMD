@@ -201,10 +201,15 @@ func (a *AuthAPI) password(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 
 func (a *AuthAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
 	var wait *auth.WaitError
-	switch {
-	case errors.As(err, &wait):
+	if errors.As(err, &wait) {
+		// Also on the failure that starts the wait, so the form can say how long it is.
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Wait.Seconds()))))
+	}
+	switch {
+	case wait != nil && !wait.Checked:
 		writeError(w, stdhttp.StatusTooManyRequests, "too many attempts, retry later")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		writeError(w, stdhttp.StatusServiceUnavailable, "request cancelled")
 	case errors.Is(err, auth.ErrBadSession), errors.Is(err, auth.ErrBadPassword), errors.Is(err, auth.ErrNotSetUp):
 		writeError(w, stdhttp.StatusUnauthorized, "wrong password or session")
 	case errors.Is(err, auth.ErrBadToken):

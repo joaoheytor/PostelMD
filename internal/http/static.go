@@ -68,6 +68,10 @@ func serveFrame(w stdhttp.ResponseWriter, r *stdhttp.Request, ui fs.FS, file str
 	h.Set("Cache-Control", "no-cache")
 	if strings.HasSuffix(file, ".html") {
 		h.Set("X-Frame-Options", "SAMEORIGIN") // the app's pages frame it; nobody else
+	} else {
+		// The sandboxed frame has an opaque origin, so its own script is a cross-origin load
+		// for it. The script is public, static code.
+		h.Set("Cross-Origin-Resource-Policy", "cross-origin")
 	}
 	stdhttp.ServeFileFS(w, r, ui, file)
 }
