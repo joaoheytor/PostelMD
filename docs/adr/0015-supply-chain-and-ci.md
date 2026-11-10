@@ -242,6 +242,15 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   minimum release age. `npm run lint` passes with it. `test/perf/app` and `test/perf/editor`
   don't depend on `minimatch`. The override goes when ESLint and `typescript-eslint` accept
   minimatch 11 (#101).
+- **2026-11-10, actionlint and shellcheck images.** `make lint` and CI's `lint` job run
+  actionlint and shellcheck from their upstream images on Docker Hub, pinned by index digest
+  in the Makefile (`ACTIONLINT_IMAGE` = `rhysd/actionlint` 1.7.12, published 2026-03-30;
+  `SHELLCHECK_IMAGE` = `koalaman/shellcheck` v0.11.0, published 2025-08-04). CI used to
+  install actionlint with `go install` and take the runner's preinstalled, unpinned
+  shellcheck, which is older than 0.11.0 and reported an SC2015 that local runs didn't. The
+  actionlint image bundles shellcheck 0.11.0, the same as `SHELLCHECK_IMAGE`. They are linters, not
+  security tools: they run with no network and a read-only mount, and the digest pin is the
+  control. A bump moves both together, to releases at least two weeks old.
 - **2026-11-10, the release workflows** (`prerelease.yaml`, `release.yaml`). No new
   dependency: they reuse `candidate.yaml`'s actions and tools, plus crane v0.22.1 pinned as
   above.

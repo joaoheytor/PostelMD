@@ -21,7 +21,6 @@ concurrency:
 
 env:
   GOLANGCI_LINT_VERSION: v2.15.0
-  ACTIONLINT_VERSION: v1.7.12
   YAMLLINT_VERSION: 1.35.1
 
 jobs:
@@ -103,10 +102,9 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-      - name: Install actionlint and yamllint
-        run: |
-          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
-          pipx install "yamllint==${YAMLLINT_VERSION}"
+      # actionlint and shellcheck run from the images pinned in the Makefile, as they do locally.
+      - name: Install yamllint
+        run: pipx install "yamllint==${YAMLLINT_VERSION}"
       - run: make lint-web lint-repo
 
   test-go:

@@ -47,15 +47,22 @@ without the maintainer's explicit go-ahead in the conversation.
      way (bugs, gaps, follow-up issues);
    - the body's last line: `🤖 Generated with [Claude Code](https://claude.com/claude-code)`;
    - `--label skip-changelog` when nothing user-visible changed.
-9. **Watch CI:** `gh pr checks <n>`, and list open code-scanning alerts on the PR:
+9. **Watch CI:** `gh pr checks <n>` (after a push, use the wait loop in the `pr-review`
+   skill: `--watch` can exit before the new checks are queued), and list open code-scanning alerts on the PR:
    `gh api "repos/{owner}/{repo}/code-scanning/alerts?ref=refs/pull/<n>/merge&state=open"`.
    Fix what they find in the same PR.
-10. **Review:** suggest the `security-engineer` reviewer agent for PRs that cross a trust
-    boundary (auth, secrets, CSP, supply chain).
+10. **Review:** the `pr-review` skill picks the persona reviewers (`.claude/agents/`), runs
+    them alongside CI, and decides "ready to merge".
 11. **After the maintainer says it's merged** (squash merge):
-    `git switch main && git pull --ff-only`, then confirm nothing was lost with
-    `git diff --quiet <branch> main` (a non-zero exit means the trees differ: if the only
-    differences come from PRs merged after this one, that's expected; otherwise stop and
-    report what the branch has that `main` doesn't). Then delete the branch (`git branch -D <branch>`; the
-    squash merge makes `-d` refuse) and, if one was used, remove the worktree
-    (`git worktree remove .claude/worktrees/<name>`).
+    - `git fetch origin`, and find the squash commit:
+      `gh pr view <n> --json mergeCommit -q .mergeCommit.oid`.
+    - Check the branch matches it: `git diff --quiet <branch> <squash-commit>`. If later PRs
+      merged in between and that is inconvenient, compare patches instead:
+      `git diff origin/main...<branch> | git patch-id --stable` against
+      `git show <squash-commit> | git patch-id --stable`. If they differ, stop and report
+      what the branch has that the squash commit doesn't.
+    - Then clean up: remove the worktree if one was used
+      (`git worktree remove .claude/worktrees/<name>`), delete the local branch
+      (`git branch -D <branch>`; the squash merge makes `-d` refuse), and delete the remote
+      branch if GitHub didn't (`git ls-remote --heads origin <branch>` non-empty →
+      `git push origin --delete <branch>`, a permission prompt).

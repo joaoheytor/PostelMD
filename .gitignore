@@ -4,6 +4,7 @@
 /.claude/settings.local.json
 /.claude/public-guard.local.txt
 /.claude/worktrees/
+/.claude/hooks/__pycache__/
 
 # OS / editor noise
 **/.DS_Store

@@ -6,21 +6,26 @@ Modes (first CLI argument):
   public   Write/Edit: ask before writing content that should rarely be public
            (absolute home paths, private IPs, unknown email addresses, and
            terms from the git-ignored local denylist .claude/public-guard.local.txt).
-  adr      Write/Edit: ask before changing the Decision section of an Accepted ADR.
+  adr      Write/Edit: ask before changing the Decision section of an ADR that is Accepted
+           on main (the merge base of HEAD and origin/main; HEAD without origin/main).
   git      Bash: outward-facing commands (push, tags, releases, PRs, issues, repo
            settings, mutating API calls) always get a human permission prompt ("ask");
-           enforce DCO sign-off + Conventional Commit subjects; forbid skipping hooks.
+           enforce DCO sign-off + Conventional Commit subjects; forbid skipping hooks;
+           ask before shell writes to repository files (bash_writes.py).
 
 These are guardrails for an agent, not a security boundary: CI is the hard gate.
 
 The hook reads the tool call as JSON on stdin and answers with a
 hookSpecificOutput JSON object (deny/ask) or exits 0 silently to allow.
-Only the Python standard library is used.
+Only the Python standard library is used. Tests: postelmd_guard_test.py (make test-scripts).
 """
 import json
 import os
 import re
+import subprocess
 import sys
+
+from bash_writes import repo_write_targets
 
 # A command position: start of the command, or after ; & | ( or a newline, optionally after
 # VAR=value assignments or sudo/env/command/xargs. Anchoring here keeps text inside
@@ -48,8 +53,8 @@ SECRET_PATTERNS = [
 ]
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
-# _test.go files today; test/scenarios/fixtures is the planned suite's fixture folder.
-SECRET_FIXTURE_PATHS = re.compile(r"(^|/)(testdata|test/scenarios/fixtures)/|_test\.go$")
+# _test.go files next to the code they cover.
+SECRET_FIXTURE_PATHS = re.compile(r"(^|/)testdata/|_test\.go$")
 
 ALLOWED_EMAILS = re.compile(
     r"^(jhkpereira@gmail\.com|noreply@anthropic\.com|.+@example\.(com|org|net)|you@example\.com)$",
@@ -136,6 +141,30 @@ def check_public(tool_input):
                        + "; ".join(reasons) + ". Confirm this is meant to be published.")
 
 
+def git_out(cwd, *args):
+    """git's stdout, or None when git fails or isn't there."""
+    try:
+        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def adr_on_main(full):
+    """(the ADR as on main, where) — main is the merge base of HEAD and origin/main, or HEAD
+    without origin/main. The text is "" when main doesn't have the file yet (it is still being
+    written on this branch), and None outside a git repository."""
+    d = os.path.dirname(full) or "."
+    base = (git_out(d, "merge-base", "HEAD", "origin/main") or "").strip()
+    where = "main"
+    if not base:
+        base, where = "HEAD", "HEAD (no origin/main to compare with)"
+    if git_out(d, "rev-parse", "--verify", "-q", base + "^{commit}") is None:
+        return None, where
+    text = git_out(d, "show", f"{base}:./{os.path.basename(full)}")
+    return (text if text is not None else ""), where
+
+
 def check_adr(tool_input):
     path = rel_path(tool_input)
     if not re.match(r"docs/adr/\d{4}-.+\.md$", path):
@@ -146,16 +175,21 @@ def check_adr(tool_input):
             current = fh.read()
     except OSError:
         return
-    if not re.search(r"^- \*\*Status:\*\* Accepted", current, re.M):
-        return
+    on_main, where = adr_on_main(full)
+    if on_main is None:  # not in git: judge the file as it is
+        on_main, where = current, "the file on disk"
+    if not re.search(r"^- \*\*Status:\*\* Accepted", on_main, re.M):
+        return  # Proposed on main, or new on this branch: still editable
     if tool_input.get("content") is not None:
-        respond("ask", f"{path} is ACCEPTED: rewriting the whole file may change its Decision. "
-                       "Accepted decisions change only by superseding; clarifications are append-only.")
+        respond("ask", f"{path} is ACCEPTED on {where}: rewriting the whole file may change its "
+                       "Decision. Accepted decisions change only by superseding; clarifications "
+                       "are append-only.")
     m = re.search(r"^## Decision\n(.*?)(?=^## )", current, re.M | re.S)
     olds = [tool_input.get("old_string") or ""] + [e.get("old_string") or "" for e in tool_input.get("edits") or []]
     if m and any(o and o in m.group(1) for o in olds):
-        respond("ask", f"{path} is ACCEPTED and this edit touches its Decision section. Supersede it "
-                       "with a new ADR instead, or add a dated Clarification (docs/adr/README.md).")
+        respond("ask", f"{path} is ACCEPTED on {where} and this edit touches its Decision "
+                       "section. Supersede that part with a new ADR instead (the new-adr skill); "
+                       "a dated Clarification may only add rationale, links or typo fixes.")
 
 
 def check_git(tool_input):
@@ -192,6 +226,14 @@ def check_git(tool_input):
                             "test build ci chore revert; '!' for breaking).")
 
 
+def check_bash_writes(tool_input, cwd):
+    targets = repo_write_targets(tool_input.get("command") or "", cwd)
+    if targets:
+        respond("ask", "SHELL WRITE to repository file(s) " + ", ".join(targets[:5]) + ". Use "
+                       "Write/Edit so the guard hook sees the change (secrets, public-repo and ADR "
+                       "checks); approve only for generated output that Write/Edit can't produce.")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
@@ -199,7 +241,11 @@ def main():
     except (ValueError, OSError):
         return  # never block on a malformed payload
     tool_input = payload.get("tool_input") or {}
-    {"secrets": check_secrets, "public": check_public, "adr": check_adr, "git": check_git}.get(
+    if mode == "git":
+        check_git(tool_input)  # deny/ask on git and gh commands wins over the write check
+        check_bash_writes(tool_input, payload.get("cwd") or os.getcwd())
+        return
+    {"secrets": check_secrets, "public": check_public, "adr": check_adr}.get(
         mode, lambda _: None)(tool_input)
 
 

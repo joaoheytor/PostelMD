@@ -56,4 +56,25 @@ adr 0003-new.md Accepted "Brand new."
 g add docs
 expect pass "adding a new ADR"
 
+# A branch: the ADRs above are on main; 0004 is written and Accepted on the branch only.
+main=$(g rev-parse HEAD)
+g switch -q -c feature
+adr 0004-branch.md Accepted "First draft."
+g add docs && g commit -q -m "add ADR 0004"
+
+adr 0004-branch.md Accepted "Fixed draft."
+g add docs
+expect fail "without origin/main, an ADR Accepted at HEAD can't change (HEAD fallback)"
+if grep -q "comparing Accepted ADRs with HEAD" "$work/err"; then echo "ok   the HEAD fallback says so"
+else echo "FAIL the HEAD fallback doesn't say so: $(cat "$work/err")"; failures=$((failures + 1)); fi
+
+g update-ref refs/remotes/origin/main "$main"
+adr 0004-branch.md Accepted "Fixed draft."
+g add docs
+expect pass "an ADR new in this branch can be edited, though Accepted at HEAD"
+
+adr 0001-accepted.md Accepted "We use Z."
+g add docs
+expect fail "an ADR Accepted on main still can't change on a branch"
+
 [ "$failures" -eq 0 ] && echo "all pre-commit ADR tests passed" || exit 1

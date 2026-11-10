@@ -5,7 +5,7 @@
 #   2. public-repo check: absolute home paths and the local denylist
 #      (.claude/public-guard.local.txt, git-ignored), in added lines and file names;
 #   3. file-size limit for source files (CLAUDE.md rule 2: 500 lines);
-#   4. an Accepted ADR's Decision section is immutable (docs/adr/README.md).
+#   4. an Accepted ADR's Decision section, as on main, is immutable (docs/adr/README.md).
 # Enable once per clone:  git config core.hooksPath .githooks
 set -eu
 g() { git -c color.ui=never -c core.fsmonitor=false "$@"; }
@@ -75,18 +75,27 @@ while IFS= read -r f; do
 done < "$tmp/src"
 
 # 4. Accepted ADRs: the "## Decision" section (up to the next "## " heading) must stay as it
-#    is at HEAD. The Write/Edit hook (.claude/hooks/postelmd_guard.py, check_adr) asks about
-#    this too; this check also covers files written any other way.
+#    is on main: the merge base of HEAD and origin/main, so an ADR written (and Accepted)
+#    earlier in this unmerged branch can still be fixed. An ADR that main doesn't have yet is
+#    skipped. Without origin/main (offline clone, no remote) it compares with HEAD. The
+#    Write/Edit hook (.claude/hooks/postelmd_guard.py, check_adr) asks about this too; this
+#    check also covers files written any other way.
 decision() { awk '/^## / { if (d) exit; d = ($0 == "## Decision"); next } d' "$1"; }
 tr '\0' '\n' < "$tmp/files" | grep -E '^docs/adr/[0-9]{4}-[^/]+\.md$' > "$tmp/adrs" || true
+if [ -s "$tmp/adrs" ]; then
+  if ! base=$(g merge-base HEAD origin/main 2>/dev/null); then
+    base=HEAD
+    echo "pre-commit: note: no merge base with origin/main; comparing Accepted ADRs with HEAD." >&2
+  fi
+fi
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  g show "HEAD:$f" > "$tmp/adr-head" 2>/dev/null || continue
+  g show "$base:$f" > "$tmp/adr-head" 2>/dev/null || continue
   grep -q '^- \*\*Status:\*\* Accepted' "$tmp/adr-head" || continue
   decision "$tmp/adr-head" > "$tmp/decision-head"
   decision "$tmp/tree/$f" > "$tmp/decision-staged"
   if ! cmp -s "$tmp/decision-head" "$tmp/decision-staged"; then
-    echo "pre-commit: $f is Accepted and its Decision section changed. Supersede it with a new" >&2
+    echo "pre-commit: $f is Accepted on main and its Decision section changed. Supersede it with a new" >&2
     echo "  ADR, or append a dated entry under '## Clarifications' (docs/adr/README.md)." >&2
     fail=1
   fi
