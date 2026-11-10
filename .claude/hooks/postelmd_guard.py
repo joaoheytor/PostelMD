@@ -47,7 +47,8 @@ SECRET_PATTERNS = [
     r"-----BEGIN( [A-Z0-9]+)* PRIVATE KEY( BLOCK)?-----", # PEM / OpenSSH / PGP private keys
 ]
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
-# downgrade deny -> ask so a human confirms the value is fake.
+# downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
+# _test.go files today; test/scenarios/fixtures is the planned suite's fixture folder.
 SECRET_FIXTURE_PATHS = re.compile(r"(^|/)(testdata|test/scenarios/fixtures)/|_test\.go$")
 
 ALLOWED_EMAILS = re.compile(

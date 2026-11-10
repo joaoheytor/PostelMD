@@ -28,7 +28,7 @@ describe("Workspace secret warning (ADR-0020)", () => {
     ws.state.value.open?.doc.edit();
     await ws.state.value.open?.doc.flush();
   };
-  const shown = () => (ws.secrets.value.dismissed ? [] : ws.secrets.value.findings.map((f) => `${f.rule}@${f.line}`));
+  const shown = () => (ws.secrets.warning.value.dismissed ? [] : ws.secrets.warning.value.findings.map((f) => `${f.rule}@${f.line}`));
 
   it("warns when a save holds a secret, and stops once it's gone; the save still happens", async () => {
     await save(`# a\n\n${key}\n`);
@@ -45,9 +45,9 @@ describe("Workspace secret warning (ADR-0020)", () => {
     expect(api.saveNote).not.toHaveBeenCalled();
   });
 
-  it("a dismissed warning stays hidden until the findings change", async () => {
+  it("a dismissed warning stays hidden through saves until the findings change", async () => {
     await save(`${key}\n`);
-    ws.dismissSecrets();
+    ws.secrets.dismiss();
     await save(`${key}\nmore text\n`);
     expect(shown()).toEqual([]);
     await save(`${key}\n${key.replace("Q7", "R5")}\n`);

@@ -4,6 +4,9 @@ import type { DiagramReply, DiagramRequest } from "../diagram/protocol";
 /** A rendered diagram, ready for an img: SVG in an <img> runs no script and loads nothing. */
 export type Diagram = { ok: true; url: string; width: number; height: number; label: string } | { ok: false; error: string };
 
+/** The class of a diagram's img in the preview: how the pane finds the diagrams on screen. */
+export const diagramClass = "pm-diagram";
+
 /** A diagram that hasn't come back by then, frame load included, is given up on and the frame replaced. */
 const timeoutMs = 15_000;
 
@@ -14,8 +17,9 @@ const cacheSize = 32;
  * Renders Mermaid diagrams in the sandboxed renderer frame (ADR-0021). The frame is created on
  * the first diagram, and talks only over a MessagePort handed over on its first load: if the
  * frame ever navigates away, the port dies with it and a new frame takes over. The last
- * cacheSize results are cached by source and theme; an older one's blob URL is revoked once
- * it isn't on screen, and dispose revokes them all.
+ * cacheSize results are cached by source and theme. An older one's blob URL is revoked by the
+ * first eviction or sweep() that finds it off screen (the pane sweeps after placing a
+ * diagram), and dispose revokes them all.
  */
 export class Diagrams implements Disposable {
   private frame: HTMLIFrameElement | undefined;
@@ -31,6 +35,7 @@ export class Diagrams implements Disposable {
   constructor(private readonly shown: (url: string) => boolean = () => false) {}
 
   render(source: string): Promise<Diagram> {
+    if (this.disposed) return Promise.resolve({ ok: false, error: "closed" });
     const theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default";
     const key = `${theme}\n${source}`;
     let d = this.cache.get(key);
@@ -121,7 +126,7 @@ export class Diagrams implements Disposable {
   }
 
   /** Revokes every retired URL no longer on screen; all of them once disposed. */
-  private sweep(): void {
+  sweep(): void {
     for (const url of this.retired) {
       if (this.disposed || !this.shown(url)) {
         URL.revokeObjectURL(url);

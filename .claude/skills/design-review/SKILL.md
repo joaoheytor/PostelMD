@@ -48,4 +48,5 @@ yourself against the files before reporting it; drop anything you can't confirm.
 - Each finding: title, file:line, failing scenario, needed fix. Keep it short.
 - Then a table of items you checked that are **resolved**, so the user sees coverage.
 - End with your judgement: what must be fixed before implementing, and what can be proven
-  instead by the failure-scenario suite (`test/scenarios/`).
+  instead by the failure-scenario suite (crash tests next to the code, in `internal/vault`
+  and `internal/store/*`; CLAUDE.md, Testing conventions).
