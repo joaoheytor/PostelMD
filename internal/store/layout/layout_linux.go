@@ -45,9 +45,16 @@ var (
 	ephemeral = map[int64]string{0x01021994: "tmpfs"}
 	container = map[int64]string{0x794C7630: "overlayfs"}
 	network   = map[int64]string{0x6969: "nfs", 0x517B: "smb", 0xFF534D42: "cifs", 0xFE534D42: "smb2",
-		0x01021997: "9p", 0x6A656A63: "virtiofs", 0x65735546: "fuse", 0x00C36400: "ceph"}
-	// hostShares are how Docker Desktop shares a Windows or macOS folder (ADR-0014 §1).
-	hostShares = map[int64]bool{0x01021997: true, 0x6A656A63: true}
+		0x01021997: "9p", 0x65735546: "fuse", 0x00C36400: "ceph"}
+	// hostShares are how Docker Desktop shares a host folder (ADR-0014 §1): 9p for a Windows
+	// path; FUSE for virtiofs (macOS), which reports FUSE_SUPER_MAGIC like sshfs or rclone.
+	// They get a fix instead of the override, which would be harmful advice there.
+	hostShares = map[int64]string{
+		0x01021997: "a folder shared from Windows. Keep the folder on the Linux filesystem (in WSL, under ~, " +
+			"never /mnt/c), or keep the notes in a named volume: -v postelmd-data:/data, without a notes bind mount",
+		0x65735546: "a FUSE filesystem, such as a Docker Desktop file share or sshfs. Use a named volume " +
+			"(-v postelmd-data:/data, without a notes bind mount), or a folder on the Linux filesystem",
+	}
 )
 
 // ErrNotesAtRoot: notes were found directly in /data instead of in a vault mount.
@@ -115,11 +122,9 @@ func checkFS(dir string, allowNetworkFS bool) (Durability, error) {
 		return ContainerLayer, nil
 	case allowNetworkFS:
 		return Persistent, nil
-	case hostShares[magic]:
-		return 0, fmt.Errorf("layout: %s is on %s, a folder shared from Windows or macOS, which can't hold "+
-			"PostelMD's data safely (ADR-0014). Keep the folder on the Linux filesystem (in WSL, under ~, "+
-			"never /mnt/c), or keep the notes in a named volume: -v postelmd-data:/data, without a notes "+
-			"bind mount (ADR-0009)", dir, network[magic])
+	case hostShares[magic] != "":
+		return 0, fmt.Errorf("layout: %s is on %s, %s; it can't hold PostelMD's data safely (ADR-0014, ADR-0009)",
+			dir, network[magic], hostShares[magic])
 	case network[magic] != "":
 		return 0, fmt.Errorf("layout: %s is on %s, which can't hold PostelMD's data safely (ADR-0014); "+
 			"use a local volume, or set POSTELMD_ALLOW_NETWORK_FS=true at your own risk", dir, network[magic])

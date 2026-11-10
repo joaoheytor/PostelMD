@@ -80,7 +80,7 @@ branch, so fork PRs can't poison `main`'s cache.
 
 | Tag | Where | Meaning |
 |---|---|---|
-| `sha-<short>`, `main` | GHCR | Candidate from `main` (not for users) |
+| `sha-<short>`, `main` | GHCR | Candidate from `main`: for testers until the first release candidate, never for production |
 | `X.Y.Z-rc.N` | GHCR | Release candidate |
 | `X.Y.Z`, `X.Y` | **Docker Hub** + GHCR | Promoted release |
 | `X` (major) | **Docker Hub** + GHCR | **From 1.0 only.** Before 1.0 every minor may break, so docs use `:0.Y`. |

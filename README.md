@@ -35,7 +35,8 @@ Open http://127.0.0.1:8080/setup and paste the token from `docker logs postelmd`
 expires after 30 minutes; `docker restart postelmd` prints a new one.
 
 - **Which image.** Until v0.1.0 is released, `ghcr.io/joaoheytor/postelmd:main` is the
-  signed candidate built from `main` (not for production), and release candidates are
+  signed candidate built from `main`, for testers until the first release candidate (never
+  for production), and release candidates are
   `ghcr.io/joaoheytor/postelmd:0.1.0-rc.N`. After the release, use
   `docker.io/joaoheytor/postelmd:0.1`. Tags: [ci-cd §4](docs/ci-cd.md#4-images-and-tags);
   verifying signatures: [verify-images](docs/operations/verify-images.md). Or build your own
@@ -46,6 +47,7 @@ expires after 30 minutes; `docker restart postelmd` prints a new one.
 - **Docker Desktop and WSL2:** run the command from a WSL shell and keep `~/postelmd` (and
   your notes) on the Linux filesystem, never under `/mnt/c`: Windows folders reach the
   container as 9p, which PostelMD refuses (ADR-0009).
+- **macOS:** use a named volume, `-v postelmd-data:/data` without `--user` (ADR-0009).
 - **A volume is required.** Without one, everything is lost at the next `docker rm` (every
   upgrade does one), so PostelMD refuses to start.
 

@@ -71,7 +71,8 @@ func fakeFS(t *testing.T, state, vault int64) {
 
 // TestNetworkFilesystemsAreRefused presents each network filesystem's statfs magic: the
 // directory is refused, naming the filesystem, unless the operator overrides it (ADR-0014
-// §1). A folder shared from Windows or macOS (9p, virtiofs) gets the named-volume fix.
+// §1). A Docker Desktop file share (9p for a Windows path; FUSE, which is what virtiofs on
+// macOS reports) gets the named-volume fix, never the advice to override.
 func TestNetworkFilesystemsAreRefused(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
@@ -79,9 +80,9 @@ func TestNetworkFilesystemsAreRefused(t *testing.T) {
 		hostShare bool
 	}{
 		{"9p", 0x01021997, true},
-		{"virtiofs", 0x6A656A63, true},
-		{"fuse", 0x65735546, false},
+		{"fuse", 0x65735546, true},
 		{"nfs", 0x6969, false},
+		{"cifs", 0xFF534D42, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeFS(t, tt.magic, tt.magic)
@@ -91,6 +92,9 @@ func TestNetworkFilesystemsAreRefused(t *testing.T) {
 			}
 			if got := strings.Contains(err.Error(), "-v postelmd-data:/data"); got != tt.hostShare {
 				t.Fatalf("%s: named-volume fix in %q = %v, want %v", tt.name, err, got, tt.hostShare)
+			}
+			if got := strings.Contains(err.Error(), "POSTELMD_ALLOW_NETWORK_FS"); got == tt.hostShare {
+				t.Fatalf("%s: override advice in %q = %v, want %v", tt.name, err, got, !tt.hostShare)
 			}
 			if d, err := checkFS("/data/vaults/notes", true); err != nil || d != Persistent {
 				t.Fatalf("%s with the override = %v, %v; want Persistent", tt.name, d, err)
@@ -104,7 +108,7 @@ func TestNetworkFilesystemsAreRefused(t *testing.T) {
 // decides. The container's own layer (no volume at /data) is refused unless the operator
 // opts in; tmpfs starts, flagged.
 func TestPrepareChecksStateAndVault(t *testing.T) {
-	const ext4, tmpfs, overlay, p9, virtiofs = 0xEF53, 0x01021994, 0x794C7630, 0x01021997, 0x6A656A63
+	const ext4, tmpfs, overlay, p9, fuse = 0xEF53, 0x01021994, 0x794C7630, 0x01021997, 0x65735546
 	for _, tt := range []struct {
 		name         string
 		state, vault int64
@@ -114,7 +118,7 @@ func TestPrepareChecksStateAndVault(t *testing.T) {
 	}{
 		{"both on ext4", ext4, ext4, Options{}, Persistent, ""},
 		{"a Windows-path vault on 9p", ext4, p9, Options{}, 0, "notes is on 9p"},
-		{"a macOS vault on virtiofs", ext4, virtiofs, Options{}, 0, "notes is on virtiofs"},
+		{"a macOS vault on virtiofs (FUSE)", ext4, fuse, Options{}, 0, "notes is on fuse, a FUSE filesystem"},
 		{"state on 9p", p9, ext4, Options{}, 0, ".postelmd is on 9p"},
 		{"a 9p vault, overridden", ext4, p9, Options{AllowNetworkFS: true}, Persistent, ""},
 		{"no volume at /data", overlay, overlay, Options{}, 0, "no volume is mounted at /data"},

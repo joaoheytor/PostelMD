@@ -32,7 +32,8 @@ func routed(mux *stdhttp.ServeMux) stdhttp.Handler {
 	})
 }
 
-// statusWriter keeps the status a handler sent.
+// statusWriter keeps the status a handler sent. Write isn't wrapped: a body written without
+// WriteHeader is a 200, which is what logWrites assumes when the status is still 0.
 type statusWriter struct {
 	stdhttp.ResponseWriter
 	status int
@@ -43,13 +44,6 @@ func (s *statusWriter) WriteHeader(code int) {
 		s.status = code
 	}
 	s.ResponseWriter.WriteHeader(code)
-}
-
-func (s *statusWriter) Write(b []byte) (int, error) {
-	if s.status == 0 {
-		s.status = stdhttp.StatusOK
-	}
-	return s.ResponseWriter.Write(b)
 }
 
 // Unwrap lets http.ResponseController reach the underlying writer.

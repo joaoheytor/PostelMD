@@ -60,7 +60,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   `POSTELMD_ALLOW_EPHEMERAL_DATA=true` (or `allow_ephemeral_data` in `config.yaml`) starts it
   anyway for a throwaway try.
 - The notes folder's filesystem is checked like the data directory's: an adopted folder on a
-  Windows path (9p) or a macOS share (virtiofs) is refused, with the fix.
+  Windows path (9p) or a FUSE share (such as Docker Desktop's on macOS) is refused, with the
+  fix.
 - A runbook for running v0.1: backups, a restore drill, logs, upgrade and rollback, and
   recovering from a lost password, a git lock or a deleted note.
 

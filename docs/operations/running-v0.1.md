@@ -44,6 +44,13 @@ The simplest consistent copy stops the server for a few seconds:
 docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . && docker start postelmd
 ```
 
+With an adopted folder mounted at `/data/vaults/notes`, copy it in the same stop:
+
+```sh
+docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . \
+  && tar -C ~/notes -cpf ~/notes-backup-$(date +%F).tar . && docker start postelmd
+```
+
 `docker stop` waits for in-flight saves (up to the `--stop-timeout 60` you ran it with). The
 browser keeps unsaved edits as drafts and retries, so a short stop loses nothing.
 
@@ -60,6 +67,7 @@ docker stop postelmd
 docker run --rm -v postelmd-data:/data:ro -v "$HOME:/backup" busybox:1.37 \
   tar -C /data -cpf "/backup/postelmd-backup-$(date +%F).tar" .
 docker start postelmd
+sudo chown "$(id -u):$(id -g)" ~/postelmd-backup-$(date +%F).tar   # busybox ran as root
 ```
 
 ## Restore drill
@@ -74,17 +82,34 @@ docker run -d --name postelmd-drill -p 127.0.0.1:8081:8080 \
   --user "$(id -u):$(id -g)" -v ~/postelmd-drill:/data "$IMAGE"
 ```
 
+With an adopted folder, restore it too and mount it as the drill's vault:
+
+```sh
+mkdir -p ~/postelmd-drill/vaults/notes ~/notes-drill
+tar -C ~/notes-drill -xpf ~/notes-backup-YYYY-MM-DD.tar
+docker run -d --name postelmd-drill -p 127.0.0.1:8081:8080 --user "$(id -u):$(id -g)" \
+  -v ~/postelmd-drill:/data -v ~/notes-drill:/data/vaults/notes "$IMAGE"
+```
+
 Open http://127.0.0.1:8081 **in a private window** (both instances are on `127.0.0.1`, and
 browsers don't separate cookies by port, so logging in to one would log you out of the
 other). Log in with your usual password, open a note, check the history of a note you
 committed. Then remove it:
 
 ```sh
-docker rm -f postelmd-drill && rm -rf ~/postelmd-drill
+docker rm -f postelmd-drill && rm -rf ~/postelmd-drill ~/notes-drill
 ```
 
-A real restore is the same extraction into `~/postelmd` (empty it first, with the container
-stopped), then `docker start postelmd`.
+A real restore keeps the current data aside instead of deleting it (`rm -rf ~/postelmd/*`
+would also miss `.postelmd`):
+
+```sh
+docker stop postelmd && mv ~/postelmd ~/postelmd.old && mkdir ~/postelmd \
+  && tar -C ~/postelmd -xpf ~/postelmd-backup-YYYY-MM-DD.tar && docker start postelmd
+```
+
+For an adopted folder, do the same with `~/notes` and its backup before `docker start`.
+Delete `~/postelmd.old` once the restored instance looks right.
 
 ## Logs
 
@@ -117,7 +142,7 @@ Count them (the setup lines aren't JSON, hence `fromjson?`):
 
 ```sh
 f=~/postelmd-logs-$(date +%F).jsonl
-jq -cR 'fromjson? | select(.msg == "request" and .status >= 500)' "$f"
+jq -cR 'fromjson? | select(.msg == "request" and .status >= 500 and .status != 503)' "$f"
 jq -cR 'fromjson? | select(.msg == "request" and .status == 412)' "$f" | wc -l
 ```
 
@@ -183,6 +208,9 @@ IDE with a git integration polling the folder. Check, then tick the box and remo
 ```sh
 pgrep -a git    # nothing for the vault: safe
 ```
+
+`pgrep` only sees Linux processes: it can't see a Windows `git.exe` or an IDE working on the
+vault through `\\wsl$`. Close those first.
 
 ## Restoring a deleted note
 

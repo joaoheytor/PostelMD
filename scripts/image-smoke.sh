@@ -15,10 +15,10 @@ volume=$name-data
 port=${SMOKE_PORT:-18090}
 budget=${FIRST_NOTE_BUDGET:-120}
 base=http://127.0.0.1:$port
-work=$(mktemp -d)
-jar=$work/cookies
 # shellcheck source=scripts/image-smoke-lib.sh
 . "$(dirname "$0")/image-smoke-lib.sh"
+work=$(smoke_workdir)
+jar=$work/cookies
 
 cleanup() {
 	docker rm -f "$name" "$name-2" >/dev/null 2>&1 || true
@@ -26,6 +26,7 @@ cleanup() {
 	rm -rf "$work"
 }
 trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 size=$(docker image inspect -f '{{.Size}}' "$image")
 echo "image $image: $size bytes"
