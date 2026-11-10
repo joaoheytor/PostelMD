@@ -7,7 +7,9 @@ import (
 	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // newVault builds:
@@ -75,6 +77,30 @@ func TestReadFile(t *testing.T) {
 				t.Fatalf("content = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestReadFileFIFO: a FIFO swapped in for a file (after the caller listed it as regular)
+// is refused at once; opening it blocking would wait for a writer forever.
+func TestReadFileFIFO(t *testing.T) {
+	r, vault := newVault(t)
+	mustDo(t, syscall.Mkfifo(filepath.Join(vault, "dir", "fifo"), 0o600))
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.ReadFile("dir/fifo")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrNotRegular) {
+			t.Fatalf("err = %v, want ErrNotRegular", err)
+		}
+	case <-time.After(5 * time.Second):
+		// Unblock the reader so the test process can exit.
+		if f, err := os.OpenFile(filepath.Join(vault, "dir", "fifo"), os.O_WRONLY, 0); err == nil {
+			_ = f.Close()
+		}
+		t.Fatal("ReadFile blocked on a FIFO")
 	}
 }
 

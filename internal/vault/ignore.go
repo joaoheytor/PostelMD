@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
@@ -20,7 +21,13 @@ type commitWalk struct {
 	fn      func(p string, size int64, ignored bool) error
 }
 
-func (v *Vault) walkForCommit(exclude []byte, committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error) error {
+func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error) error {
+	exclude, err := v.git.Exclude()
+	if errors.Is(err, git.ErrExcludeSkipped) {
+		v.log.Warn("ignoring .git/info/exclude", "err", err)
+	} else if err != nil {
+		return err
+	}
 	w := &commitWalk{v: v, tracked: map[string]bool{}, fn: fn}
 	for p := range committed {
 		for d := p; strings.Contains(d, "/"); {
