@@ -137,3 +137,15 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 .pm-commit-changes { margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow: auto; }
 .pm-commit-kind { display: inline-block; min-width: 5.5em; color: var(--muted); }
 .pm-commit-kind[data-kind="deleted"] { color: var(--danger); }
+.pm-dialog-wide { width: min(64rem, calc(100vw - 32px)); }
+.pm-history { display: grid; grid-template-columns: minmax(12rem, 1fr) 2fr; gap: 12px; min-height: 0; }
+.pm-history-list { margin: 0; padding: 0; list-style: none; max-height: 60vh; overflow: auto; }
+.pm-history-list button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; margin-bottom: 4px; }
+.pm-history-list button[aria-pressed="true"] { border-color: var(--fg); }
+.pm-history-meta { font-size: 0.8rem; color: var(--muted); }
+.pm-history-view { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pm-history-view button[aria-pressed="true"] { border-color: var(--fg); }
+.pm-diff { margin: 0; max-height: 55vh; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; font-size: 0.85rem; }
+.pm-diff ins { display: block; text-decoration: none; background: color-mix(in srgb, #2e7d32 18%, transparent); }
+.pm-diff del { display: block; text-decoration: none; background: color-mix(in srgb, var(--danger) 18%, transparent); }
+@media (max-width: 40rem) { .pm-history { grid-template-columns: 1fr; } }

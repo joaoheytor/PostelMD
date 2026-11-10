@@ -107,6 +107,40 @@ export class Workspace {
     return true;
   }
 
+  /**
+   * Replaces the open note's text with its version from commit, through the save path
+   * (ADR-0020): the open note is saved first, and the server replaces it only if it is still
+   * that saved version (If-Match). The note is then reopened with what the server holds.
+   */
+  async restore(commit: string): Promise<boolean> {
+    const open = this.state.value.open;
+    if (!open) return false;
+    const path = open.doc.path;
+    if (!(await this.saveOpen())) {
+      this.state.update((s) => ({ ...s, error: `Save or resolve ${path} before restoring a version.` }));
+      return false;
+    }
+    // Closed first, so no autosave races the restore.
+    open.doc.dispose();
+    this.state.set({});
+    let failed: unknown;
+    try {
+      await api.restore(path, commit, open.doc.etag);
+    } catch (err) {
+      failed = err;
+    }
+    await this.open(path); // reopening clears the error
+    if (failed !== undefined) {
+      const why =
+        failed instanceof api.ApiError && failed.status === 412
+          ? "it changed in the meantime, so nothing was replaced"
+          : message(failed);
+      this.state.update((s) => ({ ...s, error: `Couldn't restore ${path}: ${why}` }));
+      return false;
+    }
+    return true;
+  }
+
   /** Moves a note or folder to the trash. An open note inside it is closed unsaved. */
   async trash(path: string, kind: "file" | "folder"): Promise<void> {
     const open = this.state.value.open;
