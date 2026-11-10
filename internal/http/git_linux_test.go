@@ -67,7 +67,7 @@ func TestGitAPI(t *testing.T) {
 		t.Fatalf("save = %d", resp.StatusCode)
 	}
 	editRev := resp.Header.Get("ETag")
-	if code, body := get("/api/v1/git/status"); !strings.Contains(body, `{"path":"a.md","kind":"modified","blob":"`) {
+	if code, body := get("/api/v1/git/status"); !strings.Contains(body, `{"path":"a.md","kind":"modified","rev":"`) || strings.Contains(body, "blob") {
 		t.Fatalf("status after an edit = %d %s", code, body)
 	}
 	if resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: commitBody(t, srv, cookie, "  ")}); resp.StatusCode != 422 {

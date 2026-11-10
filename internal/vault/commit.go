@@ -13,46 +13,42 @@ import (
 // changed, appeared or went back since the status); nothing was committed.
 var ErrChangesDiffer = errors.New("vault: the changes differ from the ones listed")
 
-// Listed is one change as the commit dialog listed it: its path and the blob ID of the
-// bytes it scanned, nil for a deletion.
+// Listed is one change as the commit dialog listed it: its path and the revision (the save
+// protocol's ETag) of the bytes it scanned; nil for a deletion.
 type Listed struct {
-	Path string  `json:"path"`
-	Blob *string `json:"blob"`
+	Path string `json:"path"`
+	Rev  *Rev   `json:"rev"`
 }
 
 // Commit commits the uncommitted changes with msg, as author, if they are exactly listed:
-// the same paths, each with the same blob (ADR-0020). Otherwise it fails with
+// the same paths, each with the same revision (ADR-0020). Otherwise it fails with
 // ErrChangesDiffer and commits nothing. The check and the commit hold one acquisition of
 // the vault mutex and use one read of the files, so the commit has the bytes checked.
 func (v *Vault) Commit(ctx context.Context, msg, name, email string, listed []Listed) (git.Hash, error) {
 	return v.commit(ctx, msg, name, email, func(st *Status) error { return sameChanges(st.Changes, listed) })
 }
 
-// sameChanges reports whether listed names exactly changes, path by path and blob by blob.
+// sameChanges reports whether listed names exactly changes: the same paths, a deletion
+// listed without a revision, and every other change with the revision of its bytes.
 func sameChanges(changes []Change, listed []Listed) error {
-	want := make(map[string]string, len(listed))
+	want := make(map[string]*Rev, len(listed))
 	for _, l := range listed {
 		if _, dup := want[l.Path]; dup {
 			return fmt.Errorf("%w: %q listed twice", ErrChangesDiffer, l.Path)
 		}
-		want[l.Path] = blobText(l.Blob)
+		want[l.Path] = l.Rev
 	}
 	if len(want) != len(changes) {
 		return fmt.Errorf("%w: %d listed, %d changed", ErrChangesDiffer, len(want), len(changes))
 	}
 	for _, c := range changes {
-		if b, ok := want[c.Path]; !ok || b != blobText(c.Blob) {
+		rev, ok := want[c.Path]
+		same := ok && (c.Kind == Deleted && rev == nil || c.Kind != Deleted && rev != nil && *rev == c.Rev)
+		if !same {
 			return fmt.Errorf("%w: %q", ErrChangesDiffer, c.Path)
 		}
 	}
 	return nil
-}
-
-func blobText(b *string) string {
-	if b == nil {
-		return "deleted"
-	}
-	return *b
 }
 
 // commit commits every uncommitted change, after check (if any) accepts the status. It holds

@@ -14,14 +14,21 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/store/git"
 )
 
-// listed is what the commit dialog sends back: the changes of a status, path and blob.
+// listed is what the commit dialog sends back: each change's path and revision (none for a
+// deletion).
 func listed(st *Status) []Listed {
 	out := []Listed{}
 	for _, c := range st.Changes {
-		out = append(out, Listed{Path: c.Path, Blob: c.Blob})
+		l := Listed{Path: c.Path}
+		if c.Kind != Deleted {
+			l.Rev = revOf(c.Rev)
+		}
+		out = append(out, l)
 	}
 	return out
 }
+
+func revOf(r Rev) *Rev { return &r }
 
 // commitAll commits what a status lists, as the commit dialog does. Status only reads, so
 // the crash tests' steps are the commit's own.
@@ -33,9 +40,9 @@ func commitAll(v *Vault, msg, name, email string) (git.Hash, error) {
 	return v.Commit(ctx, msg, name, email, listed(st))
 }
 
-// gateVault is a vault with one commit (notes/a.md = "A", c.md = "C") and then
+// changedVault is a vault with one commit (notes/a.md = "A", c.md = "C") and then
 // notes/a.md edited, b.md added and c.md deleted, all uncommitted.
-func gateVault(t *testing.T, opts ...fs.Option) (*Vault, string) {
+func changedVault(t *testing.T, opts ...fs.Option) (*Vault, string) {
 	t.Helper()
 	v, dir := newVault(t, opts...)
 	must(t, os.WriteFile(filepath.Join(dir, "c.md"), []byte("C"), 0o600))
@@ -49,19 +56,14 @@ func gateVault(t *testing.T, opts ...fs.Option) (*Vault, string) {
 	return v, dir
 }
 
-func blobOf(s string) *string {
-	h := git.BlobHash([]byte(s)).String()
-	return &h
-}
-
-func TestStatusListsEachChangesBlobAndRevision(t *testing.T) {
-	v, _ := gateVault(t)
+func TestStatusListsEachChangesRevision(t *testing.T) {
+	v, _ := changedVault(t)
 	st, err := v.Status(ctx)
 	must(t, err)
 	want := []Change{
-		{Path: "b.md", Kind: Added, Blob: blobOf("B"), Rev: RevOf([]byte("B"))},
+		{Path: "b.md", Kind: Added, Rev: RevOf([]byte("B"))},
 		{Path: "c.md", Kind: Deleted},
-		{Path: "notes/a.md", Kind: Modified, Blob: blobOf("A2"), Rev: RevOf([]byte("A2"))},
+		{Path: "notes/a.md", Kind: Modified, Rev: RevOf([]byte("A2"))},
 	}
 	if !reflect.DeepEqual(st.Changes, want) {
 		t.Fatalf("status = %+v, want %+v", st.Changes, want)
@@ -69,7 +71,7 @@ func TestStatusListsEachChangesBlobAndRevision(t *testing.T) {
 }
 
 func TestCommitTakesExactlyTheListedChanges(t *testing.T) {
-	v, dir := gateVault(t)
+	v, dir := changedVault(t)
 	st, err := v.Status(ctx)
 	must(t, err)
 	_, err = v.Commit(ctx, "listed", "Ada", "ada@example.invalid", listed(st))
@@ -104,27 +106,32 @@ func TestCommitRefusesAnotherSet(t *testing.T) {
 		{"a deletion missing from the list", func(_ *testing.T, _ string, l []Listed) []Listed {
 			var out []Listed
 			for _, c := range l {
-				if c.Blob != nil {
+				if c.Rev != nil {
 					out = append(out, c)
 				}
 			}
 			return out
 		}},
-		{"a deletion listed with a blob", func(_ *testing.T, _ string, l []Listed) []Listed {
+		{"a deletion listed with a revision", func(_ *testing.T, _ string, l []Listed) []Listed {
 			out := append([]Listed{}, l...)
-			out[1].Blob = blobOf("C")
+			out[1].Rev = revOf(RevOf([]byte("C")))
+			return out
+		}},
+		{"a change listed as a deletion", func(_ *testing.T, _ string, l []Listed) []Listed {
+			out := append([]Listed{}, l...)
+			out[0].Rev = nil
 			return out
 		}},
 		{"a path listed twice", func(_ *testing.T, _ string, l []Listed) []Listed {
 			return append(append([]Listed{}, l...), l[0])
 		}},
 		{"an extra path listed", func(_ *testing.T, _ string, l []Listed) []Listed {
-			return append(append([]Listed{}, l...), Listed{Path: "z.md", Blob: blobOf("Z")})
+			return append(append([]Listed{}, l...), Listed{Path: "z.md", Rev: revOf(RevOf([]byte("Z")))})
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			v, dir := gateVault(t)
+			v, dir := changedVault(t)
 			st, err := v.Status(ctx)
 			must(t, err)
 			l := tc.edit(t, dir, listed(st))
@@ -159,7 +166,7 @@ func TestCommitWithNothingListedAndNothingChanged(t *testing.T) {
 // vault mutex and use one read of the files. Right after the check passes, a save can't get
 // in, and a host edit made then isn't what gets committed: the commit has the checked bytes.
 func TestCommitChecksUnderTheCommitsLock(t *testing.T) {
-	v, dir := gateVault(t)
+	v, dir := changedVault(t)
 	v.wait = 20 * time.Millisecond
 	st, err := v.Status(ctx)
 	must(t, err)

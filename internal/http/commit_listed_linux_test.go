@@ -76,7 +76,7 @@ func TestCommitBindsToTheListedChanges(t *testing.T) {
 		{"a deletion left out", func(_ *testing.T, _ *httptest.Server, _ *stdhttp.Cookie, l []vault.Listed) []vault.Listed {
 			var out []vault.Listed
 			for _, c := range l {
-				if c.Blob != nil {
+				if c.Rev != nil {
 					out = append(out, c)
 				}
 			}
@@ -137,6 +137,16 @@ func TestCommitOfManyChanges(t *testing.T) {
 	}
 }
 
+// TestCommitBodyLimit: a body over the limit is 413, not a vague 400.
+func TestCommitBodyLimit(t *testing.T) {
+	srv, svc := newServer(t, false)
+	cookie := setup(t, srv, svc)
+	body := `{"message":"` + strings.Repeat("x", maxCommitBody) + `","changes":[]}`
+	if resp, b := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: withCookie(cookie, jsonHeader), body: body}); resp.StatusCode != 413 {
+		t.Fatalf("an oversized commit = %d %s, want 413", resp.StatusCode, b)
+	}
+}
+
 // TestConcurrentCommitsOfOneList: the vault mutex serializes them; one commits the list,
 // and the others find it no longer matches.
 func TestConcurrentCommitsOfOneList(t *testing.T) {
@@ -144,22 +154,28 @@ func TestConcurrentCommitsOfOneList(t *testing.T) {
 	cookie := setup(t, srv, svc)
 	save(t, srv, cookie, "a.md", "A2")
 	body := commitBody(t, srv, cookie, "Edit a")
-	codes := make(chan int, 8)
+	results := make(chan string, 8)
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: withCookie(cookie, jsonHeader), body: body})
-			codes <- resp.StatusCode
+			resp, b := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: withCookie(cookie, jsonHeader), body: body})
+			r := fmt.Sprint(resp.StatusCode)
+			if strings.Contains(b, `"code":"changes-differ"`) {
+				r += " changes-differ"
+			}
+			results <- r
 		})
 	}
 	wg.Wait()
-	close(codes)
-	count := map[int]int{}
-	for c := range codes {
-		count[c]++
+	close(results)
+	count := map[string]int{}
+	for r := range results {
+		count[r]++
 	}
-	if count[201] != 1 || count[409] != 7 {
-		t.Fatalf("status codes = %v, want one 201 and seven 409", count)
+	// The losers' list no longer matches (a.md is committed): changes-differ, not merely
+	// "nothing to commit".
+	if count["201"] != 1 || count["409 changes-differ"] != 7 {
+		t.Fatalf("results = %v, want one 201 and seven 409 changes-differ", count)
 	}
 	if n := historyLen(t, srv, cookie, "a.md"); n != 2 {
 		t.Fatalf("a.md has %d versions, want 2", n)

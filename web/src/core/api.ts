@@ -211,16 +211,15 @@ export async function trash(path: string, kind: "file" | "folder"): Promise<void
 export interface GitChange {
   path: string;
   kind: "added" | "modified" | "deleted";
-  /** The git blob ID of the file's bytes; null for a deletion. */
-  blob: string | null;
-  /** The same bytes' revision, the ETag a read of them answers (unquoted); none for a deletion. */
+  /** The revision of the file's bytes, the ETag a read of them answers (unquoted); none for a deletion. */
   rev?: string;
 }
 
 /** A change as the commit dialog listed it: the commit takes exactly these. */
 export interface ListedChange {
   path: string;
-  blob: string | null;
+  /** The revision the dialog checked; null for a deletion. */
+  rev: string | null;
 }
 
 export interface GitStatus {

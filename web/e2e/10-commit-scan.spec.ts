@@ -5,6 +5,8 @@ import { env, expect, login, noSeriousA11yViolations, test } from "./helpers";
 
 // The commit dialog checks exactly the bytes it lists, and the server commits only that
 // list (ADR-0020). Fake secrets are built at run time so no scanner flags this public file.
+// Files sort by name, so this runs right after 1-: its notes' names stay out of later
+// specs' searches (no "fr", which the finder spec types).
 const awsKey = `AKIA${"Q7".repeat(8)}`;
 const vault = (name: string) => join(env("PM_E2E_VAULT"), name);
 const lastSubject = () => execFileSync("git", ["-C", env("PM_E2E_VAULT"), "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
@@ -25,7 +27,7 @@ test("a pasted key is listed in the commit dialog; only Commit anyway commits it
   const secrets = dialog.getByRole("list", { name: "Possible secrets" });
   await expect(secrets).toContainText("leak.md: AWS access key ID on line 3 (AKIA…)");
   expect(await dialog.textContent()).not.toContain(awsKey);
-  await expect(dialog).toContainText("removing them later means rewriting that history");
+  await expect(dialog).toContainText("removing a secret later means rewriting that history");
   await noSeriousA11yViolations(page);
 
   // No plain Commit, and Commit anyway is never the form's default (Enter) action.
@@ -43,29 +45,29 @@ test("a pasted key is listed in the commit dialog; only Commit anyway commits it
 });
 
 test("a note edited in another tab after the dialog listed it is not committed unseen", async ({ page, context }) => {
-  writeFileSync(vault("fresh.md"), "# Fresh\n");
+  writeFileSync(vault("tabbed.md"), "# Tabbed\n");
   await login(page);
   await page.getByRole("button", { name: "Commit…" }).click();
   const dialog = page.getByRole("dialog", { name: "Commit changes" });
-  await expect(dialog.getByRole("list", { name: "Changes to commit" })).toContainText("fresh.md");
+  await expect(dialog.getByRole("list", { name: "Changes to commit" })).toContainText("tabbed.md");
   const commit = dialog.getByRole("button", { name: "Commit", exact: true });
   await expect(commit).toBeEnabled(); // listed and checked
 
   const tab2 = await context.newPage();
-  await tab2.goto("/notes/fresh.md");
-  const text = tab2.getByRole("textbox", { name: "Text of fresh.md" });
+  await tab2.goto("/notes/tabbed.md");
+  const text = tab2.getByRole("textbox", { name: "Text of tabbed.md" });
   await text.click();
   await tab2.keyboard.press("ControlOrMeta+End");
   await tab2.keyboard.type(`from tab two ${awsKey}`);
-  await expect.poll(() => readFileSync(vault("fresh.md"), "utf8")).toContain("from tab two");
+  await expect.poll(() => readFileSync(vault("tabbed.md"), "utf8")).toContain("from tab two");
   await tab2.close();
 
   const before = lastSubject();
-  await dialog.getByLabel("Commit message").fill("Add fresh");
+  await dialog.getByLabel("Commit message").fill("Add tabbed");
   await commit.click();
   await expect(dialog.getByRole("alert").filter({ hasText: "The changes were updated since you opened this dialog; review them again." })).toBeVisible();
   expect(lastSubject()).toBe(before);
   // The new list is checked again: tab two's key shows, and only Commit anyway is left.
-  await expect(dialog.getByRole("list", { name: "Possible secrets" })).toContainText("fresh.md: AWS access key ID on line 2");
+  await expect(dialog.getByRole("list", { name: "Possible secrets" })).toContainText("tabbed.md: AWS access key ID on line 2");
   await expect(commit).toHaveCount(0);
 });

@@ -15,11 +15,13 @@ the remote and push rows, and the plugin rows don't apply yet. The MVP adds:
   whole credential: anyone who can read the volume can forge sessions, as with the key ring
   in the full design;
 - **secrets in commits (I3, T9) are warned about, not blocked.** The commit gate's server
-  scan is v0.2. Until then the commit dialog scans, in the browser, exactly the bytes it
-  lists, and the server commits only that list (blob by blob, under the vault mutex, from
-  the same read), so a change made after the dialog listed it is never committed unseen.
-  With a finding the user must choose "Commit anyway". The setup's initial import commits
-  an adopted folder unscanned; it stays local (no push), and setup tells the user to check
+  scan is v0.2. Until then the web app's commit dialog scans, in the browser, exactly the
+  bytes it lists, and the server commits only that list (revision by revision, under the
+  vault mutex, from the same read), so the web app's commit dialog never commits a change
+  made after it listed the changes. The server checks that the list matches but can't
+  verify that a scan ran. With a finding, or a file the dialog couldn't check, the user
+  must choose "Commit anyway". The setup's initial import commits an adopted folder
+  unscanned; it stays local (no push), and the notice after setup tells the user to check
   it before pushing.
 
 ## Assets

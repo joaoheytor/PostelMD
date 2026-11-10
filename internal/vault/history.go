@@ -46,13 +46,12 @@ const (
 	Deleted  ChangeKind = "deleted"
 )
 
-// Change is one uncommitted file. Blob is the git blob ID of the file's bytes and Rev their
-// revision (the ETag a read of the note answers), both from the same read; a deletion has
-// neither. The commit dialog scans the bytes whose Rev it read, and commits by Blob.
+// Change is one uncommitted file. Rev is the revision of the bytes read (the ETag a read of
+// the note answers); a deletion has none. The commit dialog scans the bytes whose ETag is
+// Rev, and commits by Rev (see Commit).
 type Change struct {
 	Path string     `json:"path"`
 	Kind ChangeKind `json:"kind"`
-	Blob *string    `json:"blob"`
 	Rev  Rev        `json:"rev,omitempty"`
 }
 
@@ -133,16 +132,14 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 		if err != nil {
 			return err
 		}
-		blob := git.BlobHash(b)
 		kind := Modified
 		switch {
 		case !tracked:
 			kind = Added
-		case old == blob:
+		case old == git.BlobHash(b):
 			return nil
 		}
-		id := blob.String()
-		st.Changes = append(st.Changes, Change{Path: p, Kind: kind, Blob: &id, Rev: RevOf(b)})
+		st.Changes = append(st.Changes, Change{Path: p, Kind: kind, Rev: RevOf(b)})
 		if load {
 			content[p] = b
 		}

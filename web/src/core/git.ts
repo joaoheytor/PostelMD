@@ -1,5 +1,5 @@
 import { ApiError, type GitStatus, type ListedChange } from "./api";
-import { type FileScan, type ReadFile, scanChanges, withFindings } from "./commit-scan";
+import { type FileScan, needsConfirmation, type ReadFile, scanChanges } from "./commit-scan";
 import { Store } from "./store";
 import { message } from "./workspace";
 
@@ -74,27 +74,27 @@ export class Git {
     }
   }
 
-  /** The listed changes have been checked, and the check found something. */
-  hasFindings(): boolean {
-    return withFindings(this.state.value.scan).length > 0;
+  /** The check found something, or couldn't check a file: only "Commit anyway" commits. */
+  needsConfirmation(): boolean {
+    return needsConfirmation(this.state.value.scan);
   }
 
   /**
-   * Commits exactly the listed changes. With findings it commits only when anyway is true:
-   * the user chose "Commit anyway". If the changes moved meanwhile, nothing is committed and
-   * the dialog lists and checks them again.
+   * Commits exactly the listed changes. With a finding or a file not checked, it commits
+   * only when anyway is true: the user chose "Commit anyway". If the changes moved
+   * meanwhile, nothing is committed and the dialog lists and checks them again.
    */
   async commit(msg: string, anyway = false): Promise<boolean> {
     const { status, scan, busy, scanning } = this.state.value;
     if (busy || scanning || !status || !scan) return false;
-    if (this.hasFindings() && !anyway) return false;
+    if (this.needsConfirmation() && !anyway) return false;
     this.state.update((s) => ({ ...s, busy: true, error: undefined, notice: undefined, committed: undefined }));
     try {
       if (!(await this.deps.saveOpen())) {
         this.state.update((s) => ({ ...s, error: "Some edits to the open note aren't saved. Save or resolve them first." }));
         return false;
       }
-      const hash = await this.deps.commit(msg, status.changes.map((c) => ({ path: c.path, blob: c.blob })));
+      const hash = await this.deps.commit(msg, status.changes.map((c) => ({ path: c.path, rev: c.kind === "deleted" ? null : (c.rev ?? null) })));
       this.state.update((s) => ({ ...s, committed: hash.slice(0, 7) }));
       return true;
     } catch (err) {

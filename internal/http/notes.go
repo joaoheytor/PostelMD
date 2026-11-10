@@ -252,15 +252,19 @@ func decodeJSON(w stdhttp.ResponseWriter, r *stdhttp.Request, v any) bool {
 	return decodeJSONMax(w, r, v, 8<<10)
 }
 
-// decodeJSONMax is decodeJSON for a body of at most max bytes.
-func decodeJSONMax(w stdhttp.ResponseWriter, r *stdhttp.Request, v any, max int64) bool {
+// decodeJSONMax is decodeJSON for a body of at most limit bytes; a larger one is 413.
+func decodeJSONMax(w stdhttp.ResponseWriter, r *stdhttp.Request, v any, limit int64) bool {
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		writeError(w, stdhttp.StatusUnsupportedMediaType, "send application/json")
 		return false
 	}
-	dec := json.NewDecoder(stdhttp.MaxBytesReader(w, r.Body, max))
+	dec := json.NewDecoder(stdhttp.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		if _, ok := errors.AsType[*stdhttp.MaxBytesError](err); ok {
+			writeError(w, stdhttp.StatusRequestEntityTooLarge, "the request body is too large")
+			return false
+		}
 		writeError(w, stdhttp.StatusBadRequest, "invalid JSON body")
 		return false
 	}

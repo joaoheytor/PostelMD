@@ -29,7 +29,7 @@ type Author interface {
 // GitAPI serves:
 //
 //	GET  /api/v1/git/status                  {branch, changes, skipped, locks}
-//	POST /api/v1/git/commit                  {message, changes: [{path, blob}]}: commit the
+//	POST /api/v1/git/commit                  {message, changes: [{path, rev}]}: commit the
 //	                                         changes if they are still exactly those
 //	POST /api/v1/git/locks/remove            {confirmNoOtherGit: true}
 //	GET  /api/v1/history/{path}              the commits that changed the note
@@ -68,8 +68,9 @@ func (a *GitAPI) status(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}{st, append([]vault.LockInfo{}, locks...)})
 }
 
-// maxCommitBody bounds a commit request, whose list grows with the number of changes.
-const maxCommitBody = 4 << 20
+// maxCommitBody bounds a commit request, whose list grows with the number of changes: it
+// fits about 50,000 changes with 64-character paths.
+const maxCommitBody = 8 << 20
 
 // commit takes the changes the dialog listed (and scanned for secrets), and commits them
 // only if they are still exactly the changes. The web app is the only client (ADR-0020).

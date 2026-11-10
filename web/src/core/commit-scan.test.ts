@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GitChange } from "./api";
-import { decodeText, type FileBytes, scanChanges } from "./commit-scan";
+import { decodeText, type FileBytes, needsConfirmation, scanChanges, scanText } from "./commit-scan";
+import { scanSecrets } from "./secrets";
 
 // Fake secrets, built at run time so no scanner flags this public file.
 const awsKey = `AKIA${"Q7".repeat(8)}`;
 const enc = new TextEncoder();
 
 function change(path: string, kind: GitChange["kind"], rev = `rev-${path}`): GitChange {
-  return kind === "deleted" ? { path, kind, blob: null } : { path, kind, blob: `blob-${path}`, rev };
+  return kind === "deleted" ? { path, kind } : { path, kind, rev };
 }
 
 function disk(files: Record<string, Uint8Array | string>) {
@@ -38,19 +39,46 @@ describe("scanChanges", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it("lists binary and non-UTF-8 files as not scanned", async () => {
-    const read = disk({
-      "img.bin": new Uint8Array([0x50, 0x4e, 0x47, 0x00, 0x41, 0x4b, 0x49, 0x41]), // valid UTF-8 but for the NUL
-      "latin1.txt": new Uint8Array([0x63, 0x61, 0x66, 0xe9]),
+  it("lists a file with a NUL byte as binary, not checked", async () => {
+    const read = disk({ "img.bin": new Uint8Array([0x50, 0x4e, 0x47, 0x00, 0x41]) }); // valid UTF-8 but for the NUL
+    expect(await scanChanges([change("img.bin", "added")], read)).toEqual({
+      kind: "scanned",
+      files: [{ path: "img.bin", result: "not-checked", reason: "binary" }],
     });
-    const scan = await scanChanges([change("img.bin", "added"), change("latin1.txt", "added")], read);
+  });
+
+  it("scans text that isn't valid UTF-8 anyway", async () => {
+    const latin1 = new Uint8Array([...enc.encode(`caf`), 0xe9, ...enc.encode(` ${awsKey}`)]);
+    const scan = await scanChanges([change("latin1.txt", "added")], disk({ "latin1.txt": latin1 }));
+    expect(scan).toMatchObject({ kind: "scanned", files: [{ path: "latin1.txt", result: "findings" }] });
+  });
+
+  it("doesn't check a file over the size limit, nor files past the total limit", async () => {
+    const read = disk({ "big.md": "x".repeat(11), "a.md": "x".repeat(6), "b.md": "x".repeat(6), "c.md": "x" });
+    const changes = ["big.md", "a.md", "b.md", "c.md"].map((p) => change(p, "added"));
+    const scan = await scanChanges(changes, read, { file: 10, total: 10 });
     expect(scan).toEqual({
       kind: "scanned",
       files: [
-        { path: "img.bin", result: "not-text" },
-        { path: "latin1.txt", result: "not-text" },
+        { path: "big.md", result: "not-checked", reason: "too large" },
+        { path: "a.md", result: "clean" },
+        { path: "b.md", result: "not-checked", reason: "over the limit" },
+        { path: "c.md", result: "clean" },
       ],
     });
+  });
+
+  it("stops reading once the total limit is used up", async () => {
+    const read = disk({ "a.md": "x".repeat(10), "b.md": "x" });
+    const scan = await scanChanges([change("a.md", "added"), change("b.md", "added")], read, { file: 10, total: 10 });
+    expect(scan).toEqual({
+      kind: "scanned",
+      files: [
+        { path: "a.md", result: "clean" },
+        { path: "b.md", result: "not-checked", reason: "over the limit" },
+      ],
+    });
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("reports a file whose bytes aren't the listed ones as changed", async () => {
@@ -63,10 +91,33 @@ describe("scanChanges", () => {
   });
 });
 
+describe("scanText", () => {
+  it("finds what scanSecrets finds, with the same lines, across chunks", () => {
+    const lines = Array.from({ length: 5000 }, (_, i) => (i % 997 === 0 ? `key ${i}: ${awsKey}` : `line ${i} of the runbook`));
+    const text = lines.join("\n");
+    expect(scanText(text, 4096)).toEqual(scanSecrets(text));
+    expect(scanText(text, 4096)).toHaveLength(6);
+  });
+
+  it("keeps a line longer than a chunk whole", () => {
+    const text = `${"x".repeat(100)} ${awsKey}\nnext`;
+    expect(scanText(text, 16)).toEqual([{ rule: "AWS access key ID", line: 1, hint: "AKIA…" }]);
+  });
+});
+
 describe("decodeText", () => {
-  it("decodes UTF-8 text and refuses NUL bytes and invalid UTF-8", () => {
+  it("decodes text, replacing invalid UTF-8, and refuses a NUL byte", () => {
     expect(decodeText(enc.encode("olá"))).toBe("olá");
+    expect(decodeText(new Uint8Array([0x61, 0xff]))).toBe("a�");
     expect(decodeText(new Uint8Array([0x61, 0x00]))).toBeUndefined();
-    expect(decodeText(new Uint8Array([0xff]))).toBeUndefined();
+  });
+});
+
+describe("needsConfirmation", () => {
+  it("is true for a finding or a file that wasn't checked", () => {
+    expect(needsConfirmation([{ path: "a", result: "clean" }])).toBe(false);
+    expect(needsConfirmation([{ path: "a", result: "not-checked", reason: "binary" }])).toBe(true);
+    expect(needsConfirmation([{ path: "a", result: "findings", findings: [] }])).toBe(true);
+    expect(needsConfirmation(undefined)).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import { html, nothing } from "lit";
 import type { GitStatus } from "../core/api";
-import { type FileScan, withFindings } from "../core/commit-scan";
+import { type FileScan, needsConfirmation, notChecked, withFindings } from "../core/commit-scan";
 import type { Git } from "../core/git";
 import { fields, LightElement, StoreController } from "./base";
 
@@ -43,7 +43,7 @@ export class CommitDialog extends LightElement {
   /** The plain Commit button. With findings there is none, so Enter can't commit. */
   private async submit(e: SubmitEvent): Promise<void> {
     e.preventDefault();
-    if (this.git.hasFindings()) return;
+    if (this.git.needsConfirmation()) return;
     const form = e.target as HTMLFormElement;
     if (await this.git.commit(fields(form)["message"] ?? "")) form.reset();
   }
@@ -87,28 +87,38 @@ export class CommitDialog extends LightElement {
     </ul>`;
   }
 
-  /** ADR-0020: each finding by file, rule, line and a short hint; never the secret. */
+  /**
+   * ADR-0020: each finding by file, rule, line and a short hint, never the secret; and each
+   * file the dialog couldn't check, which needs "Commit anyway" too.
+   */
   private secrets(scan: FileScan[] | undefined) {
+    if (!needsConfirmation(scan)) return nothing;
     const found = withFindings(scan);
-    const notText = (scan ?? []).filter((f) => f.result === "not-text").map((f) => f.path);
-    return html`${found.length
-      ? html`<section class="pm-banner pm-commit-secrets" role="alert" aria-labelledby="pm-secrets-title">
-          <h3 id="pm-secrets-title">These changes look like they contain secrets</h3>
-          <ul aria-label="Possible secrets">
+    const unchecked = notChecked(scan);
+    return html`<section class="pm-banner pm-commit-secrets" role="alert" aria-labelledby="pm-secrets-title">
+      <h3 id="pm-secrets-title">
+        ${found.length ? "These changes look like they contain secrets" : "Some changes couldn't be checked for secrets"}
+      </h3>
+      ${found.length
+        ? html`<ul aria-label="Possible secrets">
             ${found.flatMap((f) =>
               f.findings.map((s) => html`<li>${f.path}: ${s.rule} on line ${s.line} (<code>${s.hint}</code>)</li>`),
             )}
-          </ul>
-          <p>A commit keeps them in the git history; removing them later means rewriting that history.</p>
-        </section>`
-      : nothing}
-    ${notText.length ? html`<p>Not checked for secrets (not text): ${notText.join(", ")}</p>` : nothing}`;
+          </ul>`
+        : nothing}
+      ${unchecked.length
+        ? html`<ul aria-label="Not checked for secrets">
+            ${unchecked.map((f) => html`<li>${f.path}: not checked (${f.reason})</li>`)}
+          </ul>`
+        : nothing}
+      <p>A commit keeps everything in the git history; removing a secret later means rewriting that history.</p>
+    </section>`;
   }
 
   private actions() {
     const s = this.st.value;
     const ready = !!s?.status?.changes.length && !!s.scan && !s.busy && !s.scanning;
-    const commit = this.git.hasFindings()
+    const commit = this.git.needsConfirmation()
       ? html`<button type="button" class="pm-danger" ?disabled=${!ready} @click=${this.commitAnyway}>Commit anyway</button>`
       : html`<button type="submit" ?disabled=${!ready}>Commit</button>`;
     return html`<div class="pm-dialog-actions">

@@ -7,8 +7,8 @@ const awsKey = `AKIA${"Q7".repeat(8)}`;
 const enc = new TextEncoder();
 
 const clean: GitStatus = { branch: "main", changes: [], locks: [] };
-const edited: GitStatus = { branch: "main", changes: [{ path: "a.md", kind: "modified", blob: "b1", rev: "r1" }], locks: [] };
-const leaked: GitStatus = { branch: "main", changes: [{ path: "creds.md", kind: "added", blob: "b2", rev: "r2" }], locks: [] };
+const edited: GitStatus = { branch: "main", changes: [{ path: "a.md", kind: "modified", rev: "r1" }], locks: [] };
+const leaked: GitStatus = { branch: "main", changes: [{ path: "creds.md", kind: "added", rev: "r2" }], locks: [] };
 
 /** A file server where every listed file has its listed bytes. */
 function readAs(content: string, etag: string) {
@@ -45,21 +45,42 @@ describe("Git", () => {
     order.length = 0;
     expect(await git.commit("Add a runbook")).toBe(true);
     expect(order).toEqual(["save", "commit"]);
-    expect(d.commit).toHaveBeenCalledWith("Add a runbook", [{ path: "a.md", blob: "b1" }]);
+    expect(d.commit).toHaveBeenCalledWith("Add a runbook", [{ path: "a.md", rev: "r1" }]);
     expect(git.state.value).toMatchObject({ committed: "0123456", status: clean, busy: false });
   });
 
   it("lists findings, and commits them only with Commit anyway", async () => {
     const d = deps({ status: vi.fn(async () => leaked), readFile: readAs(`aws = ${awsKey}\n`, `"r2"`) });
     const git = await opened(d);
-    expect(git.hasFindings()).toBe(true);
+    expect(git.needsConfirmation()).toBe(true);
     expect(git.state.value.scan).toEqual([
       { path: "creds.md", result: "findings", findings: [{ rule: "AWS access key ID", line: 1, hint: "AKIA…" }] },
     ]);
     expect(await git.commit("x")).toBe(false);
     expect(d.commit).not.toHaveBeenCalled();
     expect(await git.commit("x", true)).toBe(true);
-    expect(d.commit).toHaveBeenCalledWith("x", [{ path: "creds.md", blob: "b2" }]);
+    expect(d.commit).toHaveBeenCalledWith("x", [{ path: "creds.md", rev: "r2" }]);
+  });
+
+  it("treats a file it couldn't check like a finding, and lists a deletion with rev null", async () => {
+    const mixed: GitStatus = {
+      branch: "main",
+      changes: [
+        { path: "img.bin", kind: "added", rev: "r3" },
+        { path: "old.md", kind: "deleted" },
+      ],
+      locks: [],
+    };
+    const d = deps({ status: vi.fn(async () => mixed), readFile: vi.fn(async () => ({ bytes: new Uint8Array([0x41, 0]), etag: `"r3"` })) });
+    const git = await opened(d);
+    expect(git.state.value.scan).toEqual([{ path: "img.bin", result: "not-checked", reason: "binary" }]);
+    expect(await git.commit("x")).toBe(false);
+    expect(d.commit).not.toHaveBeenCalled();
+    expect(await git.commit("x", true)).toBe(true);
+    expect(d.commit).toHaveBeenCalledWith("x", [
+      { path: "img.bin", rev: "r3" },
+      { path: "old.md", rev: null },
+    ]);
   });
 
   it("lists the changes again when a file's bytes aren't the listed ones", async () => {
@@ -69,7 +90,7 @@ describe("Git", () => {
     );
     const git = await opened(deps({ status, readFile }));
     expect(git.state.value).toMatchObject({ status: leaked, notice: changedNotice, scanning: false });
-    expect(git.hasFindings()).toBe(true);
+    expect(git.needsConfirmation()).toBe(true);
   });
 
   it("doesn't commit before the check has run", async () => {
@@ -89,7 +110,7 @@ describe("Git", () => {
     const git = await opened(d);
     expect(await git.commit("x")).toBe(false);
     expect(git.state.value).toMatchObject({ notice: changedNotice, status: leaked, error: undefined });
-    expect(git.hasFindings()).toBe(true);
+    expect(git.needsConfirmation()).toBe(true);
   });
 
   it("doesn't commit while the open note has unsaved edits", async () => {
