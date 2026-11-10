@@ -4,6 +4,7 @@ import type { Draft, Drafts } from "./drafts";
 import { Store } from "./store";
 import { sameFindings, scanSecrets, type SecretFinding } from "./secrets";
 import { join, rebase, Tree } from "./tree";
+import { fill, localDate, type Template } from "./templates";
 
 /** The note open in the editor, with the text it was loaded with. */
 export interface OpenNote {
@@ -90,11 +91,14 @@ export class Workspace {
     }
   }
 
-  async createNote(folder: string, name: string): Promise<void> {
+  /** Creates a note, blank or from a template with its placeholders' values, and opens it. */
+  async createNote(folder: string, name: string, from?: { template: Template; values: Record<string, string> }): Promise<void> {
     const file = /\.[a-z]+$/i.test(name) ? name : `${name}.md`;
     const path = join(folder, file);
+    const title = name.replace(/\.[a-z]+$/i, "");
+    const content = from ? fill(from.template.body, { ...from.values, title, date: localDate(new Date()) }) : `# ${title}\n\n`;
     try {
-      await api.createNote(path, `# ${name.replace(/\.[a-z]+$/i, "")}\n\n`);
+      await api.createNote(path, content);
     } catch (err) {
       this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${message(err)}` }));
       return;
