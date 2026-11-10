@@ -22,13 +22,13 @@ func TestPathlessLogsNoUserText(t *testing.T) {
 		want string // substring of the JSON line
 	}{
 		{"errno inside", fmt.Errorf("vault: %w", &iofs.PathError{Op: "rename", Path: ".postelmd-trash/" + secret, Err: syscall.EIO}),
-			`"err":{"op":"rename","errno":"EIO","kind":"unexpected"}`},
+			`"err":{"op":"rename","errno":"EIO","kind":"unexpected","type":"syscall.Errno"}`},
 		{"inner error quoting a path", &iofs.PathError{Op: "open", Path: secret,
 			Err: errors.New("cannot open " + secret + "\n" + `{"level":"INFO","msg":"forged"}`)},
-			`"err":{"op":"open","errno":"none","kind":"unexpected"}`},
+			`"err":{"op":"open","errno":"none","kind":"unexpected","type":"*errors.errorString"}`},
 		{"user text as the Op", &iofs.PathError{Op: secret + "\nforged", Path: "x", Err: iofs.ErrNotExist},
-			`"err":{"op":"unknown","errno":"none","kind":"not exist"}`},
-		{"plain error", errors.New(secret), `"err":{"op":"unknown","errno":"none","kind":"unexpected"}`},
+			`"err":{"op":"unknown","errno":"none","kind":"not exist","type":"*errors.errorString"}`},
+		{"plain error", errors.New(secret), `"err":{"op":"unknown","errno":"none","kind":"unexpected","type":"*errors.errorString"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer

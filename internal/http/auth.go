@@ -126,7 +126,7 @@ func (a *AuthAPI) setup(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	// succeeded; if the import fails, the files stay uncommitted changes the user commits.
 	imp, err := a.importer.ImportInitial(r.Context(), req.Name, req.Email)
 	if err != nil {
-		a.log.Error("initial import", "err", oneLine(err.Error()))
+		a.log.Error("initial import", pathless(err))
 	}
 	// skipped: files over the commit size limit, left out of git; the notice says so.
 	writeJSON(w, stdhttp.StatusCreated, struct {
@@ -224,7 +224,7 @@ func (a *AuthAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) 
 	case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrBadProfile):
 		writeError(w, stdhttp.StatusUnprocessableEntity, err.Error())
 	default:
-		a.log.Error("auth API", "route", r.Pattern, "err", oneLine(err.Error()))
+		a.log.Error("auth API", "route", r.Pattern, pathless(err))
 		writeError(w, stdhttp.StatusInternalServerError, "internal error")
 	}
 }
