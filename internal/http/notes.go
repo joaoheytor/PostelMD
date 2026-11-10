@@ -206,7 +206,9 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
 	default:
-		a.log.Error("notes API", "method", r.Method, "path", r.URL.Path, "err", err)
+		// The route pattern is ours; the error can quote the request path, so line breaks in
+		// it are escaped and can't forge log lines.
+		a.log.Error("notes API", "route", r.Pattern, "err", oneLine(err.Error()))
 		writeError(w, stdhttp.StatusInternalServerError, "internal error")
 	}
 }
@@ -220,4 +222,10 @@ func writeJSON(w stdhttp.ResponseWriter, status int, v any) {
 
 func writeError(w stdhttp.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// oneLine escapes line breaks so a value from a request stays on its log line.
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return strings.ReplaceAll(s, "\r", `\r`)
 }

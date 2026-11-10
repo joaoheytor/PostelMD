@@ -144,3 +144,9 @@ func TestListShape(t *testing.T) {
 		t.Fatalf("list notes = %s (%v)", body, err)
 	}
 }
+
+func TestOneLine(t *testing.T) {
+	if got := oneLine("open a\nfake=entry\r"); got != `open a\nfake=entry\r` {
+		t.Fatalf("oneLine = %q", got)
+	}
+}
