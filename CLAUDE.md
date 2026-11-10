@@ -29,15 +29,23 @@ web/
   src/core/            framework-free: doc store, save queue, sync engine, plugin host
   src/editor/          CodeMirror 6 setup and extensions
   src/ui/              UI shell: Lit, light DOM (ADR-0019); never imported by core/ or plugin-api
+  src/preview/         markdown-it Worker, sanitizer, preview pane
+  src/diagram/         host side of the sandboxed Mermaid frame (ADR-0021)
+  src/templates/       note template starter pack
+  public/frames/       the sandboxed Mermaid frame page (ADR-0021)
 packages/plugin-api/   @postelmd/plugin-api (types + runtime contract, Apache-2.0)
 test/scenarios/        failure-scenario suite (fault injection; one test per recovery contract)
+test/perf/editor/      editor benchmark spike (#33)
+test/perf/app/         real-app benchmark of the v0.1 budgets (`make perf`)
+scripts/               image smoke and scan, file-size check, fuzz, release-tag verification
 deploy/helm/postelmd/  Helm chart
 docs/                  PRD, architecture, ADRs, threat model, roadmap, ci-cd
 docs/operations/       runbooks (backup, restore, fencing, key compromise, upgrade/rollback)
 CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleased]
 .githooks/             commit-msg + pre-commit (enable: git config core.hooksPath .githooks)
 .claude/               shared agent config: settings.json, hooks/postelmd_guard.py, skills/
-                       (new-adr, changelog, design-review); *.local.* files are git-ignored
+                       (new-adr, changelog, design-review, pr-slice, milestone-audit);
+                       *.local.* files are git-ignored
 ```
 
 ## Hard rules
@@ -106,6 +114,9 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 - **GitHub Actions:** pin actions by commit SHA, set least-privilege `permissions:`, never use
   `pull_request_target` with a PR checkout, and use GitHub-hosted runners only
   (`docs/ci-cd.md`).
+- **Supply chain:** third-party CI tools run pinned by digest or SHA. Before bumping a security
+  tool, verify its signature (as done for Trivy, `docs/ci-cd.md`). Never use
+  `aquasecurity/trivy-action`.
 - **Bug fixes start with a failing test.**
 - After a refactor, delete the dead code in the same PR.
 - `.gitignore` patterns must be anchored (`/notes/`, not `notes/`).
@@ -116,6 +127,18 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   work references into it. `.claude/hooks/postelmd_guard.py` blocks secrets, asks about
   anything that looks private, and turns every outward-facing command (push, tag, release,
   PR, issue, repo settings) into a permission prompt for the maintainer.
+- The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
+  acceptance criteria to the tests that assert them.
+
+## Worktrees and parallel agents
+
+- Parallel slices each run in their own git worktree under `.claude/worktrees/`, and each
+  sets its own `IMAGE=postelmd:<slice>`, `PM_E2E_PORT` and `SMOKE_PORT` before `make ci`.
+- At most three slices in parallel: the maintainer reviews every diff.
+- Sequential only: anything touching save, sync, git or recovery code (rules 4 and 14), or
+  depending on another open slice.
+- Agents write repository files with Write/Edit, not shell redirection, so the guard hook
+  sees them.
 
 ## Definition of Done
 
@@ -131,7 +154,8 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 ## Commands
 
 ```sh
-make ci         # everything the CI `required` check runs, locally (no signing or publishing)
+make ci         # everything the CI `required` check runs, locally (no signing or publishing),
+                # including image-scan
 make test       # go test -race ./... and the web tests (Vitest)
 make lint       # golangci-lint, tsc + eslint, file size, actionlint, shellcheck, yamllint
 make vuln       # govulncheck + npm audit --omit=dev
@@ -139,6 +163,10 @@ make build      # bin/postelmd, with the web app embedded
 make e2e        # Playwright smoke tests against bin/postelmd
 make image      # the container image for this machine, as postelmd:dev
 make image-smoke  # the `docker run` smoke test of ADR-0009 on postelmd:dev
+make image-scan   # Trivy gate of ADR-0015 on $(IMAGE): no critical, no high with a fix
+make perf       # the PRD budgets for one user against bin/postelmd (test/perf/app;
+                # SAMPLES sessions per mode, default 30); the `perf` workflow runs it on
+                # PRs that touch the benchmark
 ```
 
 Planned, with the code that needs them: `make dev` (go run + Vite dev server),
@@ -153,4 +181,16 @@ Planned, with the code that needs them: `make dev` (go run + Vite dev server),
   assert the recovery table's outcome. These are permanent regression tests.
 - Frontend: Vitest for `core/` (no DOM needed). Playwright uses role- and label-based
   locators only; no CSS or structure selectors.
+- Prove each new test can fail: break or disable the behaviour, see the test fail, restore
+  it. Say so in the PR.
+- Fake secrets in tests are built at run time (e.g. `"AKIA" + "Q7".repeat(8)`), so the guard
+  hook and GitHub secret scanning don't flag public test files.
+- Playwright:
+  - the CSP/Trusted Types fixture in `web/e2e/helpers.ts` is automatic; the `hostile-html`
+    annotation is the only opt-out;
+  - simulate a crashed tab with CDP `Page.crash` (`page.close()` lets the last save through);
+  - assert saved content by polling the file on disk, not by waiting for the "Saved" status;
+  - don't type over a multi-line selection until #79 is fixed.
+- Test helpers and scripts that start a server kill it and remove their data on every exit
+  path.
 - Never quarantine a flaky test silently: fix it or delete it with an issue link.

@@ -4,7 +4,8 @@
 #      CI is the hard gate);
 #   2. public-repo check: absolute home paths and the local denylist
 #      (.claude/public-guard.local.txt, git-ignored), in added lines and file names;
-#   3. file-size limit for source files (CLAUDE.md rule 2: 500 lines).
+#   3. file-size limit for source files (CLAUDE.md rule 2: 500 lines);
+#   4. an Accepted ADR's Decision section is immutable (docs/adr/README.md).
 # Enable once per clone:  git config core.hooksPath .githooks
 set -eu
 g() { git -c color.ui=never -c core.fsmonitor=false "$@"; }
@@ -72,5 +73,23 @@ while IFS= read -r f; do
     fail=1
   fi
 done < "$tmp/src"
+
+# 4. Accepted ADRs: the "## Decision" section (up to the next "## " heading) must stay as it
+#    is at HEAD. The Write/Edit hook (.claude/hooks/postelmd_guard.py, check_adr) asks about
+#    this too; this check also covers files written any other way.
+decision() { awk '/^## / { if (d) exit; d = ($0 == "## Decision"); next } d' "$1"; }
+tr '\0' '\n' < "$tmp/files" | grep -E '^docs/adr/[0-9]{4}-[^/]+\.md$' > "$tmp/adrs" || true
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  g show "HEAD:$f" > "$tmp/adr-head" 2>/dev/null || continue
+  grep -q '^- \*\*Status:\*\* Accepted' "$tmp/adr-head" || continue
+  decision "$tmp/adr-head" > "$tmp/decision-head"
+  decision "$tmp/tree/$f" > "$tmp/decision-staged"
+  if ! cmp -s "$tmp/decision-head" "$tmp/decision-staged"; then
+    echo "pre-commit: $f is Accepted and its Decision section changed. Supersede it with a new" >&2
+    echo "  ADR, or append a dated entry under '## Clarifications' (docs/adr/README.md)." >&2
+    fail=1
+  fi
+done < "$tmp/adrs"
 
 exit "$fail"
