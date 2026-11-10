@@ -121,6 +121,34 @@ describe("Workspace.restore", () => {
   });
 });
 
+describe("Workspace.open", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("keeps the note opened last when an earlier open resolves after it", async () => {
+    let slowA: (n: { content: string; etag: string }) => void = () => {};
+    vi.mocked(api.readNote).mockImplementationOnce(() => new Promise((resolve) => (slowA = resolve)));
+    const ws = new Workspace();
+    const a = ws.open("a.md");
+    await ws.open("b.md");
+    slowA({ content: "# a", etag: '"ea"' });
+    await a;
+    expect(ws.state.value.open?.doc.path).toBe("b.md");
+    expect(ws.state.value.open?.initial).toBe("# b.md");
+  });
+
+  it("doesn't report a failed open that was superseded", async () => {
+    let failA: (err: Error) => void = () => {};
+    vi.mocked(api.readNote).mockImplementationOnce(() => new Promise((_, reject) => (failA = reject)));
+    const ws = new Workspace();
+    const a = ws.open("a.md");
+    await ws.open("b.md");
+    failA(new Error("timeout"));
+    await a;
+    expect(ws.state.value.open?.doc.path).toBe("b.md");
+    expect(ws.state.value.error).toBeUndefined();
+  });
+});
+
 describe("Workspace.createNote", () => {
   beforeEach(() => vi.clearAllMocks());
 

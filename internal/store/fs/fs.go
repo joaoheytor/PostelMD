@@ -26,8 +26,9 @@ var (
 	// ErrNotDir: a component used as a directory is not one.
 	ErrNotDir = errors.New("store/fs: not a directory")
 	// ErrNoReplaceUnsupported: the filesystem can't rename without replacing (for example
-	// 9p, used by WSL and Docker Desktop bind mounts). Callers use the two-step fallback
-	// from ADR-0003 §2 under a structural intent.
+	// 9p, used by WSL and Docker Desktop bind mounts). The MVP has no fallback: the vault
+	// probes for it at startup and refuses such a filesystem (ADR-0020); the fallback
+	// mechanisms of ADR-0003 and ADR-0006 are deferred.
 	ErrNoReplaceUnsupported = errors.New("store/fs: filesystem does not support RENAME_NOREPLACE")
 )
 
