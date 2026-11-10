@@ -33,3 +33,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The preview scrolls with the editor, both ways, and code blocks have a "Copy code"
   button. Where the browser denies clipboard access (plain http off localhost), the button
   selects the code instead.
+- Mermaid diagrams in the preview. They render in a sandboxed frame that can't reach the
+  app or the network, and are shown as images named by the diagram's `accTitle`. A diagram
+  with an error keeps its code and shows the error under it.

@@ -175,3 +175,9 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 .pm-task-item { list-style: none; margin-left: -1.3em; }
 .pm-task { display: inline-block; width: 0.9em; height: 0.9em; margin-right: 0.4em; vertical-align: -0.1em; border: 1.5px solid var(--muted); border-radius: 3px; }
 .pm-task-done { background: var(--accent); border-color: var(--accent); }
+
+/* Diagrams (ADR-0021): images of the renderer frame's SVG; the frame itself is laid out off
+   screen, since Mermaid measures text and needs a rendered document. */
+.pm-diagram { display: block; max-width: 100%; height: auto; margin: 0 0 1em; }
+.pm-diagram-error { color: var(--danger); font-size: 0.875rem; }
+.pm-diagram-frame { position: fixed; top: 0; left: -10000px; width: 1200px; height: 800px; border: 0; visibility: hidden; }

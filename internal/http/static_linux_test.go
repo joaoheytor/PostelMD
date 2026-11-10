@@ -10,8 +10,10 @@ import (
 )
 
 var testUI = fstest.MapFS{
-	"index.html":         {Data: []byte("<!doctype html><title>PostelMD</title>")},
-	"assets/app-1a2b.js": {Data: []byte("export {}")},
+	"index.html":          {Data: []byte("<!doctype html><title>PostelMD</title>")},
+	"assets/app-1a2b.js":  {Data: []byte("export {}")},
+	"frames/diagram.html": {Data: []byte("<!doctype html><title>PostelMD diagram renderer</title>")},
+	"frames/diagram.js":   {Data: []byte("void 0")},
 }
 
 // appCSP is ADR-0007's policy: scripts, styles and Workers only from our origin, no inline
@@ -51,6 +53,36 @@ func TestWebApp(t *testing.T) {
 	}
 	if resp, _ := do(t, srv, call{method: "POST", path: "/", header: jsonHeader}); resp.StatusCode != 405 {
 		t.Fatalf("POST / = %d, want 405", resp.StatusCode)
+	}
+}
+
+// wantDiagramCSP is ADR-0021's policy for the diagram renderer frame: always sandboxed with an
+// opaque origin, no network, and framed only by the app.
+const wantDiagramCSP = "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; " +
+	"img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+
+func TestDiagramFrame(t *testing.T) {
+	srv, svc := newServer(t, false)
+	setup(t, srv, svc)
+	for _, f := range []struct{ path, body, frameOptions string }{
+		{"/frames/diagram", "diagram renderer", "SAMEORIGIN"},
+		{"/frames/diagram.js", "void 0", "DENY"},
+	} {
+		resp, body := do(t, srv, call{method: "GET", path: f.path})
+		if resp.StatusCode != 200 || !strings.Contains(body, f.body) || resp.Header.Get("Cache-Control") != "no-cache" {
+			t.Errorf("GET %s = %d %q, cache %q", f.path, resp.StatusCode, body, resp.Header.Get("Cache-Control"))
+		}
+		if got := resp.Header.Get("Content-Security-Policy"); got != wantDiagramCSP {
+			t.Errorf("GET %s: CSP %q, want %q", f.path, got, wantDiagramCSP)
+		}
+		if got := resp.Header.Get("X-Frame-Options"); got != f.frameOptions {
+			t.Errorf("GET %s: X-Frame-Options %q, want %q", f.path, got, f.frameOptions)
+		}
+	}
+	// Only those two: the rest of frames/ is the app's shell, with the app's CSP.
+	resp, body := do(t, srv, call{method: "GET", path: "/frames/diagram.html"})
+	if resp.StatusCode != 200 || !strings.Contains(body, "<title>PostelMD<") || resp.Header.Get("Content-Security-Policy") != appCSP {
+		t.Errorf("GET /frames/diagram.html = %d %q, CSP %q; want the app", resp.StatusCode, body, resp.Header.Get("Content-Security-Policy"))
 	}
 }
 

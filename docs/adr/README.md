@@ -28,7 +28,7 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0004](0004-change-propagation.md) | Change propagation: watcher + reconciler + SSE | Proposed |
 | [0005](0005-auth-providers.md) | Pluggable auth providers, local accounts by default | Proposed |
 | [0006](0006-authorization-and-confinement.md) | Vaults, memberships, confinement and reserved paths | Proposed |
-| [0007](0007-markdown-and-rendering.md) | Markdown dialect and client-side rendering | Accepted |
+| [0007](0007-markdown-and-rendering.md) | Markdown dialect and client-side rendering | Accepted (Mermaid: see 0021) |
 | [0008](0008-plugin-architecture.md) | Plugin architecture: two trust tiers, per-plugin isolation, versioned API | Proposed |
 | [0009](0009-zero-infra-distribution.md) | Zero-infra contract: one image, one volume, secure first run | Accepted |
 | [0010](0010-git-vaults-and-secret-detection.md) | Git-backed vaults and secret detection in core | Proposed |
@@ -42,3 +42,4 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
 | [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Accepted |
 | [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Proposed |
+| [0021](0021-mermaid-in-a-sandboxed-frame.md) | Mermaid renders in a sandboxed frame, shown as images | Accepted |
