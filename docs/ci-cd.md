@@ -116,7 +116,11 @@ branch, so fork PRs can't poison `main`'s cache.
   **tag schema** (an index tagged `sha256-<digest>`), where every write is a read-modify-write
   of one tag. So every job that writes GHCR referrers (the `candidate`, `prerelease` and
   `release` publish jobs) shares the concurrency group `ghcr-referrers`, with
-  `cancel-in-progress: false`, and signs and attests sequentially.
+  `cancel-in-progress: false`, and signs and attests sequentially. The group is shared
+  because a candidate and an RC of the same commit can share a digest, and with it the same
+  referrers tag. A group keeps only one *pending* run, so a later push can cancel a queued
+  `prerelease` or `release` run. A cancelled run is simply re-run, which is safe because
+  every step is idempotent and a re-run redoes them all.
 - **The promotion gate pins the exact RC.** The RC digest comes from the RC's GitHub
   pre-release record (written by `prerelease.yaml`), never from the mutable `-rc.N` tag. The
   `verify` job checks that digest with:
