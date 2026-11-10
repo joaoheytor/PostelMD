@@ -223,9 +223,9 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
 	default:
-		// The route pattern is ours; the error can quote the request path, so line breaks in
-		// it are escaped and can't forge log lines.
-		a.log.Error("notes API", "route", r.Pattern, "err", oneLine(err.Error()))
+		// The route pattern is ours; the error can quote a note's path, so it is logged
+		// without its text (rule 15).
+		a.log.Error("notes API", "route", r.Pattern, pathless(err))
 		writeError(w, stdhttp.StatusInternalServerError, "internal error")
 	}
 }
