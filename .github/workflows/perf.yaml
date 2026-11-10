@@ -1,0 +1,64 @@
+# The PRD performance budgets for one user, measured against the real binary on the
+# reference runner (v0.1 acceptance criterion): typing with the preview open against a
+# <textarea> control, saves while typing, cold start and idle memory on a 10,000-note
+# vault. Fails when a budget is missed. Not a required check until the v0.2 regression
+# gate; runs on demand, and on PRs that change the benchmark.
+name: perf
+
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Sessions per mode (the PRD procedure uses at least 30)
+        default: "30"
+  pull_request:
+    paths:
+      - test/perf/app/**
+      - .github/workflows/perf.yaml
+
+permissions: {}
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  budgets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            test/perf/app/package-lock.json
+      - run: make build
+      - working-directory: test/perf/app
+        run: npm ci --ignore-scripts && npx playwright install --with-deps --only-shell chromium
+      - name: Benchmark
+        working-directory: test/perf/app
+        shell: bash
+        run: npm run --silent bench | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          SAMPLES: ${{ inputs.samples || '30' }}
+          RESULT: result.json
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-result
+          path: test/perf/app/result.json
+          retention-days: 30
+          if-no-files-found: ignore
