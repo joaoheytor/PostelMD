@@ -107,25 +107,31 @@ const adversarial: [string, (n: number) => string][] = [
   ["JWT payloads", (n) => fill("eyJaaaaaaaaaaa.eyJ-", n)],
   ["Kubernetes", (n) => fill("client-key-data: ", n)],
   ["Kubernetes spaces", (n) => `client-key-data:${fill(" ", n)}`],
+  // Many findings: their line numbers must not cost a pass over the text each.
+  ["findings on one line", (n) => fill(`AKIA${r("Q7", 8)} `, n)],
+  ["findings on many lines", (n) => fill(`AKIA${r("Q7", 8)}\n`, n)],
 ];
 
-/** The best of three runs, in ms: the least disturbed by the machine. */
+/** The median of five runs, in ms, after one untimed run (JIT warm-up). */
 function timeScan(text: string): number {
-  let best = Infinity;
-  for (let i = 0; i < 3; i++) {
+  scanSecrets(text);
+  const runs: number[] = [];
+  for (let i = 0; i < 5; i++) {
     const start = performance.now();
     scanSecrets(text);
-    best = Math.min(best, performance.now() - start);
+    runs.push(performance.now() - start);
   }
-  return best;
+  return runs.sort((a, b) => a - b)[2] ?? Infinity;
 }
 
 describe("scanSecrets on hostile input", () => {
   it.each(adversarial)("stays linear on %s", (_, make) => {
-    const small = timeScan(make(50_000));
-    const large = timeScan(make(200_000));
-    // Below 2 ms, timer resolution is noise: count it as 2 ms.
-    expect(large / Math.max(small, 2)).toBeLessThan(8);
-    expect(large).toBeLessThan(2000); // a hang guard only
+    const small = timeScan(make(100_000));
+    expect(small).toBeLessThan(2000); // a hang guard only; stops before the large run
+    const large = timeScan(make(400_000));
+    expect(large).toBeLessThan(2000);
+    // Linear is about 4, quadratic about 16. Under 5 ms, timer resolution, GC and the
+    // machine's load are most of the measurement: count it as 5 ms.
+    expect(large / Math.max(small, 5)).toBeLessThan(11);
   });
 });

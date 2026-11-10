@@ -70,15 +70,16 @@ export function scanSecrets(text: string): SecretFinding[] {
     }
   }
   found.sort((a, b) => a.at - b.at);
-  return found.map(({ at, rule, hint }) => ({ rule, line: lineOf(text, at), hint }));
+  // One pass over the text for every line number: counting from the start for each finding
+  // made a note full of matches quadratic.
+  let line = 1;
+  let nl = text.indexOf("\n");
+  return found.map(({ at, rule, hint }) => {
+    for (; nl !== -1 && nl < at; nl = text.indexOf("\n", nl + 1)) line++;
+    return { rule, line, hint };
+  });
 }
 
 export function sameFindings(a: SecretFinding[], b: SecretFinding[]): boolean {
   return a.length === b.length && a.every((f, i) => f.rule === b[i]?.rule && f.line === b[i]?.line && f.hint === b[i]?.hint);
-}
-
-function lineOf(text: string, at: number): number {
-  let line = 1;
-  for (let i = text.indexOf("\n"); i !== -1 && i < at; i = text.indexOf("\n", i + 1)) line++;
-  return line;
 }
