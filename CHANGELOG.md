@@ -149,3 +149,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   renderer is ever compromised.
 - The startup message prints the setup page's full address (for example
   `http://localhost:8080/setup`), with the token kept out of the URL.
+- An unexpected error in the notes or login API, or in the first import at setup, is logged
+  without the error's text, which could name one of your notes: the log keeps the failed
+  operation and the system error (for example `open`, `EIO`), as the trash API does.
