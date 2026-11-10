@@ -67,17 +67,17 @@ func TestGitAPI(t *testing.T) {
 		t.Fatalf("save = %d", resp.StatusCode)
 	}
 	editRev := resp.Header.Get("ETag")
-	if code, body := get("/api/v1/git/status"); !strings.Contains(body, `{"path":"a.md","kind":"modified"}`) {
+	if code, body := get("/api/v1/git/status"); !strings.Contains(body, `{"path":"a.md","kind":"modified","rev":"`) || strings.Contains(body, "blob") {
 		t.Fatalf("status after an edit = %d %s", code, body)
 	}
-	if resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: `{"message":"  "}`}); resp.StatusCode != 422 {
+	if resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: commitBody(t, srv, cookie, "  ")}); resp.StatusCode != 422 {
 		t.Fatalf("an empty message = %d, want 422", resp.StatusCode)
 	}
-	resp, body := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: `{"message":"Edit a"}`})
+	resp, body := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: commitBody(t, srv, cookie, "Edit a")})
 	if resp.StatusCode != 201 {
 		t.Fatalf("commit = %d %s", resp.StatusCode, body)
 	}
-	if resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: `{"message":"again"}`}); resp.StatusCode != 409 {
+	if resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/git/commit", header: authJSON, body: commitBody(t, srv, cookie, "again")}); resp.StatusCode != 409 {
 		t.Fatalf("nothing to commit = %d, want 409", resp.StatusCode)
 	}
 

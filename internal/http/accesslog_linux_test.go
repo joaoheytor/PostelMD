@@ -77,7 +77,8 @@ func TestEveryWriteIsLogged(t *testing.T) {
 		{"history", call{method: "GET", path: "/api/v1/history/" + secretName, header: auth(nil)}, false, 200, "", ""},
 		{"mkdir", call{method: "POST", path: "/api/v1/folders/" + secretName + "-dir", header: auth(nil)},
 			true, 201, "POST /api/v1/folders/{path...}", "INFO"},
-		{"commit", call{method: "POST", path: "/api/v1/git/commit", body: `{"message":"` + secretBody + `"}`,
+		{"commit", call{method: "POST", path: "/api/v1/git/commit", body: `{"message":"` + secretBody +
+			`","changes":[{"path":"` + secretName + `","rev":"` + string(vault.RevOf([]byte(secretBody))) + `"}]}`,
 			header: auth(jsonHeader)}, true, 201, "POST /api/v1/git/commit", "INFO"},
 		{"no session", call{method: "DELETE", path: "/api/v1/notes/" + secretName}, true, 401, "/api/v1/notes/", "WARN"},
 		{"wrong password", call{method: "POST", path: "/api/v1/session", header: jsonHeader,

@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (in v0.1)
 - **Date:** 2026-11-09 (revised after design review)
-- **MVP scope (ADR-0020):** the MVP commits locally and warns about secrets in the editor; remotes, credentials and the commit and push gates arrive in v0.2.
+- **MVP scope (ADR-0020):** the MVP commits locally and warns about secrets in the editor and in the commit dialog, which commits only the listed changes (ADR-0020); remotes, credentials, the server-side commit gate (gate 3) and the push gate arrive in v0.2.
 
 ## Context
 The target audience works docs-as-code: runbooks and ADRs live in git and are published by
