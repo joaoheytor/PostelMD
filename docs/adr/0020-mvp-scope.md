@@ -204,7 +204,9 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
   PostelMD committed. A repository PostelMD creates lists `.postelmd-trash/` and
   `.postelmd-tmp/` in `.git/info/exclude`; an adopted one gets the lines it lacks appended
   when it is opened (written aside and renamed into place; its other lines are kept), so a
-  host `git add -A` never commits the trash. A repository is
+  host `git add -A` never commits the trash. This is best effort: if `.git/info` is
+  read-only, or `info/exclude` is a symlink or not a regular file (never followed or
+  replaced, and then its patterns don't apply), the server logs a warning and starts. A repository is
   created in the vault's temp folder and renamed into place, so a crash never leaves half a
   `.git`.
 - **A leftover git lock needs the user.** A crash during the ref or index update can leave

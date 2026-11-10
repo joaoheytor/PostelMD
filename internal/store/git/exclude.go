@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
+
+	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
 
 const (
@@ -15,11 +17,18 @@ const (
 // reservedExcludes keep PostelMD's own folders out of the user's git (`git add -A`).
 var reservedExcludes = []string{"/.postelmd-trash/", "/.postelmd-tmp/"}
 
+// ErrExcludeSkipped: .git/info/exclude is a symlink or not a regular file, so it is neither
+// followed nor rewritten, and its patterns don't apply. Callers warn and go on.
+var ErrExcludeSkipped = errors.New("store/git: info/exclude isn't a regular file; its patterns are not applied")
+
 // Exclude returns .git/info/exclude, or nil if there is none. A symlink isn't followed.
 func (g *Repo) Exclude() ([]byte, error) {
 	b, err := g.dotgit.ReadFile(excludeFile)
 	if errors.Is(err, iofs.ErrNotExist) {
 		return nil, nil
+	}
+	if errors.Is(err, fs.ErrSymlink) || errors.Is(err, fs.ErrNotRegular) || errors.Is(err, fs.ErrNotDir) {
+		return nil, fmt.Errorf("%w: %w", ErrExcludeSkipped, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store/git: read %s: %w", excludeFile, err)
@@ -56,6 +65,7 @@ func (g *Repo) EnsureExclude() error {
 	if len(next) == len(old) {
 		return nil
 	}
+	mode := g.excludeMode()
 	if old == nil {
 		if err := g.dotgit.Mkdir("info"); err != nil && !errors.Is(err, iofs.ErrExist) {
 			return fmt.Errorf("store/git: create info: %w", err)
@@ -68,7 +78,7 @@ func (g *Repo) EnsureExclude() error {
 		return fmt.Errorf("store/git: remove %s: %w", excludeNew, err)
 	}
 	steps := []func() error{
-		func() error { return g.dotgit.CreateFile(excludeNew, next, 0o644) },
+		func() error { return g.dotgit.CreateFile(excludeNew, next, mode) },
 		func() error { return g.dotgit.SyncFile(excludeNew) },
 		func() error { return g.dotgit.Rename(excludeNew, excludeFile) },
 		func() error { return g.dotgit.SyncDir("info") },
@@ -79,4 +89,19 @@ func (g *Repo) EnsureExclude() error {
 		}
 	}
 	return nil
+}
+
+// excludeMode is info/exclude's permission bits, kept when it is rewritten (0644, git's
+// default, for a new one).
+func (g *Repo) excludeMode() uint32 {
+	entries, err := g.dotgit.ReadDir("info")
+	if err != nil {
+		return 0o644
+	}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && e.Name() == "exclude" {
+			return uint32(info.Mode().Perm())
+		}
+	}
+	return 0o644
 }
