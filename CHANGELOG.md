@@ -57,3 +57,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - An idle server no longer keeps about 65 MB after a login: the memory the password hash
   (argon2id) needs is handed back at once, so idle memory stays near 15 MB, well under the
   80 MB budget.
+- Commits, and the initial import at setup, now skip the files your `.gitignore` files and
+  `.git/info/exclude` ignore (such as `.env` or `node_modules/`), as `git add -A` does;
+  files already in the history stay tracked. An existing repository you adopt also gets
+  PostelMD's trash folder added to `.git/info/exclude`, so your own `git add -A` no longer
+  commits deleted notes.

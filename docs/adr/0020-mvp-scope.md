@@ -189,6 +189,12 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
   safe because the user has seen the warning first; an auto-commit would put a pasted secret
   into the history unseen, and removing it means rewriting history. Auto-commit arrives in
   v0.2, with the gate.
+- A commit, and the initial import, take what `git add -A` would: an untracked file that
+  a `.gitignore` (each scoped to its directory) or `.git/info/exclude` ignores is neither a
+  change nor committed, and an ignored directory isn't walked. A tracked file stays tracked
+  even if a pattern matches it, so its edits and its deletion are committed. A global
+  `core.excludesFile` isn't read (the container has none). The editor's tree and file list
+  still show ignored files.
 - A commit is built from bytes (#39), its objects are durable before the ref moves (#56),
   and the ref is moved with git's lockfile protocol (#54). After a crash, the branch is the
   old or the new commit. Files whose commit didn't land are still uncommitted changes, so the
@@ -196,7 +202,9 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
 - A commit also resets `.git/index` to the new commit (ADR-0016), before the branch moves
   and with git's lockfile protocol, so the user's own `git status` on the host shows what
   PostelMD committed. A repository PostelMD creates lists `.postelmd-trash/` and
-  `.postelmd-tmp/` in `.git/info/exclude`; an adopted one is left as it is. A repository is
+  `.postelmd-tmp/` in `.git/info/exclude`; an adopted one gets the lines it lacks appended
+  when it is opened (written aside and renamed into place; its other lines are kept), so a
+  host `git add -A` never commits the trash. A repository is
   created in the vault's temp folder and renamed into place, so a crash never leaves half a
   `.git`.
 - **A leftover git lock needs the user.** A crash during the ref or index update can leave
