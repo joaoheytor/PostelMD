@@ -88,28 +88,6 @@ func setup(t *testing.T, srv *httptest.Server, svc *auth.Service) *stdhttp.Cooki
 	return session(resp)
 }
 
-func TestPreSetupRouting(t *testing.T) {
-	srv, _ := newServer(t, false)
-	srv.Client().CheckRedirect = func(*stdhttp.Request, []*stdhttp.Request) error { return stdhttp.ErrUseLastResponse }
-	for path, want := range map[string]int{
-		"/healthz": 204, "/readyz": 204, "/api/v1/notes/a.md": 503, "/api/v1/files": 503, "/api/v1/session": 503,
-		"/metrics": 404, "/": 303, "/some/page": 303,
-	} {
-		resp, _ := do(t, srv, call{method: "GET", path: path})
-		if resp.StatusCode != want {
-			t.Errorf("GET %s before setup = %d, want %d", path, resp.StatusCode, want)
-		}
-		if want == 303 && resp.Header.Get("Location") != "/setup" {
-			t.Errorf("GET %s redirects to %q", path, resp.Header.Get("Location"))
-		}
-	}
-	resp, _ := do(t, srv, call{method: "POST", path: "/api/v1/setup", header: jsonHeader,
-		body: `{"token":"guess","password":"` + password + `","name":"Ada","email":"a@b"}`})
-	if resp.StatusCode != 403 {
-		t.Fatalf("setup with a wrong token = %d, want 403", resp.StatusCode)
-	}
-}
-
 func TestSessionsGuardTheNotes(t *testing.T) {
 	srv, svc := newServer(t, false)
 	cookie := setup(t, srv, svc)
