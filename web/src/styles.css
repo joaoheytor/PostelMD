@@ -84,7 +84,8 @@ pm-login, pm-setup { display: block; }
 /* Workspace */
 pm-app, pm-workspace { display: flex; flex-direction: column; height: 100%; }
 .pm-top { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
-.pm-top-name { flex: 1; font-weight: 700; }
+/* The page's one h1 (the note path is its h2), at the size of the bar's text. */
+.pm-top-name { flex: 1; margin: 0; font-size: inherit; font-weight: 700; }
 .pm-top-error, .pm-top-notice { margin: 0; padding: 6px 12px; }
 .pm-main { display: flex; flex: 1; min-height: 0; }
 .pm-side { width: 280px; flex-shrink: 0; overflow: auto; padding: 8px; background: var(--side); border-right: 1px solid var(--line); }

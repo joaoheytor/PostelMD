@@ -2,8 +2,8 @@ import { html, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
 import type { DocState } from "../core/document";
 import { type Disposable, DisposableStore } from "../core/disposable";
-import { parent } from "../core/tree";
-import { isNote, type OpenNote, type Workspace } from "../core/workspace";
+import { isNote, parent } from "../core/tree";
+import type { OpenNote, Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
 import { Preview } from "../preview/pane";
 import { ScrollSync } from "../preview/sync";
@@ -214,13 +214,14 @@ export class NoteEditor extends LightElement {
   }
 
   /**
-   * A move closes the form and the reopened note's editor takes the focus; a cancel gives it
-   * back to the Rename or move button (a new one if a failed move reopened the note).
+   * A move closes the form and the moved note's editor takes the focus (the form, rendered
+   * again while the note reopened, had taken it); a cancel gives it back to the Rename or move
+   * button (a new one if a failed move reopened the note).
    */
   private moveDone(to?: string): void {
     this.moving = false;
     this.moveTyped = undefined;
-    if (!to) void this.updateComplete.then(() => this.querySelector<HTMLElement>(".pm-editor-move")?.focus());
+    void this.updateComplete.then(() => (to ? this.editor?.focus() : this.querySelector<HTMLElement>(".pm-editor-move")?.focus()));
   }
 
   /**

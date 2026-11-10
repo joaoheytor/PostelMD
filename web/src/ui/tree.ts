@@ -1,8 +1,8 @@
 import { html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
 import type { Template } from "../core/templates";
-import { join, parent } from "../core/tree";
-import { isNote, type Workspace } from "../core/workspace";
+import { isNote, join, parent } from "../core/tree";
+import type { Workspace } from "../core/workspace";
 import { LightElement, openNote, refocus, StoreController } from "./base";
 import "./move";
 import { chosen, templateFields, values } from "./template-fields";

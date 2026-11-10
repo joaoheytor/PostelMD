@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, expect, login, noSeriousA11yViolations, password, test } from "./helpers";
@@ -32,12 +33,26 @@ test("rename by keyboard: the field starts focused with the path selected", asyn
   await expect(field).toBeFocused();
   await page.keyboard.type("renamed-by-keys"); // replaces the selected path
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("textbox", { name: "Text of renamed-by-keys.md" })).toBeVisible();
+  // The moved note's editor has the focus, as after New note.
+  await expect(page.getByRole("textbox", { name: "Text of renamed-by-keys.md" })).toBeFocused();
   await expect.poll(() => existsSync(vault("renamed-by-keys.md"))).toBe(true);
 
   await page.getByRole("button", { name: "Rename or move" }).click();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Rename or move" })).toBeFocused();
+});
+
+test("the editor screen has one main heading, with the preview hidden", async ({ page }) => {
+  writeFileSync(vault("headings.md"), "# Headings\n");
+  await login(page);
+  await page.getByRole("button", { name: "headings.md" }).click();
+  await expect(page.getByRole("textbox", { name: "Text of headings.md" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("PostelMD");
+  await expect(page.getByRole("heading", { level: 2, name: "headings.md" })).toBeVisible();
+  const { violations } = await new AxeBuilder({ page }).withRules(["page-has-heading-one", "heading-order"]).analyze();
+  expect(violations).toEqual([]);
+  await noSeriousA11yViolations(page);
 });
 
 test("moving into a folder that doesn't exist says so and keeps what was typed", async ({ page }) => {

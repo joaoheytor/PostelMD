@@ -8,6 +8,11 @@ export interface TreeState {
   error?: string | undefined;
 }
 
+/** Note files the editor opens; anything else is listed but not opened as text. */
+export function isNote(name: string): boolean {
+  return /\.(md|markdown|txt)$/i.test(name);
+}
+
 /** Joins a folder path and an entry name ("" + "a.md" → "a.md"). */
 export function join(folder: string, name: string): string {
   return folder === "" ? name : `${folder}/${name}`;

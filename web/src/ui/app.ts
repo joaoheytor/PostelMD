@@ -81,7 +81,7 @@ export class WorkspaceView extends LightElement {
     const notice = this.appState.value?.notice;
     return html`
       <header class="pm-top">
-        <span class="pm-top-name">PostelMD</span>
+        <h1 class="pm-top-name">PostelMD</h1>
         <button type="button" aria-keyshortcuts="Control+P" @click=${() => (this.finding = true)}>Find a note</button>
         ${this.offered.value?.length
           ? html`<button type="button" @click=${() => (this.listingDrafts = true)}>Unsaved drafts (${this.offered.value.length})</button>`

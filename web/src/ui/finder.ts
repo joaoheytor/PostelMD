@@ -1,7 +1,8 @@
 import { html, nothing } from "lit";
 import * as api from "../core/api";
 import { type Match, rank } from "../core/fuzzy";
-import { isNote, message, type Workspace } from "../core/workspace";
+import { isNote } from "../core/tree";
+import { message, type Workspace } from "../core/workspace";
 import { LightElement, openNote } from "./base";
 
 const limit = 50;

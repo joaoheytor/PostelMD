@@ -27,11 +27,6 @@ export interface SecretWarning {
 
 const noSecrets: SecretWarning = { findings: [], dismissed: false };
 
-/** Note files the editor opens; anything else is listed but not opened as text. */
-export function isNote(name: string): boolean {
-  return /\.(md|markdown|txt)$/i.test(name);
-}
-
 /** The workspace: the file tree and the open note. */
 export class Workspace {
   readonly tree = new Tree(api.listFolder);
