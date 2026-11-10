@@ -3,8 +3,12 @@
 > A self-hosted, git-native Markdown workspace for operational knowledge
 > (runbooks, ADRs, postmortems), built for DevOps, Platform and SRE engineers.
 
-**Status:** pre-alpha. This repository contains design documents only and no code yet.
-Start with the [roadmap](docs/roadmap.md).
+**Status:** v0.1, the single-user MVP, is code-complete; the first release candidate is
+pending. It works today: one user with a password, one vault of `.md` files, an editor with
+preview, conflict-aware autosave with drafts kept in the browser, create, move and delete
+(into a trash folder), manual git commits, history and restoring a version, and adopting an
+existing notes folder. Multi-user, push, secret detection and plugins come later: see the
+[roadmap](docs/roadmap.md).
 
 ## What it is
 
@@ -17,16 +21,36 @@ Start with the [roadmap](docs/roadmap.md).
   the same image.
 - **Extensible.** A framework-agnostic plugin API with two trust tiers.
 
+## Run it
+
 ```sh
 mkdir -p ~/postelmd
 docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
   -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data \
-  docker.io/joaoheytor/postelmd:0.1
-docker logs postelmd   # prints a one-time setup URL
+  ghcr.io/joaoheytor/postelmd:main
+docker logs postelmd   # prints a one-time setup token
 ```
 
-(See [ADR-0009](docs/adr/0009-zero-infra-distribution.md). The image isn't published yet: until the
-first release, build it with `make image`, which tags it `postelmd:dev`, and use that name above.)
+Open http://127.0.0.1:8080/setup and paste the token from `docker logs postelmd`. The token
+expires after 30 minutes; `docker restart postelmd` prints a new one.
+
+- **Which image.** Until v0.1.0 is released, `ghcr.io/joaoheytor/postelmd:main` is the
+  signed candidate built from `main` (not for production), and release candidates are
+  `ghcr.io/joaoheytor/postelmd:0.1.0-rc.N`. After the release, use
+  `docker.io/joaoheytor/postelmd:0.1`. Tags: [ci-cd §4](docs/ci-cd.md#4-images-and-tags);
+  verifying signatures: [verify-images](docs/operations/verify-images.md). Or build your own
+  with `make image` (tagged `postelmd:dev`).
+- **An existing notes folder:** add `-v ~/notes:/data/vaults/notes`. Setup adopts it (and
+  makes it a git repository if it isn't one). Create the mount point first
+  (`mkdir -p ~/postelmd/vaults/notes`), or Docker creates it owned by root.
+- **Docker Desktop and WSL2:** run the command from a WSL shell and keep `~/postelmd` (and
+  your notes) on the Linux filesystem, never under `/mnt/c`: Windows folders reach the
+  container as 9p, which PostelMD refuses (ADR-0009).
+- **A volume is required.** Without one, everything is lost at the next `docker rm` (every
+  upgrade does one), so PostelMD refuses to start.
+
+Backups, logs, upgrades and recovery: [running v0.1](docs/operations/running-v0.1.md).
+Design: [ADR-0009](docs/adr/0009-zero-infra-distribution.md).
 
 Settings are optional. They come from flags, then `POSTELMD_*` environment variables, then
 `.postelmd/config.yaml` in the data directory (`~/postelmd/.postelmd/config.yaml` above), then
@@ -34,8 +58,9 @@ defaults. An unknown key in the file stops the server with its name, so a typo n
 unnoticed:
 
 ```yaml
-listen: ":8080"          # POSTELMD_LISTEN, --listen
-allow_network_fs: false  # POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
+listen: ":8080"              # POSTELMD_LISTEN, --listen
+allow_network_fs: false      # POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
+allow_ephemeral_data: false  # POSTELMD_ALLOW_EPHEMERAL_DATA: start with no volume at /data
 ```
 
 The data directory itself is set with `--data` or `POSTELMD_DATA_DIR`, never in the file.
@@ -50,6 +75,7 @@ The data directory itself is set with `--data` or `POSTELMD_DATA_DIR`, never in 
 | [docs/threat-model.md](docs/threat-model.md) | STRIDE threat model |
 | [docs/roadmap.md](docs/roadmap.md) | Milestones and acceptance criteria |
 | [docs/ci-cd.md](docs/ci-cd.md) | Pipelines, repository settings, releases, homelab hand-off |
+| [docs/operations/](docs/operations/) | Runbooks: [running v0.1](docs/operations/running-v0.1.md), [verifying images](docs/operations/verify-images.md) |
 | [docs/lessons-from-frankmd.md](docs/lessons-from-frankmd.md) | Pitfalls this design avoids |
 | [CLAUDE.md](CLAUDE.md) | Conventions for humans and AI coding agents |
 | [CHANGELOG.md](CHANGELOG.md) | Release history ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)) |

@@ -52,6 +52,17 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - An optional settings file, `.postelmd/config.yaml` in the data directory. Flags and
   `POSTELMD_*` environment variables still win over it. An unknown key stops the server with
   its name, so a typo is never silently ignored.
+- One log line for every write to the API (saves, creates, moves, deletes, commits, logins):
+  the method, the route, the status and how long it took, never the note's path or content.
+  Conflicts (412) and server errors can be counted from the logs.
+- The server refuses to start when no volume is mounted at `/data`, since the next
+  `docker rm` (every upgrade) would delete everything. It says how to add one;
+  `POSTELMD_ALLOW_EPHEMERAL_DATA=true` (or `allow_ephemeral_data` in `config.yaml`) starts it
+  anyway for a throwaway try.
+- The notes folder's filesystem is checked like the data directory's: an adopted folder on a
+  Windows path (9p) or a macOS share (virtiofs) is refused, with the fix.
+- A runbook for running v0.1: backups, a restore drill, logs, upgrade and rollback, and
+  recovering from a lost password, a git lock or a deleted note.
 
 ### Fixed
 - An idle server no longer keeps about 65 MB after a login: the memory the password hash

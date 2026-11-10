@@ -24,7 +24,7 @@ wait_healthy() {
 api() { # api METHOD PATH [curl args...]: prints the body, then the status on its own line
 	method=$1 path=$2
 	shift 2
-	curl -sS -b "$jar" -c "$jar" -X "$method" -w '\n%{http_code}' "$@" "$base$path"
+	curl -sS --max-time 15 -b "$jar" -c "$jar" -X "$method" -w '\n%{http_code}' "$@" "$base$path"
 }
 
 body() { # body RESPONSE: the response without its status line

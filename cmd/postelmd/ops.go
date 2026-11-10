@@ -23,7 +23,7 @@ import (
 // so it refuses to run next to a live server. On a terminal the password is read twice
 // without echo; otherwise one line is read from stdin.
 func resetPassword(cfg config.Config, stdin *os.File, stdout io.Writer) error {
-	paths, _, err := layout.Prepare(cfg.DataDir, cfg.AllowNetworkFS)
+	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg))
 	if err != nil {
 		return err
 	}

@@ -144,6 +144,8 @@ branch, so fork PRs can't poison `main`'s cache.
 - **Stable aliases** (`X.Y`, and `X` from 1.0) are moved only by `release.yaml`, only for a
   stable tag, and only after both verifications pass. RC tags never move an alias.
 - **User verification** and the spike's evidence: [verify-images](operations/verify-images.md).
+  Running a candidate or a release (backups, logs, upgrade and rollback):
+  [running v0.1](operations/running-v0.1.md).
 - **Docker Hub description:** updated by hand for now. Syncing it automatically needs a token
   with *Read, Write, Delete* scope, broader than the push token; revisit later with a separate
   token.

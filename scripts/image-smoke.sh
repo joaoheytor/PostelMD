@@ -4,7 +4,9 @@
 #   note, within FIRST_NOTE_BUDGET seconds of `docker run` (roadmap v0.1: < 2 minutes,
 #   human steps included); restart; check that the note and the session persist; check
 #   that a second container on the same /data refuses to start; then boot on a bind mount
-#   with --user, as in the README. Also checks the image's size, user and lack of a shell.
+#   with --user, as in the README; finally, check that a container without a volume at
+#   /data refuses to start unless POSTELMD_ALLOW_EPHEMERAL_DATA opts in. Also checks the
+#   image's size, user and lack of a shell.
 #   Adopting an existing notes folder is image-smoke-adopt.sh.
 set -eu
 image=${1:-postelmd:dev}
@@ -72,5 +74,16 @@ docker run -d --name "$name" --stop-timeout 60 -p "127.0.0.1:$port:8080" \
 	--user "$(id -u):$(id -g)" -v "$work/data:/data" "$image" >/dev/null
 wait_healthy
 [ -d "$work/data/vaults/notes/.git" ] || fail "no vault in the bind mount"
+
+echo "9. no volume at /data: refused, unless opted in"
+docker rm -f "$name" >/dev/null
+if docker run --rm "$image" >"$work/novolume.log" 2>&1; then
+	fail "a container without a volume at /data started"
+fi
+grep -q "no volume is mounted at /data" "$work/novolume.log" ||
+	fail "the container without a volume failed for another reason: $(cat "$work/novolume.log")"
+docker run -d --name "$name" -e POSTELMD_ALLOW_EPHEMERAL_DATA=true "$image" >/dev/null
+wait_healthy
+docker logs "$name" 2>&1 | grep -q "the data directory is not persistent" || fail "no warning without a volume"
 
 echo "OK"

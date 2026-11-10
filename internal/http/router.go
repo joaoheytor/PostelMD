@@ -10,6 +10,7 @@ import (
 // NewRouter assembles the whole HTTP surface (ADR-0020): health checks, the auth API, and
 // the notes API behind a session. Around it, from the outside in:
 //
+//   - one log line per mutating API request (route pattern, status, duration; logWrites);
 //   - security headers on every response;
 //   - cross-origin protection: a non-safe request from another origin is refused (403),
 //     so a site the user visits can't drive the API with their cookie;
@@ -21,7 +22,7 @@ func NewRouter(a Auth, v Vault, ui fs.FS, log *slog.Logger) stdhttp.Handler {
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", ok)
 	(&AuthAPI{auth: a, importer: v, log: log}).register(mux)
-	notesAPI := NewNotesAPI(v, log)
+	notesAPI := routed(NewNotesAPI(v, log))
 	private := stdhttp.NewServeMux()
 	private.Handle("/api/v1/notes/", notesAPI)
 	private.Handle("/api/v1/folders/", notesAPI)
@@ -30,14 +31,14 @@ func NewRouter(a Auth, v Vault, ui fs.FS, log *slog.Logger) stdhttp.Handler {
 	(&GitAPI{git: v, author: a, notes: &NotesAPI{notes: v, log: log}, log: log}).register(private)
 	for _, prefix := range []string{"/api/v1/notes/", "/api/v1/folders/", "/api/v1/move", "/api/v1/files", "/api/v1/git/",
 		"/api/v1/history/", "/api/v1/versions/", "/api/v1/restore"} {
-		mux.Handle(prefix, RequireSession(a, private))
+		mux.Handle(prefix, RequireSession(a, routed(private)))
 	}
 	mux.HandleFunc("/api/", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeError(w, stdhttp.StatusNotFound, "not found")
 	})
 	mux.Handle("/", webApp(ui))
 
-	return securityHeaders(stdhttp.NewCrossOriginProtection().Handler(setupGate(a, mux)))
+	return logWrites(log, securityHeaders(stdhttp.NewCrossOriginProtection().Handler(setupGate(a, routed(mux)))))
 }
 
 // Vault is everything the API needs from the vault. *vault.Vault implements it.

@@ -20,6 +20,12 @@ const password = "correct horse battery"
 
 func newServer(t *testing.T, tls bool) (*httptest.Server, *auth.Service) {
 	t.Helper()
+	return newLoggingServer(t, tls, slog.New(slog.DiscardHandler))
+}
+
+// newLoggingServer is newServer with the router logging to log.
+func newLoggingServer(t *testing.T, tls bool, log *slog.Logger) (*httptest.Server, *auth.Service) {
+	t.Helper()
 	base := t.TempDir()
 	state, notes := filepath.Join(base, "state"), filepath.Join(base, "notes")
 	for _, d := range []string{state, notes} {
@@ -43,7 +49,7 @@ func newServer(t *testing.T, tls bool) (*httptest.Server, *auth.Service) {
 	if _, err := v.EnableGit(); err != nil {
 		t.Fatal(err)
 	}
-	h := NewRouter(svc, v, testUI, slog.New(slog.DiscardHandler))
+	h := NewRouter(svc, v, testUI, log)
 	srv := httptest.NewUnstartedServer(h)
 	if tls {
 		srv.StartTLS()

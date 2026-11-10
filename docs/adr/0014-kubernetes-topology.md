@@ -31,11 +31,15 @@ protocol (ADR-0003) all assume it. Kubernetes alone doesn't guarantee this:
   | Filesystem (magic) | Decision |
   |---|---|
   | ext2/3/4 (`0xEF53`), XFS (`0x58465342`), Btrfs (`0x9123683E`), ZFS (`0x2FC12FC1`), F2FS (`0xF2F52010`), bcachefs (`0xCA451A4E`) | Accepted |
-  | tmpfs (`0x01021994`), overlayfs (`0x794C7630`, the container's own layer: no volume at `/data`) | Starts, with a permanent "data is not persistent" banner, a log warning and a metric |
-  | NFS (`0x6969`), SMB/CIFS (`0x517B`, `0xFF534D42`, `0xFE534D42`), 9p (`0x01021997`), FUSE (`0x65735546`: virtiofs, sshfs, rclone…), Ceph (`0x00C36400`) | **Refused** |
+  | tmpfs (`0x01021994`) | Starts, with a permanent "data is not persistent" banner, a log warning and a metric |
+  | overlayfs (`0x794C7630`, the container's own layer: no volume at `/data`) | **Refused**: the next `docker rm`, which every upgrade does, deletes everything. `POSTELMD_ALLOW_EPHEMERAL_DATA=true` starts it as tmpfs is started |
+  | NFS (`0x6969`), SMB/CIFS (`0x517B`, `0xFF534D42`, `0xFE534D42`), 9p (`0x01021997`), virtiofs (`0x6A656A63`), FUSE (`0x65735546`: older virtiofs, sshfs, rclone…), Ceph (`0x00C36400`) | **Refused**; for 9p and virtiofs (a Windows or macOS folder shared by Docker Desktop) the error gives the named-volume fix of ADR-0009 |
   | Any other magic | **Refused**, with the magic number in the error; known-safe ones get added to this list |
 
-  `POSTELMD_ALLOW_NETWORK_FS=true` overrides a refusal. It is documented as unsafe.
+  `POSTELMD_ALLOW_NETWORK_FS=true` overrides a refusal. It is documented as unsafe. In the
+  MVP (ADR-0020), the vault directory gets the same check as `/data/.postelmd`, since it can
+  be a separate bind mount, and the worse of the two decides. That is stricter than the
+  capability probe below, which still runs.
 - **Vaults are checked by capability, not by filesystem name.** Notes folders are often bind
   mounts from a host or a NAS, so when a vault is added and at every start, PostelMD probes
   its root and records the result in the vault status:
