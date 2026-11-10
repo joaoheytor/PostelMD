@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -23,13 +24,17 @@ type Config struct {
 	Listen             string // listen, POSTELMD_LISTEN, --listen; default :8080
 	AllowNetworkFS     bool   // allow_network_fs, POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
 	AllowEphemeralData bool   // allow_ephemeral_data, POSTELMD_ALLOW_EPHEMERAL_DATA: start with no volume
+	// AllowedHosts: allowed_hosts, POSTELMD_ALLOWED_HOSTS (comma-separated). The host names,
+	// besides localhost and IP literals, that requests may name (DNS rebinding; ADR-0005).
+	AllowedHosts []string
 }
 
 // file is config.yaml. Pointers tell a setting that's absent from one set to its zero value.
 type file struct {
-	Listen             *string `yaml:"listen"`
-	AllowNetworkFS     *bool   `yaml:"allow_network_fs"`
-	AllowEphemeralData *bool   `yaml:"allow_ephemeral_data"`
+	Listen             *string  `yaml:"listen"`
+	AllowNetworkFS     *bool    `yaml:"allow_network_fs"`
+	AllowEphemeralData *bool    `yaml:"allow_ephemeral_data"`
+	AllowedHosts       []string `yaml:"allowed_hosts"`
 }
 
 // Load reads flags from args, the environment, then the data directory's config.yaml.
@@ -81,10 +86,33 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 			*dst = b
 		}
 	}
+	if v := getenv("POSTELMD_ALLOWED_HOSTS"); v != "" {
+		hosts, err := hostNames(strings.Split(v, ","))
+		if err != nil {
+			return c, fmt.Errorf("config: POSTELMD_ALLOWED_HOSTS: %w", err)
+		}
+		c.AllowedHosts = hosts
+	}
 	if set["listen"] {
 		c.Listen = flagListen
 	}
 	return c, nil
+}
+
+// hostNames normalizes allowed host names (trimmed, lower case, no trailing dot) and refuses
+// anything that isn't one plain name: a wildcard, a port, a scheme or a path would either
+// not match or open the allowlist wider than its author meant.
+func hostNames(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	for _, h := range in {
+		h = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
+		if h == "" || len(h) > 253 || strings.Trim(h, "abcdefghijklmnopqrstuvwxyz0123456789-.") != "" ||
+			strings.HasPrefix(h, ".") || strings.Contains(h, "..") {
+			return nil, fmt.Errorf("%q isn't a host name (no port, scheme, path or wildcard)", h)
+		}
+		out = append(out, h)
+	}
+	return out, nil
 }
 
 // readFile applies the data directory's config.yaml, if there is one. It is strict: an
@@ -116,6 +144,13 @@ func (c *Config) readFile() error {
 	}
 	if f.AllowEphemeralData != nil {
 		c.AllowEphemeralData = *f.AllowEphemeralData
+	}
+	if f.AllowedHosts != nil {
+		hosts, err := hostNames(f.AllowedHosts)
+		if err != nil {
+			return fmt.Errorf("config: %s: allowed_hosts: %w", path, err)
+		}
+		c.AllowedHosts = hosts
 	}
 	return nil
 }

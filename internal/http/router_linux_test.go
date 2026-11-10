@@ -171,9 +171,15 @@ func TestLoginBackoff(t *testing.T) {
 	if resp := login(t, srv, password); resp.StatusCode != 204 || session(resp) == nil {
 		t.Fatalf("login = %d", resp.StatusCode)
 	}
-	for range 6 {
-		if resp := login(t, srv, "not the password"); resp.StatusCode != 401 {
+	for i := range 6 {
+		resp := login(t, srv, "not the password")
+		if resp.StatusCode != 401 {
 			t.Fatalf("wrong password = %d, want 401", resp.StatusCode)
+		}
+		// The failure that starts the backoff says so, so the form doesn't just say "wrong
+		// password" while the next attempt would be refused.
+		if want := map[bool]string{true: "1", false: ""}[i == 5]; resp.Header.Get("Retry-After") != want {
+			t.Fatalf("failure %d: Retry-After %q, want %q", i+1, resp.Header.Get("Retry-After"), want)
 		}
 	}
 	if resp := login(t, srv, password); resp.StatusCode != 429 || resp.Header.Get("Retry-After") != "1" {

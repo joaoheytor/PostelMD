@@ -1,5 +1,6 @@
 import type { Disposable } from "../core/disposable";
 import type { DiagramReply, DiagramRequest } from "../diagram/protocol";
+import { svgBlobURL } from "./svg";
 
 /** A rendered diagram, ready for an img: SVG in an <img> runs no script and loads nothing. */
 export type Diagram = { ok: true; url: string; width: number; height: number; label: string } | { ok: false; error: string };
@@ -107,7 +108,7 @@ export class Diagrams implements Disposable {
       w.done({ ok: false, error: r.error });
       return;
     }
-    const url = URL.createObjectURL(new Blob([r.svg], { type: "image/svg+xml" }));
+    const url = svgBlobURL(r.svg);
     w.done({ ok: true, url, width: r.width, height: r.height, label: r.label });
   }
 

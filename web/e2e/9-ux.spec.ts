@@ -151,7 +151,11 @@ test("after several wrong passwords, the login says how long to wait", async ({ 
   for (let i = 0; i < 8; i++) {
     await field.fill(`wrong ${i}`);
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(alert).toHaveText(/^(Wrong password\.|Too many attempts\. Try again in \d+ s\.)$/);
+    if (i === 5) {
+      // The failure that starts the wait says so: the next attempt would be refused.
+      await expect(alert).toHaveText(/^Wrong password\. Try again in \d+ s\.$/);
+    }
+    await expect(alert).toHaveText(/^(Wrong password\.( Try again in \d+ s\.)?|Too many attempts\. Try again in \d+ s\.)$/);
   }
   await expect(alert).toHaveText(/^Too many attempts\. Try again in \d+ s\.$/);
   await expect(alert).toHaveCSS("color", "rgb(179, 38, 30)"); // --danger, not the card's muted grey

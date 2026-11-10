@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,6 +114,92 @@ func TestSetup(t *testing.T) {
 	}
 }
 
+// Each argon2id run takes 64 MiB and one at a time is allowed: a request that will be
+// refused anyway must not run one, or anyone can queue them and starve the owner's login.
+func TestSetupChecksBeforeHashing(t *testing.T) {
+	e := newEnv(t)
+	s := e.open(t)
+	tok, _ := s.NewSetupToken()
+	if _, err := s.Setup(ctx, tok+"x", pw, "Ada", "a@b"); !errors.Is(err, ErrBadToken) {
+		t.Fatalf("wrong token = %v", err)
+	}
+	if n := s.hashes.Load(); n != 0 {
+		t.Fatalf("a wrong setup token ran %d hashes, want 0", n)
+	}
+	if _, err := s.Setup(ctx, tok, pw, "Ada", "ada@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Setup(ctx, tok, pw, "Eve", "e@x"); !errors.Is(err, ErrAlreadySetUp) {
+		t.Fatalf("setup after setup = %v", err)
+	}
+	if n := s.hashes.Load(); n != 1 {
+		t.Fatalf("setup ran %d hashes, want 1 (none after setup)", n)
+	}
+}
+
+// Parallel wrong passwords from one IP all pass the backoff check before any of them fails;
+// each must check again once it may hash.
+func TestParallelLoginsKeepTheBackoff(t *testing.T) {
+	e := newEnv(t)
+	s, _ := setUp(t, e)
+	s.hashes.Store(0)
+	var wg sync.WaitGroup
+	for range 4 * freeFailures {
+		wg.Go(func() { _, _ = s.Login(ctx, "198.51.100.1", "wrong password!") })
+	}
+	wg.Wait()
+	if n := s.hashes.Load(); n > freeFailures+1 {
+		t.Fatalf("%d parallel guesses ran %d hashes, want at most %d", 4*freeFailures, n, freeFailures+1)
+	}
+}
+
+// Two password changes from one session, interleaved (an attacker with a stolen cookie and
+// the old password racing the owner): the second to save must not overwrite the first.
+func TestInterleavedPasswordChanges(t *testing.T) {
+	e := newEnv(t)
+	s, cookie := setUp(t, e)
+	var first error
+	s.afterVerify = func() { // between the outer change's check and its save
+		s.afterVerify = nil
+		_, first = s.ChangePassword(ctx, "ip", cookie, pw, "the password saved first")
+	}
+	if _, err := s.ChangePassword(ctx, "ip", cookie, pw, "the password saved second"); !errors.Is(err, ErrBadSession) {
+		t.Fatalf("the change that lost the race = %v, want ErrBadSession", err)
+	}
+	if first != nil {
+		t.Fatalf("the change that saved first = %v", first)
+	}
+	if _, err := s.Login(ctx, "ip2", "the password saved first"); err != nil {
+		t.Fatalf("the first change was overwritten: %v", err)
+	}
+	if _, err := s.Login(ctx, "ip3", "the password saved second"); !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("the refused change took effect: %v", err)
+	}
+}
+
+// Anyone can send bad setup tokens before setup: the audit log keeps one line per minute,
+// with how many it left out.
+func TestSetupRejectionsAreRateLimited(t *testing.T) {
+	e := newEnv(t)
+	s := e.open(t)
+	if _, err := s.NewSetupToken(); err != nil {
+		t.Fatal(err)
+	}
+	for range 50 {
+		if err := s.CheckSetupToken(ctx, "bad"); !errors.Is(err, ErrBadToken) {
+			t.Fatalf("bad token = %v", err)
+		}
+	}
+	if n := strings.Count(e.logs.String(), "event=setup.rejected"); n != 1 {
+		t.Fatalf("50 bad tokens logged %d lines, want 1", n)
+	}
+	e.now = e.now.Add(time.Minute)
+	_ = s.CheckSetupToken(ctx, "bad")
+	if n := strings.Count(e.logs.String(), "event=setup.rejected"); n != 2 || !strings.Contains(e.logs.String(), "suppressed=49") {
+		t.Fatalf("a minute later: %d lines, want 2 with suppressed=49:\n%s", n, e.logs.String())
+	}
+}
+
 func TestLoginAndBackoff(t *testing.T) {
 	e := newEnv(t)
 	s, _ := setUp(t, e)
@@ -124,10 +211,12 @@ func TestLoginAndBackoff(t *testing.T) {
 			t.Fatalf("failure %d = %v", i, err)
 		}
 	}
+	var w *WaitError
 	if _, err := s.Login(ctx, "198.51.100.1", "wrong again!!"); !errors.Is(err, ErrBadPassword) {
 		t.Fatal("the sixth failure should still be checked")
+	} else if !errors.As(err, &w) || w.Wait != time.Second {
+		t.Fatalf("the failure that starts the backoff = %v, want the 1 s wait with it", err)
 	}
-	var w *WaitError
 	if _, err := s.Login(ctx, "198.51.100.1", pw); !errors.As(err, &w) || w.Wait != time.Second {
 		t.Fatalf("right after six failures = %v, want a 1 s wait", err)
 	}
