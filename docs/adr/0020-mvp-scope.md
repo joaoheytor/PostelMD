@@ -216,7 +216,12 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
 CodeMirror 6, the sanitized live preview in a Worker (ADR-0007), Mermaid, copy buttons, the
 file tree, a fuzzy finder over the file list, and the runbook/postmortem/ADR templates. The
 finder (`Ctrl+P`) ranks paths in the browser (`web/src/core/fuzzy.ts`), preferring matches
-in the file name, at word starts and in a row. A
+in the file name, at word starts and in a row. The
+starter templates (runbook, postmortem, ADR, on-call handoff) ship inside the app
+(`web/src/templates/`) and are offered by the "New note" form. `{{title}}` and `{{date}}` are
+filled in automatically, and the form asks for each template's other placeholders; an empty
+one stays as `{{name}}` in the note. Substitution is plain text, with no logic (ADR-0011).
+Editable instance templates in `.postelmd/templates/` (architecture §3) come later. A
 **secret warning** runs on save and paste (a regex scan with a small rule set, not stored).
 It only warns, because nothing leaves the machine in the MVP. It runs in the browser
 (`web/src/core/secrets.ts`): a paste rescans the note at once, and every save scans the exact

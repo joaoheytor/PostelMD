@@ -90,6 +90,9 @@ pm-app, pm-workspace { display: flex; flex-direction: column; height: 100%; }
 .pm-tree-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .pm-tree-create { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .pm-tree-create label { display: flex; flex-direction: column; gap: 4px; width: 100%; font-size: 0.85rem; color: var(--muted); }
+.pm-tree-create select, .pm-tree-create input { font: inherit; }
+.pm-template-fields { width: 100%; margin: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; gap: 6px; }
+.pm-template-fields legend { font-size: 0.85rem; color: var(--muted); }
 pm-tree ul { list-style: none; margin: 0; padding-left: 14px; }
 pm-tree nav > ul { padding-left: 0; }
 pm-tree li button, .pm-tree-root {

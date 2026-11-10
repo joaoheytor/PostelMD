@@ -1,9 +1,11 @@
 import { html, nothing, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
+import type { Template } from "../core/templates";
 import { join, parent } from "../core/tree";
 import { isNote, type Workspace } from "../core/workspace";
 import { LightElement, openNote, StoreController } from "./base";
 import "./move";
+import { chosen, templateFields, values } from "./template-fields";
 
 type Creating = "note" | "folder" | undefined;
 
@@ -17,6 +19,7 @@ export class FileTree extends LightElement {
     creating: { state: true },
     moving: { state: true },
     folder: { state: true },
+    template: { state: true },
   };
   declare workspace: Workspace;
   declare creating: Creating;
@@ -24,6 +27,8 @@ export class FileTree extends LightElement {
   declare moving: boolean;
   /** The selected folder: where a new note or folder goes. */
   declare folder: string;
+  /** The new-note form's chosen template; undefined for a blank note. */
+  declare template: Template | undefined;
 
   private readonly tree = new StoreController(this, () => this.workspace?.tree.state);
   private readonly ws = new StoreController(this, () => this.workspace?.state);
@@ -49,9 +54,16 @@ export class FileTree extends LightElement {
     const input = (e.target as HTMLFormElement).querySelector("input");
     const name = input?.value.trim() ?? "";
     if (!name) return;
-    if (this.creating === "note") await this.workspace.createNote(this.folder, name);
+    const form = e.target as HTMLFormElement;
+    const template = chosen(form);
+    if (this.creating === "note") await this.workspace.createNote(this.folder, name, template && { template, values: values(form) });
     else await this.workspace.createFolder(this.folder, name);
+    this.cancel();
+  }
+
+  private cancel(): void {
     this.creating = undefined;
+    this.template = undefined;
   }
 
   private entry(folder: string, e: Entry): TemplateResult {
@@ -107,10 +119,13 @@ export class FileTree extends LightElement {
         ${this.creating
           ? html`<form class="pm-tree-create" @submit=${this.create}>
               <label>${this.creating === "note" ? "Note" : "Folder"} name in ${where}
-                <input name="name" required autofocus @keydown=${(e: KeyboardEvent) => e.key === "Escape" && (this.creating = undefined)} />
+                <input name="name" required autofocus @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.cancel()} />
               </label>
+              ${this.creating === "note"
+                ? templateFields(this.template, () => (this.template = chosen(this.querySelector("form.pm-tree-create") as HTMLFormElement)))
+                : nothing}
               <button type="submit">Create</button>
-              <button type="button" @click=${() => (this.creating = undefined)}>Cancel</button>
+              <button type="button" @click=${() => this.cancel()}>Cancel</button>
             </form>`
           : nothing}
         ${error ? html`<p class="pm-error" role="alert">${error}</p>` : nothing}

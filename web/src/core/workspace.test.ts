@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
+import { localDate } from "./templates";
 import { Workspace } from "./workspace";
 
 vi.mock("./api", async (actual) => ({
@@ -9,6 +10,7 @@ vi.mock("./api", async (actual) => ({
   saveNote: vi.fn(async () => ({ kind: "saved", etag: '"e2"' })),
   move: vi.fn(async () => {}),
   restore: vi.fn(async () => '"e3"'),
+  createNote: vi.fn(async () => '"e4"'),
 }));
 
 /** Every request in order, so a test can assert that the save came before the move. */
@@ -100,5 +102,20 @@ describe("Workspace.restore", () => {
     expect(await ws.restore("c1")).toBe(false);
     expect(ws.state.value.open?.doc.path).toBe("a.md");
     expect(ws.state.value.error).toBe("Couldn't restore a.md: it changed in the meantime, so nothing was replaced");
+  });
+});
+
+describe("Workspace.createNote", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("starts a blank note with its name as the heading", async () => {
+    await new Workspace().createNote("ops", "Disk full");
+    expect(api.createNote).toHaveBeenCalledWith("ops/Disk full.md", "# Disk full\n\n");
+  });
+
+  it("starts from a template: the name, today's date and the values filled in", async () => {
+    const template = { name: "T", body: "# {{title}}\n{{date}} {{owner}} {{service}}\n" };
+    await new Workspace().createNote("", "db.md", { template, values: { owner: "sre", service: "", title: "ignored" } });
+    expect(api.createNote).toHaveBeenCalledWith("db.md", `# db\n${localDate(new Date())} sre {{service}}\n`);
   });
 });
