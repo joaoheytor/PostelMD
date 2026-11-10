@@ -28,7 +28,7 @@ test("first-run setup with the server's token", async ({ page }) => {
 
   await expect(page.getByRole("navigation", { name: "Notes" })).toBeVisible();
   const notice = page.getByRole("status").filter({ hasText: "Imported" });
-  await expect(notice).toHaveText(/^\s*Imported 1 file from your notes folder as the first commit\.\s*Dismiss\s*$/);
+  await expect(notice).toHaveText(/^\s*Imported 1 file from your notes folder as the first commit\. Check them for secrets before you push this repository anywhere\.\s*Dismiss\s*$/);
   await notice.getByRole("button", { name: "Dismiss" }).click();
   await expect(notice).toHaveCount(0);
 });

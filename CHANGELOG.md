@@ -64,6 +64,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   fix.
 - A runbook for running v0.1: backups, a restore drill, logs, upgrade and rollback, and
   recovering from a lost password, a git lock or a deleted note.
+- The commit dialog checks every added or changed file it lists for secrets, including notes
+  changed in another tab or on the host, and shows each finding by file, rule and line
+  (never the secret). With a finding, or a file it couldn't check (binary or too large), the
+  only way to commit is "Commit anyway".
 
 ### Changed
 - The conflict banner shows a line diff between your text and the other version, and says
@@ -74,6 +78,12 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   files from the notes folder became the first commit.
 - Save errors read as plain sentences, e.g. "Not saved: can't reach the server. Retrying;
   your edits are kept in this browser.", never a raw browser error.
+- A commit takes exactly the changes the dialog listed. If anything changed after the dialog
+  listed it, nothing is committed and the dialog lists and checks the changes again.
+- The commit API now requires the listed `changes`; a tab left open across an upgrade gets
+  422 and must be reloaded.
+- After setup, the notice of the files imported into the first commit asks you to check them
+  for secrets before you push the repository anywhere.
 
 ### Fixed
 - A diagram whose renderer can't load now shows an error after 15 seconds instead of waiting
