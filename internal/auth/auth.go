@@ -62,12 +62,17 @@ type Service struct {
 	hashMu sync.Mutex   // one argon2id at a time: each takes 64 MB
 	hashes atomic.Int64 // argon2id runs, so tests can tell which requests cost one
 
+	afterVerify func() // a test seam inside ChangePassword; nil outside tests
+
 	ownsRoot bool // opened by OpenDir; closed by Close
 
 	mu           sync.Mutex
 	cred         *credential // nil before setup
 	setupToken   string
 	setupExpires time.Time
+
+	rejectLogged     time.Time // the last setup.rejected record
+	rejectSuppressed int       // bad setup tokens not recorded since
 }
 
 // Open loads the credential and the instance secret from the state directory.
@@ -148,10 +153,24 @@ func (s *Service) checkToken(ctx context.Context, token string) error {
 	}
 	if s.setupToken == "" || !s.now().Before(s.setupExpires) ||
 		subtle.ConstantTimeCompare([]byte(token), []byte(s.setupToken)) != 1 {
-		s.audit.Record(ctx, "setup.rejected")
+		s.recordRejection(ctx)
 		return ErrBadToken
 	}
 	return nil
+}
+
+// rejectionLogEvery bounds the setup.rejected records: anyone can send bad tokens.
+const rejectionLogEvery = time.Minute
+
+// recordRejection audits a bad setup token, at most once per rejectionLogEvery, with the
+// number of rejections left out since the last record. s.mu is held.
+func (s *Service) recordRejection(ctx context.Context) {
+	if now := s.now(); s.rejectLogged.IsZero() || now.Sub(s.rejectLogged) >= rejectionLogEvery {
+		s.audit.Record(ctx, "setup.rejected", slog.Int("suppressed", s.rejectSuppressed))
+		s.rejectLogged, s.rejectSuppressed = now, 0
+		return
+	}
+	s.rejectSuppressed++
 }
 
 // Setup sets the password and the git author with the setup token, and returns a session.
@@ -209,14 +228,20 @@ func (s *Service) ChangePassword(ctx context.Context, ip, cookie, current, next 
 	if err := s.Check(cookie); err != nil {
 		return "", err
 	}
-	if _, err := s.verify(ctx, ip, current); err != nil {
+	verified, err := s.verify(ctx, ip, current)
+	if err != nil {
 		return "", err
+	}
+	if s.afterVerify != nil {
+		s.afterVerify()
 	}
 	hash, err := s.hash(next)
 	if err != nil {
 		return "", err
 	}
-	epoch, err := s.update(func(c *credential) { c.PasswordHash = hash; c.Epoch++ })
+	// Saved only over the credential the current password was checked against: a change
+	// that saved in between (another session racing this one) wins, and this one is refused.
+	epoch, err := s.update(verified, func(c *credential) { c.PasswordHash = hash; c.Epoch++ })
 	if err != nil {
 		return "", err
 	}
@@ -229,7 +254,7 @@ func (s *Service) LogoutEverywhere(ctx context.Context, cookie string) error {
 	if err := s.Check(cookie); err != nil {
 		return err
 	}
-	if _, err := s.update(func(c *credential) { c.Epoch++ }); err != nil {
+	if _, err := s.update(anyEpoch, func(c *credential) { c.Epoch++ }); err != nil {
 		return err
 	}
 	s.audit.Record(ctx, "sessions.revoked")
@@ -251,14 +276,14 @@ func (s *Service) verify(ctx context.Context, ip, password string) (uint64, erro
 	if err := s.throttled(ctx, ip); err != nil {
 		return 0, err
 	}
+	s.hashMu.Lock()
+	defer s.hashMu.Unlock()
 	s.mu.Lock()
-	cred := s.cred
+	cred := s.cred // read once it may hash: a change may have saved while it waited
 	s.mu.Unlock()
 	if cred == nil {
 		return 0, ErrNotSetUp
 	}
-	s.hashMu.Lock()
-	defer s.hashMu.Unlock()
 	// Check again: parallel attempts all passed the first check while earlier ones queued
 	// here, and their failures since then count. The outcome is recorded before the next
 	// attempt may hash. A request that gave up while it waited doesn't cost a hash.
@@ -304,12 +329,19 @@ func (s *Service) hash(password string) (string, error) {
 	return HashPassword(password)
 }
 
-// update applies change to a copy of the credential, saves it, then makes it current.
-func (s *Service) update(change func(*credential)) (uint64, error) {
+// anyEpoch: update applies whatever the current epoch is (epochs start at 1).
+const anyEpoch = 0
+
+// update applies change to a copy of the credential, saves it, then makes it current. With
+// an epoch, it is a compare-and-swap: ErrBadSession if the credential changed since then.
+func (s *Service) update(epoch uint64, change func(*credential)) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cred == nil {
 		return 0, ErrNotSetUp
+	}
+	if epoch != anyEpoch && s.cred.Epoch != epoch {
+		return 0, ErrBadSession
 	}
 	c := *s.cred
 	change(&c)

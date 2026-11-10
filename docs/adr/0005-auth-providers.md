@@ -62,7 +62,11 @@ off by default and a single shared token.
   be refused (an invalid setup token, setup already done, a source still waiting) is refused
   before it hashes, and the backoff is checked again once an attempt may hash, so parallel
   guesses from one source can't run more hashes than sequential ones. The failure that
-  starts a wait carries `Retry-After` with its `401`, like the `429` that follows.
+  starts a wait carries `Retry-After` with its `401`, like the `429` that follows. Rejected
+  setup tokens are audited at most once a minute, with the count left out.
+- **A password change saves only over the credential it checked** (compare-and-swap on the
+  epoch): of two interleaved changes, say an attacker with a stolen cookie and the old
+  password racing the owner, the second to save is refused instead of overwriting the first.
 - **First run:** see ADR-0009 for the setup token and the headless bootstrap.
 - **Authentication cannot be disabled.** There is no "no-auth" or single-user bypass mode.
 - The session, account and permission lifecycle (expiry, rotation, suspension, linking,

@@ -106,6 +106,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The setup page checks the token before hashing the password, and parallel wrong
   passwords from one address can no longer get past the login backoff: neither can be
   used to keep the server busy hashing and slow down your own login.
+- Two password changes racing each other (for example someone with a stolen session and
+  the old password, and you) can no longer overwrite each other: the second to save is
+  refused.
 - The wrong password that starts the login wait now says how long to wait, instead of a
   plain "Wrong password." the next attempt would contradict.
 - The secret warning no longer freezes the tab on a crafted note: its patterns used to take

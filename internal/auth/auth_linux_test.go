@@ -153,6 +153,53 @@ func TestParallelLoginsKeepTheBackoff(t *testing.T) {
 	}
 }
 
+// Two password changes from one session, interleaved (an attacker with a stolen cookie and
+// the old password racing the owner): the second to save must not overwrite the first.
+func TestInterleavedPasswordChanges(t *testing.T) {
+	e := newEnv(t)
+	s, cookie := setUp(t, e)
+	var first error
+	s.afterVerify = func() { // between the outer change's check and its save
+		s.afterVerify = nil
+		_, first = s.ChangePassword(ctx, "ip", cookie, pw, "the password saved first")
+	}
+	if _, err := s.ChangePassword(ctx, "ip", cookie, pw, "the password saved second"); !errors.Is(err, ErrBadSession) {
+		t.Fatalf("the change that lost the race = %v, want ErrBadSession", err)
+	}
+	if first != nil {
+		t.Fatalf("the change that saved first = %v", first)
+	}
+	if _, err := s.Login(ctx, "ip2", "the password saved first"); err != nil {
+		t.Fatalf("the first change was overwritten: %v", err)
+	}
+	if _, err := s.Login(ctx, "ip3", "the password saved second"); !errors.Is(err, ErrBadPassword) {
+		t.Fatalf("the refused change took effect: %v", err)
+	}
+}
+
+// Anyone can send bad setup tokens before setup: the audit log keeps one line per minute,
+// with how many it left out.
+func TestSetupRejectionsAreRateLimited(t *testing.T) {
+	e := newEnv(t)
+	s := e.open(t)
+	if _, err := s.NewSetupToken(); err != nil {
+		t.Fatal(err)
+	}
+	for range 50 {
+		if err := s.CheckSetupToken(ctx, "bad"); !errors.Is(err, ErrBadToken) {
+			t.Fatalf("bad token = %v", err)
+		}
+	}
+	if n := strings.Count(e.logs.String(), "event=setup.rejected"); n != 1 {
+		t.Fatalf("50 bad tokens logged %d lines, want 1", n)
+	}
+	e.now = e.now.Add(time.Minute)
+	_ = s.CheckSetupToken(ctx, "bad")
+	if n := strings.Count(e.logs.String(), "event=setup.rejected"); n != 2 || !strings.Contains(e.logs.String(), "suppressed=49") {
+		t.Fatalf("a minute later: %d lines, want 2 with suppressed=49:\n%s", n, e.logs.String())
+	}
+}
+
 func TestLoginAndBackoff(t *testing.T) {
 	e := newEnv(t)
 	s, _ := setUp(t, e)

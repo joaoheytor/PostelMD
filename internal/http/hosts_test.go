@@ -55,6 +55,27 @@ func TestAllowHosts(t *testing.T) {
 	}
 }
 
+// The MVP trusts no proxy: X-Forwarded-Host never stands in for Host, either way.
+func TestAllowHostsIgnoresForwardedHost(t *testing.T) {
+	h := AllowHosts(nil, slog.New(slog.DiscardHandler), stdhttp.HandlerFunc(ok))
+	for _, tc := range []struct {
+		host, forwarded string
+		want            int
+	}{
+		{"rebind.attacker.example", "localhost", 421},
+		{"localhost:8080", "rebind.attacker.example", 204},
+	} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = tc.host
+		r.Header.Set("X-Forwarded-Host", tc.forwarded)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != tc.want {
+			t.Errorf("Host %q, X-Forwarded-Host %q = %d, want %d", tc.host, tc.forwarded, w.Code, tc.want)
+		}
+	}
+}
+
 // The refused Host is the client's to choose: it reaches the log escaped and truncated.
 func TestAllowHostsLogsASafeHost(t *testing.T) {
 	var logs bytes.Buffer

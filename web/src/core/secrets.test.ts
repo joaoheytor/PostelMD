@@ -64,39 +64,68 @@ describe("scanSecrets", () => {
   });
 });
 
+// Bounding a pattern for speed must not cost real secrets: long tokens exist.
+describe("scanSecrets on long secrets", () => {
+  const b64 = (n: number) => r("aB3_x-", Math.ceil(n / 6)).slice(0, n);
+  it.each([
+    ["a JWT with a 3000-character payload (group claims)", `eyJ${b64(30)}.eyJ${b64(3000)}.${b64(40)}`, "JSON Web Token"],
+    ["a JWT with a 1000-character header (x5c)", `eyJ${b64(1000)}.eyJ${b64(40)}.${b64(40)}`, "JSON Web Token"],
+    ["a URL with a 300-character password", `https://app:${b64(300)}@db.internal/app`, "Password in a URL"],
+    ["a URL with a 300-character user", `https://${b64(300)}:s3cr3t-Pa55@db.internal/app`, "Password in a URL"],
+  ])("finds %s", (_, secret, rule) => {
+    expect(scanSecrets(`x ${secret} y`).map((f) => f.rule)).toEqual([rule]);
+  });
+});
+
 // The scan runs on paste and on every save: a note crafted so a rule restarts a long match at
-// every position must not freeze the tab. Each input is ~200 KB of one rule's near-miss.
-const size = 200_000;
-const fill = (unit: string) => unit.repeat(Math.ceil(size / unit.length));
-const adversarial: [string, string][] = [
-  ["URL scheme", fill("a.")],
-  ["URL user", `a://${fill("b")}`],
-  ["URL password", `a://b:${fill("c")}`],
-  ["URL users", fill("a://b:c")],
-  ["AWS", fill("AKIA")],
-  ["GitHub", fill("ghp_")],
-  ["GitHub PAT", fill("github_pat_")],
-  ["GitLab", fill("glpat-")],
-  ["Slack", fill("xoxb-")],
-  ["Slack webhook", fill("hooks.slack.com/services/")],
-  ["private key", fill("-----BEGIN ")],
-  ["Google", fill("AIza-")],
-  ["Stripe", fill("sk_test_")],
-  ["npm", fill("npm_")],
-  ["OpenAI", fill("sk-")],
-  ["OpenAI project", fill("sk-proj-")],
-  ["Anthropic", fill("sk-ant-a")],
-  ["Anthropic dashes", fill("sk-ant-a-")],
-  ["JWT", fill("eyJ-")],
-  ["JWT segments", fill("eyJaaaaaaaaaaa.")],
-  ["Kubernetes", fill("client-key-data: ")],
-  ["Kubernetes spaces", `client-key-data:${fill(" ")}`],
+// every position must not freeze the tab. Each case is one rule's near-miss, repeated. The
+// test measures growth, not a wall-clock budget that depends on the machine: four times the
+// input must cost about four times the time (linear), well under sixteen (quadratic).
+const fill = (unit: string, size: number) => unit.repeat(Math.ceil(size / unit.length));
+const adversarial: [string, (n: number) => string][] = [
+  ["URL scheme", (n) => fill("a.", n)],
+  ["URL user", (n) => `a://${fill("b", n)}`],
+  ["URL password", (n) => `a://b:${fill("c", n)}`],
+  ["URL users", (n) => fill("a://b:c", n)],
+  ["AWS", (n) => fill("AKIA", n)],
+  ["GitHub", (n) => fill("ghp_", n)],
+  ["GitHub PAT", (n) => fill("github_pat_", n)],
+  ["GitLab", (n) => fill("glpat-", n)],
+  ["Slack", (n) => fill("xoxb-", n)],
+  ["Slack webhook", (n) => fill("hooks.slack.com/services/", n)],
+  ["private key", (n) => fill("-----BEGIN ", n)],
+  ["Google", (n) => fill("AIza-", n)],
+  ["Stripe", (n) => fill("sk_test_", n)],
+  ["npm", (n) => fill("npm_", n)],
+  ["OpenAI", (n) => fill("sk-", n)],
+  ["OpenAI project", (n) => fill("sk-proj-", n)],
+  ["OpenAI markers", (n) => `sk-${fill("T3BlbkFJ", n)}`],
+  ["Anthropic", (n) => fill("sk-ant-a", n)],
+  ["Anthropic dashes", (n) => fill("sk-ant-a-", n)],
+  ["JWT", (n) => fill("eyJ-", n)],
+  ["JWT segments", (n) => fill("eyJaaaaaaaaaaa.", n)],
+  ["JWT payloads", (n) => fill("eyJaaaaaaaaaaa.eyJ-", n)],
+  ["Kubernetes", (n) => fill("client-key-data: ", n)],
+  ["Kubernetes spaces", (n) => `client-key-data:${fill(" ", n)}`],
 ];
 
-describe("scanSecrets on hostile input", () => {
-  it.each(adversarial)("stays linear on %s", (_, text) => {
+/** The best of three runs, in ms: the least disturbed by the machine. */
+function timeScan(text: string): number {
+  let best = Infinity;
+  for (let i = 0; i < 3; i++) {
     const start = performance.now();
     scanSecrets(text);
-    expect(performance.now() - start).toBeLessThan(200);
+    best = Math.min(best, performance.now() - start);
+  }
+  return best;
+}
+
+describe("scanSecrets on hostile input", () => {
+  it.each(adversarial)("stays linear on %s", (_, make) => {
+    const small = timeScan(make(50_000));
+    const large = timeScan(make(200_000));
+    // Below 2 ms, timer resolution is noise: count it as 2 ms.
+    expect(large / Math.max(small, 2)).toBeLessThan(8);
+    expect(large).toBeLessThan(2000); // a hang guard only
   });
 });
