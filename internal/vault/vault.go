@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
+	"log/slog"
 	"path"
 	"sort"
 	"time"
@@ -66,6 +67,7 @@ type Vault struct {
 	mu   chan struct{} // the vault mutex; a channel so waiting is bounded
 	wait time.Duration
 	now  func() time.Time
+	log  *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
 }
 
 // Open opens the vault at dir, removes every leftover temp file (a save that didn't finish
@@ -76,7 +78,8 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &Vault{root: root, dir: dir, opts: opts, mu: make(chan struct{}, 1), wait: 5 * time.Second, now: time.Now}
+	v := &Vault{root: root, dir: dir, opts: opts, mu: make(chan struct{}, 1), wait: 5 * time.Second, now: time.Now,
+		log: slog.New(slog.DiscardHandler)}
 	err = v.sweepTemps()
 	if err == nil {
 		err = v.probeNoReplace()
@@ -87,6 +90,10 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 	}
 	return v, nil
 }
+
+// SetLogger sets where the vault's warnings go (discarded by default). Call it before
+// EnableGit.
+func (v *Vault) SetLogger(l *slog.Logger) { v.log = l }
 
 // probeNoReplace renames a temp file to an absent name with RENAME_NOREPLACE. The target
 // must be absent: the VFS answers EEXIST for an existing one before asking the filesystem,

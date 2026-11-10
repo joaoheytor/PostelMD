@@ -76,7 +76,9 @@ func (r *Root) ReadFile(rel string) ([]byte, error) {
 	if err := checkRel(rel); err != nil {
 		return nil, err
 	}
-	fd, err := r.openat(rel, unix.O_RDONLY)
+	// O_NONBLOCK: a FIFO swapped in after the caller listed a regular file must not block
+	// the open; the check below then refuses it. It changes nothing for a regular file.
+	fd, err := r.openat(rel, unix.O_RDONLY|unix.O_NONBLOCK)
 	if err != nil {
 		return nil, err
 	}
