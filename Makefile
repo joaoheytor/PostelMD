@@ -11,8 +11,12 @@ IMAGE     ?= postelmd:dev
 PLATFORMS ?= linux/amd64,linux/arm64
 # Trivy v0.76.1, its cosign signature verified against aquasecurity/trivy's release workflow.
 TRIVY_IMAGE ?= ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+# image-push and image-gate (candidate.yaml)
+REPO        ?=
+DIGEST_FILE ?= bin/image-digest
+GATE_DIR    ?= bin/candidate
 
-.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan print-trivy-image test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan image-push image-gate test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,9 +50,23 @@ image-smoke: image ## `docker run` smoke test of $(IMAGE) (ADR-0009), and adopti
 image-scan: image ## Trivy gate of ADR-0015 on $(IMAGE): no critical, no high with a fix
 	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/image-scan.sh $(IMAGE)
 
-# For candidate.yaml, which scans a pushed digest with the same pinned Trivy.
-print-trivy-image:
-	@echo '$(TRIVY_IMAGE)'
+# Push the multi-arch image of the binaries already in bin/linux-<arch>/ (image-bins, or
+# candidate.yaml's artifact) to $(REPO), untagged, by digest; write the digest to
+# $(DIGEST_FILE). Timestamps are clamped to the commit's time, so the same binaries give the
+# same digest.
+image-push: ## Push the image untagged, by digest, to REPO=<registry>/<name> (candidate.yaml)
+	@test -n "$(REPO)" || { echo 'usage: make image-push REPO=<registry>/<name>' >&2; exit 1; }
+	test -f bin/linux-amd64/postelmd && test -f bin/linux-arm64/postelmd
+	mkdir -p bin/empty
+	SOURCE_DATE_EPOCH=$$(git log -1 --format=%ct) docker buildx build --platform $(PLATFORMS) \
+		--provenance=false --sbom=false --metadata-file bin/image-push.json \
+		--output 'type=image,name=$(REPO),push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true' .
+	jq -r '."containerimage.digest"' bin/image-push.json >$(DIGEST_FILE)
+	grep -qE '^sha256:[0-9a-f]{64}$$' $(DIGEST_FILE)
+	@echo "pushed $(REPO)@$$(cat $(DIGEST_FILE))"
+
+image-gate: ## Candidate gates (scripts/candidate-gate.sh) on REPO@$(DIGEST_FILE): smoke, Trivy, SBOMs
+	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/candidate-gate.sh $(REPO) "$$(cat $(DIGEST_FILE))" $(GATE_DIR)
 
 test: test-go test-web test-scripts ## Go, web and script tests
 
