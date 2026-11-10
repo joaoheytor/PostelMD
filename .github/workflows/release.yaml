@@ -60,10 +60,12 @@ jobs:
       - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
+          # No *.blob.core.windows.net: no artifacts here, and GitHub's own productionresultssa*
+          # accounts come from GitHub's meta domains, which harden-runner allows.
+          # *.actions.githubusercontent.com is GitHub's own (results; the host varies per run).
           allowed-endpoints: >
             github.com:443 api.github.com:443 release-assets.githubusercontent.com:443
             objects.githubusercontent.com:443 *.actions.githubusercontent.com:443
-            *.blob.core.windows.net:443
             proxy.golang.org:443 sum.golang.org:443 storage.googleapis.com:443 go.dev:443
             dl.google.com:443 vuln.go.dev:443
             ghcr.io:443 pkg-containers.githubusercontent.com:443 mirror.gcr.io:443
@@ -84,8 +86,10 @@ jobs:
           scripts/release-meta.sh parse "$TAG" > "$RUNNER_TEMP/tag.env"
           grep -qx kind=stable "$RUNNER_TEMP/tag.env" || { echo "::error::$TAG is not a stable tag"; exit 1; }
           version=$(sed -n 's/^version=//p' "$RUNNER_TEMP/tag.env")
-          # The release notes are CHANGELOG.md's [X.Y.Z] section; fail now, not after signing.
-          scripts/release-meta.sh notes "$version" CHANGELOG.md > /dev/null
+          # The release notes are the [X.Y.Z] section of CHANGELOG.md on main (the CHANGELOG
+          # PR can merge after the tested RC); fail now, not after signing.
+          git show origin/main:CHANGELOG.md > "$RUNNER_TEMP/CHANGELOG.md"
+          scripts/release-meta.sh notes "$version" "$RUNNER_TEMP/CHANGELOG.md" > /dev/null
           git fetch --no-tags --force origin 'refs/tags/v*:refs/tags/v*'
           move=$(git tag --list 'v*' | scripts/release-meta.sh is-highest "$version")
           { cat "$RUNNER_TEMP/tag.env"; echo "move-minor=$move"; } >> "$GITHUB_OUTPUT"
@@ -186,10 +190,15 @@ jobs:
       - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
+          # This job holds DOCKERHUB_TOKEN: no *.blob.core.windows.net (any Azure storage
+          # account). It uses no artifacts; GitHub's own productionresultssa* accounts come
+          # from GitHub's meta domains, which harden-runner allows. The one wildcard,
+          # *.actions.githubusercontent.com, is GitHub's own (OIDC token, results; the host
+          # varies per run).
           allowed-endpoints: >
             github.com:443 api.github.com:443 uploads.github.com:443
             release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
-            *.actions.githubusercontent.com:443 *.blob.core.windows.net:443
+            *.actions.githubusercontent.com:443
             ghcr.io:443 pkg-containers.githubusercontent.com:443
             index.docker.io:443 registry-1.docker.io:443 auth.docker.io:443
             production.cloudfront.docker.com:443
@@ -219,8 +228,10 @@ jobs:
           HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           printf '%s' "$TOKEN" | crane auth login ghcr.io -u "$ACTOR" --password-stdin
-          [ -n "$HUB_USER" ] && [ -n "$HUB_TOKEN" ] \
-            || { echo "::error::DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not set in the release environment"; exit 1; }
+          if [ -z "$HUB_USER" ] || [ -z "$HUB_TOKEN" ]; then
+            echo "::error::DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not set in the release environment"
+            exit 1
+          fi
           printf '%s' "$HUB_TOKEN" | crane auth login index.docker.io -u "$HUB_USER" --password-stdin
       - name: "1. GHCR: sign, then verify"
         run: |
@@ -269,14 +280,27 @@ jobs:
           [ "$(find dist -type f | wc -l)" -eq 4 ] || { echo "::error::unexpected assets in $RC"; exit 1; }
           (cd dist && sha256sum postelmd-* > SHA256SUMS)
           cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS > /dev/null
-          scripts/release-meta.sh notes "$VERSION" CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --draft=false \
-              --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          # Notes: CHANGELOG.md's [X.Y.Z] section on main (verify checked it exists).
+          git fetch --no-tags --depth=1 origin refs/heads/main:refs/remotes/origin/main
+          git show origin/main:CHANGELOG.md > "$RUNNER_TEMP/CHANGELOG.md"
+          {
+            echo "Built and tested as \`${RC#v}\`, promoted unchanged: the binaries and the image report that version."
+            echo "Image: \`$HUB_REPO@$DIGEST\` (and \`$GHCR_REPO@$DIGEST\`)."
+            echo
+            scripts/release-meta.sh notes "$VERSION" "$RUNNER_TEMP/CHANGELOG.md"
+          } > "$RUNNER_TEMP/notes.md"
+          # An older line's patch never takes "Latest" (the same rule as the X.Y alias).
+          found=0
+          scripts/release-meta.sh record "$GITHUB_REPOSITORY" "$TAG" > /dev/null || found=$?
+          if [ "$found" -eq 0 ]; then
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*
-          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --draft=false \
+              --latest="$MOVE_MINOR" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          elif [ "$found" -eq 3 ]; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
-              --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
+              --latest="$MOVE_MINOR" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
+          else
+            exit 1
           fi
       - name: Forget the registry credentials
         if: always()

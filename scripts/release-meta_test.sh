@@ -51,6 +51,30 @@ check "is-highest: an older patch doesn't (numeric, not text)" false "$stable" i
 check "is-highest: the first release of a minor" true "$stable" is-highest 0.3.0
 check "is-highest: RC tags don't count" true "v0.4.0-rc.1${nl}v0.4.1-rc.1${nl}" is-highest 0.4.0
 
+# record: a fake gh applies the --jq filter to a fixture listing, or fails like an outage.
+mkdir "$work/bin"
+cat >"$work/bin/gh" <<'EOF'
+#!/bin/sh
+[ "$FAKE_GH" = outage ] && { echo "gh: Server Error (HTTP 502)" >&2; exit 1; }
+while [ $# -gt 0 ]; do [ "$1" = --jq ] && { filter=$2; break; }; shift; done
+jq -c "$filter" "$FAKE_GH"
+EOF
+chmod +x "$work/bin/gh"
+printf '[{"tag_name":"v0.1.0-rc.1","draft":true,"body":"x\\npostelmd-image-digest: %s"},
+  {"tag_name":"v0.1.0-rc.2","body":null},{"tag_name":"v0.1.0-rc.3","body":"a"},
+  {"tag_name":"v0.1.0-rc.3","body":"b"}]' "$D" >"$work/releases.json"
+record() { # record <description> <expected> <exit> <mode> <tag>
+	if got=$(PATH="$work/bin:$PATH" FAKE_GH=$4 "$script" record o/r "$5" 2>"$work/err"); then rc=0; else rc=$?; fi
+	if [ "$rc" = "$3" ] && [ "$got" = "$2" ]; then echo "ok   $1"; else
+		echo "FAIL $1: expected $3 [$2], got $rc [$got] $(cat "$work/err")"; failures=$((failures + 1)); fi
+}
+record "record finds a draft and its digest line" "x${nl}postelmd-image-digest: $D" 0 "$work/releases.json" v0.1.0-rc.1
+record "record of a release without a body" "" 0 "$work/releases.json" v0.1.0-rc.2
+record "record: none is exit 3" "" 3 "$work/releases.json" v0.1.0-rc.9
+record "record: an outage is a failure, not 'none'" "" 1 outage v0.1.0-rc.9
+record "record: two releases for one tag fail" "" 1 "$work/releases.json" v0.1.0-rc.3
+record "record refuses a tag that isn't a release name" "" 1 "$work/releases.json" 'v0") | .x'
+
 cat >"$work/CHANGELOG.md" <<'EOF'
 # Changelog
 

@@ -9,6 +9,8 @@
 #                                        higher (the X.Y alias may move), else "false"
 #   release-meta.sh notes <X.Y.Z> <file> CHANGELOG.md → the body of `## [X.Y.Z] - YYYY-MM-DD`
 #   release-meta.sh digest-line <digest> the line `digest` reads, for prerelease.yaml
+#   release-meta.sh record <repo> <tag> the body of the release for <tag> (drafts included);
+#                                        exit 3 if there is none (needs gh, GH_TOKEN)
 #
 # Every command fails (exit 1, message on stderr) rather than guess.
 set -eu
@@ -53,6 +55,22 @@ digest)
 	printf '%s\n' "$d" | grep -Eqx "$digest_re" || fail "not a digest: $d"
 	echo "$d"
 	;;
+record)
+	# The body of the GitHub release (draft or not) for <tag>: exit 0 and the body, exit 3 if
+	# none exists, exit 1 on any error. Lists releases rather than GET …/releases/tags/<tag>,
+	# which hides drafts and makes "not found" and an outage hard to tell apart: here a
+	# failed call is a failure, and only a complete listing without the tag means "none".
+	repo=${1:?usage: record <owner/repo> <tag>}
+	tag=${2:?usage: record <owner/repo> <tag>}
+	printf '%s\n' "$tag" | grep -Eqx "v$semver(-rc\\.$num)?" || fail "$tag: not a release tag name"
+	out=$(gh api --paginate "repos/$repo/releases?per_page=100" \
+		--jq ".[] | select(.tag_name == \"$tag\") | {body: (.body // \"\")}") ||
+		fail "listing the releases of $repo failed"
+	[ -n "$out" ] || exit 3
+	n=$(printf '%s\n' "$out" | jq -s length) || fail "unreadable release listing"
+	[ "$n" = 1 ] || fail "$n releases for $tag"
+	printf '%s\n' "$out" | jq -r .body
+	;;
 digest-line)
 	d=${1:?usage: digest-line <digest>}
 	printf '%s\n' "$d" | grep -Eqx "$digest_re" || fail "not a digest: $d"
@@ -85,6 +103,6 @@ notes)
 		started { n++ }'
 	;;
 *)
-	fail "usage: release-meta.sh parse|latest-rc|digest|digest-line|is-highest|notes …"
+	fail "usage: release-meta.sh parse|latest-rc|digest|digest-line|record|is-highest|notes …"
 	;;
 esac

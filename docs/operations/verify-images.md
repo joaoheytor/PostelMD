@@ -87,7 +87,9 @@ gh attestation verify postelmd-linux-amd64 --repo joaoheytor/PostelMD --deny-sel
 ```
 
 The binary reports the RC's version (`postelmd --version` prints `X.Y.Z-rc.N`): a release
-promotes the RC's tested bytes and never rebuilds them. An RC's pre-release carries the same
+promotes the RC's tested bytes and never rebuilds them. The SBOMs carry the same version, so a
+scanner may treat a release as older than `X.Y.Z`; security advisories name the RC version
+too. An RC's pre-release carries the same
 files without the signed `SHA256SUMS.sigstore.json`; check them with the last command.
 
 ### Release candidates and candidates
