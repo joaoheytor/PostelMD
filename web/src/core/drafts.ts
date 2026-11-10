@@ -1,10 +1,10 @@
 /**
- * Local drafts of unsaved edits (ADR-0003 §7, ADR-0020): until the server answers a save with
- * 200, the draft is the only other copy of the edit. Each note session of a tab writes its own
- * draft, under its esid and session number; a save clears only its own session's draft, and
- * only up to the generation it saved. Every other draft, of closed or crashed tabs, of notes
- * closed in this tab and of earlier loads of it, is offered to the user, who alone decides to
- * restore or discard it: PostelMD never deletes a draft unasked.
+ * Local drafts of unsaved edits (ADR-0003 §7, ADR-0020, ADR-0023): until the server answers a
+ * save with 200, the draft is the only other copy of the edit. Each note session of a tab
+ * writes its own draft, under its draft key (`<esid>.<n>`); a save clears only its own
+ * session's draft, and only up to the generation it saved. Every other draft, of closed or
+ * crashed tabs, of notes closed in this tab and of earlier loads of it, is offered to the
+ * user, who alone decides to restore or discard it: PostelMD never deletes a draft unasked.
  */
 
 export interface Draft {

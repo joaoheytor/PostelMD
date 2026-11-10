@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import * as api from "./api";
 import { type Draft, Drafts, MemoryDraftBackend } from "./drafts";
 import { Workspace } from "./workspace";
@@ -50,8 +50,40 @@ describe("Workspace drafts (ADR-0003 §7)", () => {
     expect(await ws.saveOpen()).toBe(true);
     await ws.drafts?.idle();
     expect((await backend.all()).filter((d) => d.path === "b.md").map((d) => d.text)).toEqual(["unsaved edit"]);
-    await ws.refreshOffered();
-    expect(ws.offered.value.map((d) => d.text)).toContain("unsaved edit");
+    expect(ws.offered.value.map((d) => d.text)).toContain("unsaved edit"); // the vault-wide list too
+  });
+
+  it("restoring a draft based on an older version than the saved one asks the user (412) instead of saving over it", async () => {
+    // The server answers like the real one: a save lands only if its If-Match is current.
+    const server = { content: "# b.md", etag: '"e1"', n: 1 };
+    const [read, save] = [vi.mocked(api.readNote).getMockImplementation(), vi.mocked(api.saveNote).getMockImplementation()];
+    onTestFinished(() => {
+      if (read) vi.mocked(api.readNote).mockImplementation(read);
+      if (save) vi.mocked(api.saveNote).mockImplementation(save);
+    });
+    vi.mocked(api.readNote).mockImplementation(async () => ({ content: server.content, etag: server.etag }));
+    vi.mocked(api.saveNote).mockImplementation(async (_p, content, base) => {
+      if (base !== server.etag) return { kind: "conflict", content: server.content, etag: server.etag };
+      Object.assign(server, { content, etag: `"e${++server.n}"` });
+      return { kind: "saved", etag: server.etag };
+    });
+    await ws.open("b.md");
+    ws.reader = () => "old edit";
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "error", message: "down", retryAfterMs: 0, retry: true });
+    ws.state.value.open?.doc.edit();
+    expect(await ws.saveOpen()).toBe(false);
+    await ws.open("b.md");
+    let editor = "newer text";
+    ws.reader = () => editor;
+    ws.state.value.open?.doc.edit();
+    expect(await ws.saveOpen()).toBe(true); // the user ignored the draft and saved newer text
+    const d = ws.noteDrafts.value.find((x) => x.text === "old edit");
+    if (!d) throw new Error("no draft offered");
+
+    await ws.recoverDraft(d, (t) => (editor = t));
+    await ws.saveOpen();
+    expect(server.content).toBe("newer text"); // not overwritten without the user choosing
+    expect(ws.state.value.open?.doc.state.value).toMatchObject({ status: "conflict", conflict: { content: "newer text" } });
   });
 
   it("an edit of the open note goes to this tab's draft", async () => {

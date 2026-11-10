@@ -135,6 +135,15 @@ export class DocumentSession implements Disposable {
     return c.content;
   }
 
+  /**
+   * The editor's text is now based on etag (a restored draft's base), not on the last save:
+   * the next save sends If-Match etag, so if the note changed since, the server answers 412
+   * and the user chooses in the conflict view. Call it with no save in flight (after flush).
+   */
+  rebase(etag: string): void {
+    this.baseETag = etag;
+  }
+
   /** Drops this session's draft: the user kept its text elsewhere (saved as a new note). */
   dropDraft(): void {
     this.opts.draft?.drop();
