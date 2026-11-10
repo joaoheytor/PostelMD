@@ -192,11 +192,11 @@ func TestPasswordChangeAndRevocation(t *testing.T) {
 
 func TestResetPassword(t *testing.T) {
 	e := newEnv(t)
-	if err := ResetPassword(e.root, pw); !errors.Is(err, ErrNotSetUp) {
+	if err := ResetPassword(e.dir, pw); !errors.Is(err, ErrNotSetUp) {
 		t.Fatalf("reset before setup = %v", err)
 	}
 	_, cookie := setUp(t, e)
-	if err := ResetPassword(e.root, "the reset password"); err != nil {
+	if err := ResetPassword(e.dir, "the reset password"); err != nil {
 		t.Fatal(err)
 	}
 	restarted := e.open(t)

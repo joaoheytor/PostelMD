@@ -62,20 +62,44 @@ type Vault struct {
 	now  func() time.Time
 }
 
-// Open opens the vault at dir and removes every leftover temp file: a save that didn't
-// finish never answered 200, so its edit is still the client's draft. Call it before
-// serving requests.
+// Open opens the vault at dir, removes every leftover temp file (a save that didn't finish
+// never answered 200, so its edit is still the client's draft), and refuses a filesystem
+// without RENAME_NOREPLACE (ADR-0020). Call it before serving requests.
 func Open(dir string, opts ...fs.Option) (*Vault, error) {
 	root, err := fs.OpenRoot(dir, opts...)
 	if err != nil {
 		return nil, err
 	}
 	v := &Vault{root: root, mu: make(chan struct{}, 1), wait: 5 * time.Second, now: time.Now}
-	if err := v.sweepTemps(); err != nil {
+	err = v.sweepTemps()
+	if err == nil {
+		err = v.probeNoReplace()
+	}
+	if err != nil {
 		_ = root.Close()
 		return nil, err
 	}
 	return v, nil
+}
+
+// probeNoReplace renames a temp file to an absent name with RENAME_NOREPLACE. The target
+// must be absent: the VFS answers EEXIST for an existing one before asking the filesystem,
+// which would prove nothing (ADR-0014 §1).
+func (v *Vault) probeNoReplace() error {
+	tmp, err := v.writeTemp(nil)
+	if err != nil {
+		return err
+	}
+	probe := tmp + ".probe"
+	err = v.root.RenameNoReplace(tmp, probe)
+	if errors.Is(err, fs.ErrNoReplaceUnsupported) {
+		return errors.Join(fmt.Errorf("vault: this filesystem can't rename without replacing, "+
+			"so moves could overwrite notes; use a named volume or a WSL-side folder (ADR-0020): %w", err), v.root.Remove(tmp))
+	}
+	if err != nil {
+		return errors.Join(err, v.root.Remove(tmp))
+	}
+	return v.root.Remove(probe)
 }
 
 // Close releases the vault's directory handle.

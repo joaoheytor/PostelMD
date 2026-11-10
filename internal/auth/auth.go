@@ -267,10 +267,15 @@ func checkProfile(name, email string) error {
 	return nil
 }
 
-// ResetPassword sets a new password offline (`postelmd reset-password`, run with the
-// server stopped and the instance lock held) and revokes every session. It keeps the git
-// author, or fails with ErrNotSetUp before setup.
-func ResetPassword(root *fs.Root, password string) error {
+// ResetPassword sets a new password offline in the state directory dir
+// (`postelmd reset-password`, run with the server stopped and the instance lock held) and
+// revokes every session. It keeps the git author, or fails with ErrNotSetUp before setup.
+func ResetPassword(dir, password string) error {
+	root, err := fs.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	cred, err := loadCredential(root)
 	if err != nil {
 		return err
