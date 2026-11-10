@@ -1,6 +1,6 @@
 # ADR-0015: Supply chain, dependencies and CI
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-09
 
 ## Context
@@ -56,7 +56,20 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   TypeScript, Vite, Vitest, ESLint with `typescript-eslint`, Playwright (and the a11y scanner
   chosen under ADR-0019), k6, golangci-lint, `govulncheck`, actionlint, shellcheck, yamllint,
   the gitleaks CLI (pre-commit), Helm, kind, kubeconform, GoReleaser, buildx, cosign, Syft,
-  Trivy and Renovate.
+  Trivy, Renovate and `crane` (go-containerregistry). `release.yaml` needs a byte-exact
+  copy by digest of the image and of its Sigstore referrer manifests. Neither `cosign copy`
+  (it drops v3 bundles) nor buildx provides one (#31).
+  - **How crane is pinned:** its image isn't cosign-signed (checked on v0.22.1), so
+    workflows use the **release tarball, pinned by SHA-256**. A bump is accepted only after:
+    - the tarball matches the release's `checksums.txt`;
+    - its SLSA provenance (`multiple.intoto.jsonl`, a Sigstore bundle) verifies with
+      `cosign verify-blob-attestation --type slsaprovenance02` against the
+      slsa-github-generator `generator_generic_slsa3.yml` identity, with
+      `--certificate-github-workflow-repository google/go-containerregistry`.
+
+    v0.22.1 passed both checks on 2026-11-10.
+  - **Docker Hub credentials** reach crane only through `crane auth login
+    --password-stdin`, never as arguments or in the environment of other steps.
 - **CI (GitHub Actions)**
   - Public repo: **GitHub-hosted runners only.** Never run fork PRs on the self-hosted ARC
     runners, and never use `pull_request_target` with a checkout of PR code.
@@ -67,12 +80,13 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
     3. integration;
     4. Playwright smoke tests;
     5. multi-arch build;
-    6. Trivy;
-    7. Syft SBOM;
-    8. cosign keyless signing + build provenance;
-    9. push **untagged, by digest** to GHCR;
-    10. `docker run` smoke test, kind-based Helm install and upgrade test from N-1, all on
-        that digest;
+    6. Trivy (on the local build);
+    7. push **untagged, by digest** to GHCR;
+    8. gate on that digest: `docker run` smoke test, Trivy, kind-based Helm install and
+       upgrade test from N-1;
+    9. Syft SBOM of each platform manifest;
+    10. sign (cosign keyless, `--recursive`) and attest (build provenance on the index, an
+        SBOM per platform digest), by digest;
     11. only then apply the tag. Nothing user-visible is tagged before its gates pass.
   - CodeQL on the public repo.
 - **Branching: trunk-based.** `main` is always releasable; work happens on short-lived PR
@@ -110,6 +124,40 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   `https://github.com/joaoheytor/PostelMD/.github/workflows/release.yaml@refs/tags/vX.Y.Z` (exact regexp in `docs/ci-cd.md` §4) with the
   issuer `https://token.actions.githubusercontent.com`. The same applies to binaries (cosign
   blob signatures plus checksums) and the OCI Helm chart.
+
+  **Signatures and attestations at both registries** (spike #31; `docs/ci-cd.md` §4,
+  evidence and user commands in `docs/operations/verify-images.md`):
+  - **Provenance and SBOMs are attested once, by the builder.** `prerelease.yaml` attests
+    them with `actions/attest-build-provenance` / `actions/attest` and `push-to-registry`:
+    build provenance on the index digest, a Syft SPDX SBOM on **each platform digest**. They
+    go to GHCR and to GitHub's attestation API.
+  - **`release.yaml` builds nothing and never creates build provenance.** It copies the RC's
+    Sigstore bundles to Docker Hub **verbatim**: the referrers of the index and of every
+    platform digest, filtered by `artifactType`, and only those whose bundle verifies
+    against the exact RC identity.
+  - **The release signature is made at each address**: `cosign sign --recursive` on
+    `ghcr.io/…@<digest>`, then on `docker.io/…@<digest>` after the copy.
+  - **The gate pins the exact RC.** The RC digest comes from the RC's GitHub pre-release
+    record, not the mutable tag. It is checked against the identity
+    `…/prerelease.yaml@refs/tags/vX.Y.Z-rc.N` and the tagged commit's workflow SHA. Both
+    exact addresses are verified before any stable tag moves; `X.Y` moves only if `X.Y.Z`
+    is the highest `X.Y.*`.
+  - **GHCR referrer writes are serialized.** GHCR uses the OCI referrers tag schema, so the
+    `candidate`, `prerelease` and `release` publish jobs share the concurrency group
+    `ghcr-referrers`.
+  - **Recovery of a promotion: an idempotent full re-run**, in the order GHCR → Docker Hub →
+    GitHub Release. The registries themselves are the record; no intent file is needed.
+    Every step is safe to repeat (same digest, verbatim bundles, an extra signature is
+    harmless), and a re-run redoes every step instead of inferring progress from one signal.
+    CLAUDE.md rule 14's durable-intent requirement covers application mutations, not CI.
+    Rollback re-points `X.Y` to the previous release's digest and ships a new patch.
+  - **Rejected:**
+    - `cosign copy`: it drops v3 bundles and carries only the legacy `.sig`/`.att` tags.
+    - Attesting again in `release.yaml`: the provenance would name a workflow that didn't
+      build the image.
+    - Legacy tag-based signatures for Docker Hub: Docker Hub serves the OCI referrers API.
+    - GitHub's attestation API alone: offline and admission-controller verification read
+      the registry.
 - **Upgrades and rollback:**
   - SQLite migrations are forward-only and numbered, and each one runs **in a single
     transaction**. The schema version is checked on startup. An older binary refuses to start
@@ -169,7 +217,8 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 - **Consuming in the homelab:**
   - pin by digest;
   - Harbor proxy-cache of Docker Hub (or GHCR);
-  - optionally a Kyverno policy that admits only signed images.
+  - optionally a Kyverno policy that admits only images with both the release signature
+    (`release.yaml` identity) and build provenance (`prerelease.yaml` identity).
 
 ## Consequences
 - Positive: provenance end to end; low maintenance burden; safe use of the homelab.
