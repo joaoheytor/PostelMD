@@ -30,7 +30,7 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0006](0006-authorization-and-confinement.md) | Vaults, memberships, confinement and reserved paths | Proposed |
 | [0007](0007-markdown-and-rendering.md) | Markdown dialect and client-side rendering | Proposed |
 | [0008](0008-plugin-architecture.md) | Plugin architecture: two trust tiers, per-plugin isolation, versioned API | Proposed |
-| [0009](0009-zero-infra-distribution.md) | Zero-infra contract: one image, one volume, secure first run | Proposed |
+| [0009](0009-zero-infra-distribution.md) | Zero-infra contract: one image, one volume, secure first run | Accepted |
 | [0010](0010-git-vaults-and-secret-detection.md) | Git-backed vaults and secret detection in core | Proposed |
 | [0011](0011-no-executable-blocks.md) | No server-side execution of note content | Proposed |
 | [0012](0012-license-apache-2.md) | License: Apache-2.0 with DCO | Accepted |

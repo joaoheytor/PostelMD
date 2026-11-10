@@ -25,7 +25,8 @@ docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
 docker logs postelmd   # prints a one-time setup URL
 ```
 
-(Planned; see [ADR-0009](docs/adr/0009-zero-infra-distribution.md).)
+(See [ADR-0009](docs/adr/0009-zero-infra-distribution.md). The image isn't published yet: until the
+first release, build it with `make image`, which tags it `postelmd:dev`, and use that name above.)
 
 ## Documentation
 

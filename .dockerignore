@@ -1,0 +1,5 @@
+# The image only needs the cross-compiled binaries (see Dockerfile).
+*
+!bin/linux-amd64/postelmd
+!bin/linux-arm64/postelmd
+!bin/empty/

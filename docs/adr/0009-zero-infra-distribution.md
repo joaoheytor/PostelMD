@@ -1,6 +1,6 @@
 # ADR-0009: Zero-infra contract: one image, one volume, secure first run
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-09 (revised after design review)
 - **MVP scope (ADR-0020):** one vault at `/data/vaults/notes`; vault filesystems without `RENAME_NOREPLACE` are refused, so the Docker Desktop Windows-path vault instructions wait for ADR-0006's fallbacks; headless bootstrap, `/metrics` and `admin.sock` come later.
 

@@ -23,3 +23,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - A note's history in the web app: the commits that changed it, what changed since each one
   (a line diff against the current text) or its whole text, and "Restore this version",
   which saves the note first and replaces it only if it hasn't changed in the meantime.
+- A container image (`make image`): distroless, non-root, about 24 MB, for amd64 and arm64,
+  with a health check and `/data` owned by the image's user so a named volume needs no
+  `--user`. Not published yet.
