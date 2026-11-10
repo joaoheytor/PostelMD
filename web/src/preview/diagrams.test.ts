@@ -112,10 +112,16 @@ describe("Diagrams", () => {
     for (let i = 0; i < 40; i++) await d.render(`graph TD; a-->b${i}`);
     await Promise.resolve();
     expect(live.has(first.url)).toBe(true);
-    shown.delete(first.url); // replaced on screen: the next eviction revokes it
-    await d.render("graph TD; one more");
-    await Promise.resolve();
+    shown.delete(first.url); // replaced on screen: the pane's next sweep revokes it
+    d.sweep();
     expect(live.has(first.url)).toBe(false);
     d.dispose();
+  });
+
+  it("renders nothing once disposed", async () => {
+    const d = new Diagrams();
+    d.dispose();
+    expect(await d.render("graph TD; a-->b")).toEqual({ ok: false, error: "closed" });
+    expect(frames).toHaveLength(0);
   });
 });

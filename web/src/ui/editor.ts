@@ -60,7 +60,7 @@ export class NoteEditor extends LightElement {
   declare previewing: boolean;
 
   private readonly ws = new StoreController(this, () => this.workspace?.state);
-  private readonly secrets = new StoreController(this, () => this.workspace?.secrets);
+  private readonly secrets = new StoreController(this, () => this.workspace?.secrets.warning);
   private editor: Editor | undefined;
   private mounted: { note: OpenNote; host: Element } | undefined;
   private docSub: Disposable | undefined;
@@ -194,7 +194,7 @@ export class NoteEditor extends LightElement {
         ${w.findings.map((f) => html`<li>${f.rule} on line ${f.line} (<code>${f.hint}</code>)</li>`)}
       </ul>
       <p>It is saved in the note, and a commit would keep it in the git history. Remove it, and rotate it if it is real.</p>
-      <button type="button" @click=${() => this.workspace.dismissSecrets()}>Dismiss</button>
+      <button type="button" @click=${() => this.workspace.secrets.dismiss()}>Dismiss</button>
     </section>`;
   }
 
