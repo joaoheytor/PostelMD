@@ -83,8 +83,8 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       - **power loss:** every save, structural and git crash point above also runs under the
         power-loss model (unsynced data and directory entries dropped; ADR-0003 §5);
       - **release:** an `-rc` tag never publishes to Docker Hub or moves an alias; the
-        release signature, build provenance and SBOM verify from both registries with the
-        commands in ci-cd §4; a re-run of a failed `release.yaml` succeeds without manual
+        release signature, build provenance and per-platform SBOMs verify from both
+        registries with the commands in `docs/operations/verify-images.md`; a re-run of a failed `release.yaml` succeeds without manual
         cleanup; the `required` check fails when a needed job is cancelled or skipped
         unexpectedly.
 
