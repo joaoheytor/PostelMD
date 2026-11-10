@@ -30,3 +30,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   lists, strikethrough, autolinks) and YAML front matter, rendered off the main thread and
   sanitized before it reaches the page. A relative link to a note opens it. The web app's CSP
   now requires Trusted Types and allows no inline script or style.
+- The preview scrolls with the editor, both ways, and code blocks have a "Copy code"
+  button. Where the browser denies clipboard access (plain http off localhost), the button
+  selects the code instead.
