@@ -8,6 +8,7 @@ import { type Editor, mountEditor } from "../editor/editor";
 import { Preview } from "../preview/pane";
 import { ScrollSync } from "../preview/sync";
 import { LightElement, listen, openNote, StoreController } from "./base";
+import "./drafts";
 import "./history";
 import "./move";
 
@@ -75,7 +76,10 @@ export class NoteEditor extends LightElement {
     );
     l.add(
       listen(document, "visibilitychange", () => {
-        if (document.visibilityState === "hidden") void this.ws.value?.open?.doc.flush();
+        const doc = this.ws.value?.open?.doc;
+        if (document.visibilityState !== "hidden" || !doc) return;
+        void doc.writeDraft(); // first: the page may be gone before the save answers
+        void doc.flush();
       }),
     );
     l.add(
@@ -212,6 +216,7 @@ export class NoteEditor extends LightElement {
             <button type="button" @click=${() => this.takeTheirs(note)}>Use the other version</button>
           </section>`
         : nothing}
+      <pm-draft-banner .workspace=${this.workspace} .put=${(t: string) => this.editor?.replace(t)}></pm-draft-banner>
       ${st.status === "gone"
         ? html`<section class="pm-banner" role="alert" aria-labelledby="pm-gone-title">
             <h3 id="pm-gone-title">This note was deleted or moved outside this editor</h3>

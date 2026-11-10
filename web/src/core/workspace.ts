@@ -1,5 +1,6 @@
 import * as api from "./api";
 import { DocumentSession } from "./document";
+import type { Draft, Drafts } from "./drafts";
 import { Store } from "./store";
 import { join, rebase, Tree } from "./tree";
 
@@ -28,6 +29,21 @@ export class Workspace {
   /** The editor registers how to read its text, so saves read it only when they start. */
   reader: (() => string) | undefined;
 
+  /** Local drafts (ADR-0003 §7); set once the tab's esid is claimed, before any note opens. */
+  drafts: Drafts | undefined;
+  /** Every draft not of this tab, newest first: what the "Unsaved drafts" list shows. */
+  readonly offered = new Store<Draft[]>([]);
+  /**
+   * The open note's drafts from other tabs or earlier loads, for the user to restore or
+   * discard. A store of its own: changing it must never replace the open note, which would
+   * remount the editor.
+   */
+  readonly noteDrafts = new Store<Draft[]>([]);
+
+  useDrafts(drafts: Drafts): void {
+    this.drafts = drafts;
+  }
+
   /**
    * Saves the open note now. False means some edits couldn't be saved (a conflict, a
    * deleted note, an error): the UI asks before leaving them.
@@ -43,10 +59,13 @@ export class Workspace {
   async open(path: string): Promise<void> {
     this.state.value.open?.doc.dispose();
     this.state.set({});
+    this.noteDrafts.set([]);
     try {
       const note = await api.readNote(path);
       const read = () => this.reader?.() ?? note.content;
-      const doc = new DocumentSession(path, note.etag, { save: api.saveNote, read });
+      const draft = this.drafts?.forNote(path);
+      const doc = new DocumentSession(path, note.etag, { save: api.saveNote, read, ...(draft && { draft }) });
+      this.noteDrafts.set((await this.drafts?.offered(path)) ?? []);
       this.state.set({ open: { doc, initial: note.content } });
     } catch (err) {
       this.state.set({ error: `Couldn't open ${path}: ${message(err)}` });
@@ -163,7 +182,7 @@ export class Workspace {
   async saveAsNew(): Promise<void> {
     const open = this.state.value.open;
     if (!open) return;
-    const path = open.doc.path.replace(/(\.[a-z]+)?$/i, (ext) => `-recovered${ext || ".md"}`);
+    const path = recoveredPath(open.doc.path);
     try {
       await api.createNote(path, this.reader?.() ?? open.initial);
     } catch (err) {
@@ -171,12 +190,59 @@ export class Workspace {
       return;
     }
     await this.tree.changed(path);
-    await this.open(path);
+    await this.open(path); // closing the old note writes its draft, which goes next
+    this.drafts?.forNote(open.doc.path).drop();
+  }
+
+  /** Reads the drafts to offer again. */
+  async refreshOffered(): Promise<void> {
+    this.offered.set((await this.drafts?.offered()) ?? []);
+  }
+
+  /**
+   * Puts a draft of the open note in the editor (put replaces its text) as an edit, which then
+   * saves through the normal path (If-Match). The old draft is removed only once this tab's
+   * own draft holds the text.
+   */
+  async recoverDraft(d: Draft, put: (text: string) => void): Promise<void> {
+    const open = this.state.value.open;
+    if (!open || open.doc.path !== d.path) return;
+    put(d.text);
+    open.doc.edit();
+    await open.doc.writeDraft();
+    await this.discardDraft(d);
+  }
+
+  /** Deletes a draft the user chose to discard. */
+  async discardDraft(d: Draft): Promise<void> {
+    await this.drafts?.discard(d);
+    await this.refreshOffered();
+    this.noteDrafts.update((all) => all.filter((x) => x.esid !== d.esid || x.path !== d.path));
+  }
+
+  /** Saves a draft as a new note ("x.md" → "x-recovered.md"); the draft goes only once saved. */
+  async saveDraftAsNew(d: Draft): Promise<void> {
+    const path = recoveredPath(d.path);
+    try {
+      await api.createNote(path, d.text);
+    } catch (err) {
+      const why = err instanceof api.ApiError && err.status === 409 ? `${path} already exists` : message(err);
+      this.state.update((s) => ({ ...s, error: `Couldn't save the draft as ${path}: ${why}` }));
+      return;
+    }
+    await this.drafts?.discard(d);
+    await this.refreshOffered();
+    await this.tree.changed(path);
+    if (await this.saveOpen()) await this.open(path);
   }
 
   dismissError(): void {
     this.state.update((s) => ({ ...s, error: undefined }));
   }
+}
+
+function recoveredPath(path: string): string {
+  return path.replace(/(\.[a-z]+)?$/i, (ext) => `-recovered${ext || ".md"}`);
 }
 
 export function message(err: unknown): string {

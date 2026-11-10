@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import type { App } from "../core/app";
 import { LightElement, StoreController } from "./base";
 import "./commit";
+import "./drafts";
 import "./editor";
 import "./login";
 import "./setup";
@@ -9,21 +10,26 @@ import "./tree";
 
 /** The workspace: the file tree beside the open note. */
 export class WorkspaceView extends LightElement {
-  static override properties = { app: { attribute: false }, committing: { state: true } };
+  static override properties = { app: { attribute: false }, committing: { state: true }, listingDrafts: { state: true } };
   declare app: App;
   /** The commit dialog is open. */
   declare committing: boolean;
+  /** The unsaved-drafts dialog is open. */
+  declare listingDrafts: boolean;
 
   private readonly ws = new StoreController(this, () => this.app?.workspace.state);
+  private readonly offered = new StoreController(this, () => this.app?.workspace.offered);
 
   constructor() {
     super();
     this.committing = false;
+    this.listingDrafts = false;
   }
 
   protected override firstUpdated(): void {
     const w = this.app.workspace;
     void w.tree.load("");
+    void w.refreshOffered();
     // A reload keeps the open note: its path is in the URL.
     const m = /^\/notes\/(.+)$/.exec(location.pathname);
     if (m?.[1]) void w.open(m[1].split("/").map(decodeURIComponent).join("/"));
@@ -42,6 +48,9 @@ export class WorkspaceView extends LightElement {
     return html`
       <header class="pm-top">
         <span class="pm-top-name">PostelMD</span>
+        ${this.offered.value?.length
+          ? html`<button type="button" @click=${() => (this.listingDrafts = true)}>Unsaved drafts (${this.offered.value.length})</button>`
+          : nothing}
         <button type="button" @click=${() => (this.committing = true)}>Commit…</button>
         <button type="button" @click=${() => this.app.logout()}>Log out</button>
       </header>
@@ -57,6 +66,7 @@ export class WorkspaceView extends LightElement {
       ${this.committing
         ? html`<pm-commit .git=${this.app.git} .onClose=${() => (this.committing = false)}></pm-commit>`
         : nothing}
+      ${this.listingDrafts ? html`<pm-drafts .workspace=${w} .onClose=${() => (this.listingDrafts = false)}></pm-drafts>` : nothing}
     `;
   }
 }

@@ -108,6 +108,23 @@ side effect):
   retries, and the draft keeps the edit. Startup removes temp files before HTTP starts.
 - **Client:** the save queue with debounced autosave, the per-edit `esid`/generation rule (a
   stale response never clears newer edits), and IndexedDB drafts all stay (ADR-0003 §7).
+  In the MVP the drafts are simplified as follows:
+  - **Key:** `esid` + path. One origin is one instance, one user and one vault, so the origin
+    is the namespace ADR-0003 keys by `instanceID/userID/vaultID`, and paths stand in for file
+    IDs.
+  - **`esid`:** 128 random bits from `crypto.getRandomValues`, which, unlike `randomUUID` and
+    Web Locks, also exists on plain http off localhost. There, without Web Locks, every load
+    mints a new `esid`, as ADR-0003 §7 requires.
+  - **A reload** keeps the `esid` but restarts edit generations, so drafts already under the
+    tab's `esid` are moved to a fresh one at load, before any write, and are offered like a
+    closed tab's.
+  - **Timing:** a draft is written 300 ms after the last edit, never more than 2 s after the
+    first edit not yet in one, and at once when the tab is hidden or the note closes.
+  - **Without IndexedDB** (some private modes), drafts live in memory: they survive a closed
+    note, not a closed tab.
+  - **Not in the first drafts change:** one-tab-at-a-time editing over `BroadcastChannel`
+    (until then, two tabs on one note still get `412` and the conflict view), and ADR-0018's
+    logout prompt and shared-computer mode.
 - **External writers:** no watcher yet. A change made outside PostelMD shows when the note is
   reopened, and a save over it gets `412` because the hash moved. The uncoordinated race in
   ADR-0003 §1 is documented as before.
