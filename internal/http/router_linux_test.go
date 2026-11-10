@@ -92,7 +92,7 @@ func TestPreSetupRouting(t *testing.T) {
 	srv, _ := newServer(t, false)
 	srv.Client().CheckRedirect = func(*stdhttp.Request, []*stdhttp.Request) error { return stdhttp.ErrUseLastResponse }
 	for path, want := range map[string]int{
-		"/healthz": 204, "/readyz": 204, "/api/v1/notes/a.md": 503, "/api/v1/session": 503,
+		"/healthz": 204, "/readyz": 204, "/api/v1/notes/a.md": 503, "/api/v1/files": 503, "/api/v1/session": 503,
 		"/metrics": 404, "/": 303, "/some/page": 303,
 	} {
 		resp, _ := do(t, srv, call{method: "GET", path: path})
@@ -116,6 +116,9 @@ func TestSessionsGuardTheNotes(t *testing.T) {
 
 	if resp, _ := do(t, srv, call{method: "GET", path: "/api/v1/notes/a.md"}); resp.StatusCode != 401 {
 		t.Fatalf("notes without a session = %d, want 401", resp.StatusCode)
+	}
+	if resp, _ := do(t, srv, call{method: "GET", path: "/api/v1/files"}); resp.StatusCode != 401 {
+		t.Fatalf("the file list without a session = %d, want 401", resp.StatusCode)
 	}
 	forged := &stdhttp.Cookie{Name: cookieName, Value: "AQ.AQ", HttpOnly: true, Secure: true, SameSite: stdhttp.SameSiteLaxMode}
 	if resp, _ := do(t, srv, call{method: "GET", path: "/api/v1/notes/a.md", header: withCookie(forged, nil)}); resp.StatusCode != 401 {

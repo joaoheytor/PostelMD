@@ -186,3 +186,11 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 .pm-draft-list { list-style: none; margin: 0 0 8px; padding: 0; }
 .pm-draft-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
 .pm-draft-list li > span { flex: 1 1 12rem; }
+
+/* The finder (ADR-0020). */
+.pm-finder input { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; }
+.pm-finder ul { list-style: none; margin: 8px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
+.pm-finder li { padding: 6px 10px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.pm-finder li[aria-selected="true"] { background: var(--selection); }
+.pm-finder mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
+.pm-finder-hint { margin: 8px 0 0; font-size: 0.875rem; }

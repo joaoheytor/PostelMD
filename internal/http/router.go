@@ -26,8 +26,9 @@ func NewRouter(a Auth, v Vault, ui fs.FS, log *slog.Logger) stdhttp.Handler {
 	private.Handle("/api/v1/notes/", notesAPI)
 	private.Handle("/api/v1/folders/", notesAPI)
 	private.Handle("/api/v1/move", notesAPI)
+	private.Handle("/api/v1/files", notesAPI)
 	(&GitAPI{git: v, author: a, notes: &NotesAPI{notes: v, log: log}, log: log}).register(private)
-	for _, prefix := range []string{"/api/v1/notes/", "/api/v1/folders/", "/api/v1/move", "/api/v1/git/",
+	for _, prefix := range []string{"/api/v1/notes/", "/api/v1/folders/", "/api/v1/move", "/api/v1/files", "/api/v1/git/",
 		"/api/v1/history/", "/api/v1/versions/", "/api/v1/restore"} {
 		mux.Handle(prefix, RequireSession(a, private))
 	}

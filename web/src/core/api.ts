@@ -107,6 +107,12 @@ export async function listFolder(path: string): Promise<Entry[]> {
   return ((await resp.json()) as { entries: Entry[] }).entries;
 }
 
+/** Every file's path, for the finder; truncated when the vault holds more than the server lists. */
+export async function listFiles(): Promise<{ files: string[]; truncated: boolean }> {
+  const resp = await ok(await request("GET", "/api/v1/files"));
+  return (await resp.json()) as { files: string[]; truncated: boolean };
+}
+
 export interface Note {
   content: string;
   etag: string;

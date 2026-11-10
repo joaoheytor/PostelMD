@@ -13,6 +13,7 @@ import (
 	"fmt"
 	iofs "io/fs"
 	"path"
+	"sort"
 	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
@@ -228,6 +229,27 @@ func (v *Vault) List(p string) ([]Entry, error) {
 		out = append(out, Entry{Name: d.Name(), Kind: kind})
 	}
 	return out, nil
+}
+
+// errEnough stops a walk once Files has max paths.
+var errEnough = errors.New("enough files")
+
+// Files returns every file's path in the vault, sorted, for the finder: at most max, and
+// truncated is true when there were more. Reserved paths and symlinks are never listed (walk).
+func (v *Vault) Files(max int) (files []string, truncated bool, err error) {
+	err = v.walk(".", func(p string, _ int64) error {
+		if len(files) == max {
+			truncated = true
+			return errEnough
+		}
+		files = append(files, p)
+		return nil
+	})
+	if err != nil && !errors.Is(err, errEnough) {
+		return nil, false, err
+	}
+	sort.Strings(files)
+	return files, truncated, nil
 }
 
 // Read returns a note and its revision. It takes no lock: a note is only ever replaced by

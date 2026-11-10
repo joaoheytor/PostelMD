@@ -147,6 +147,18 @@ func TestListShape(t *testing.T) {
 	}
 }
 
+func TestFilesList(t *testing.T) {
+	srv, _ := newAPI(t)
+	resp, body := do(t, srv, call{method: "GET", path: "/api/v1/files"})
+	var got struct {
+		Files     []string
+		Truncated bool
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil || resp.StatusCode != 200 || len(got.Files) != 1 || got.Files[0] != "notes/a.md" || got.Truncated {
+		t.Fatalf("GET /api/v1/files = %d %s (%v)", resp.StatusCode, body, err)
+	}
+}
+
 func TestOneLine(t *testing.T) {
 	if got := oneLine("open a\nfake=entry\r"); got != `open a\nfake=entry\r` {
 		t.Fatalf("oneLine = %q", got)

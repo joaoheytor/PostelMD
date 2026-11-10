@@ -44,3 +44,5 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - A warning when a note looks like it contains a secret (cloud and SaaS tokens, private
   keys, JWTs, kubeconfig client keys, passwords in URLs): at once on paste, and on every save.
   It names the kind of secret and the line, never the secret itself, and doesn't block saving.
+- A fuzzy finder: press `Ctrl+P` (or **Find a note**), type part of a note's path, and press
+  Enter to open it. Matches in the file name and at word starts rank first.
