@@ -3,9 +3,9 @@ package http
 import (
 	"context"
 	"errors"
-	"fmt"
 	iofs "io/fs"
 	"log/slog"
+	"reflect"
 	"syscall"
 )
 
@@ -59,11 +59,8 @@ func pathless(err error) slog.Attr {
 // *json.SyntaxError), so an operator can tell failures apart. A type name comes from code,
 // never from user text.
 func innermostType(err error) string {
-	for {
-		next := errors.Unwrap(err)
-		if next == nil {
-			return fmt.Sprintf("%T", err)
-		}
+	for next := errors.Unwrap(err); next != nil; next = errors.Unwrap(err) {
 		err = next
 	}
+	return reflect.TypeOf(err).String()
 }
