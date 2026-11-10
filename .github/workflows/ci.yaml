@@ -194,6 +194,38 @@ jobs:
       - run: make image-smoke
       - run: make image-scan
 
+  image-arm64:
+    # The `image` job only builds arm64; this one runs it: the same smoke test and Trivy gate
+    # on GitHub's hosted arm64 runner (roadmap v0.1: "runs on amd64 and arm64").
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      - run: make image
+      - name: Check the image is arm64
+        run: |
+          arch=$(docker image inspect -f '{{.Architecture}}' postelmd:dev)
+          [ "$arch" = arm64 ] || { echo "::error::postelmd:dev is $arch, not arm64"; exit 1; }
+      - run: make image-smoke
+      - run: make image-scan
+
   e2e:
     # Playwright smoke tests against the built binary (role and label locators, axe scan).
     runs-on: ubuntu-24.04
@@ -230,7 +262,7 @@ jobs:
   required:
     # Runs even when a dependency fails or is cancelled, so the check can't be bypassed.
     if: always()
-    needs: [pr-title, changelog, lint, test-go, test-web, vuln, image, e2e]
+    needs: [pr-title, changelog, lint, test-go, test-web, vuln, image, image-arm64, e2e]
     runs-on: ubuntu-24.04
     permissions: {}
     steps:

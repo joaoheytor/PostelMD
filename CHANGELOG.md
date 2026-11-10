@@ -49,6 +49,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - Note templates: **New note** can start from a runbook, postmortem, ADR or on-call handoff.
   The note's name and today's date are filled in; the form asks for the rest, and anything left
   empty stays as a `{{placeholder}}` to fill in later.
+- An optional settings file, `.postelmd/config.yaml` in the data directory. Flags and
+  `POSTELMD_*` environment variables still win over it. An unknown key stops the server with
+  its name, so a typo is never silently ignored.
 
 ### Fixed
 - An idle server no longer keeps about 65 MB after a login: the memory the password hash
