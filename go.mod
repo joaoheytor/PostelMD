@@ -9,6 +9,7 @@ tool golang.org/x/vuln/cmd/govulncheck
 require (
 	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
+	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
 )
 
@@ -27,7 +28,6 @@ require (
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
@@ -38,6 +38,6 @@ require (
 )
 
 ignore (
-	./web/node_modules
 	./test/perf/editor/node_modules
+	./web/node_modules
 )
