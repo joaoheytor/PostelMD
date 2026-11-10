@@ -1,0 +1,165 @@
+//go:build linux
+
+package vault
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func paths(cs []Change) []string {
+	out := []string{}
+	for _, c := range cs {
+		out = append(out, c.Path)
+	}
+	return out
+}
+
+// ignoredTree is a vault whose .gitignore files ignore everything but the paths in
+// keptPaths, following git's rules: patterns at any depth, nested files scoped to their
+// directory, negation and directory-only patterns.
+var ignoredTree = map[string]string{
+	".gitignore":     ".env\nsecrets/\n*.log\n!keep.log\n# a comment\n\n",
+	".env":           "TOKEN=x",
+	"secrets/k.md":   "k",
+	"x.log":          "log",
+	"deep/z.log":     "log",
+	"keep.log":       "kept",
+	"secrets.md":     "not a directory",
+	"sub/.gitignore": "local.md\r\n",
+	"sub/local.md":   "ignored here",
+	"sub/n.md":       "n",
+	"local.md":       "outside sub's scope",
+}
+
+var keptPaths = []string{".gitignore", "keep.log", "local.md", "notes/a.md", "secrets.md", "sub/.gitignore", "sub/n.md"}
+
+// TestCommitSkipsIgnoredFiles: Status and the initial import leave out what .gitignore and
+// .git/info/exclude ignore, in an adopted repository and in a plain folder alike, and the
+// count ImportInitial reports is what it committed. The host's git agrees afterwards.
+func TestCommitSkipsIgnoredFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		adopted bool
+		want    []string
+	}{
+		{"adopted repository", true, keptPaths},
+		{"plain folder", false, keptPaths},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, dir := newVault(t)
+			writeFiles(t, dir, ignoredTree)
+			if tc.adopted {
+				gitCLI(t, dir, "init", "-q", "-b", "main")
+				writeFiles(t, dir, map[string]string{".git/info/exclude": "kube.yaml\n", "kube.yaml": "k"})
+			}
+			created, err := v.EnableGit()
+			must(t, err)
+			if created == tc.adopted {
+				t.Fatalf("EnableGit created = %v", created)
+			}
+			if got := paths(changes(t, v)); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("status = %v, want %v", got, tc.want)
+			}
+			if n, err := v.PendingImport(ctx); err != nil || n != len(tc.want) {
+				t.Fatalf("PendingImport = %d, %v", n, err)
+			}
+			n, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid")
+			must(t, err)
+			committed := strings.Split(gitCLI(t, dir, "ls-tree", "-r", "--name-only", "HEAD"), "\n")
+			if !reflect.DeepEqual(committed, tc.want) || n != len(committed) {
+				t.Fatalf("ImportInitial = %d, committed %v, want %v", n, committed, tc.want)
+			}
+			if got := gitCLI(t, dir, "status", "--porcelain", "--untracked-files=all"); got != "" {
+				t.Fatalf("the host's git sees changes PostelMD didn't commit: %q", got)
+			}
+		})
+	}
+}
+
+// TestIgnoredButTrackedFilesStayTracked: a pattern doesn't untrack a committed file (git's
+// rule), so its modifications and its deletion are still committed, also inside an ignored
+// directory; new files next to it stay out.
+func TestIgnoredButTrackedFilesStayTracked(t *testing.T) {
+	v, dir := newVault(t)
+	writeFiles(t, dir, map[string]string{"t.log": "1", "dir/x.md": "1", "gone.log": "1"})
+	_, err := v.EnableGit()
+	must(t, err)
+	_, err = v.ImportInitial(ctx, "Ada", "ada@example.invalid")
+	must(t, err)
+
+	writeFiles(t, dir, map[string]string{
+		".gitignore": "*.log\ndir/\n", "t.log": "2", "dir/x.md": "2", "dir/new.md": "new", "new.log": "new",
+	})
+	must(t, os.Remove(filepath.Join(dir, "gone.log")))
+	want := []Change{{".gitignore", Added}, {"dir/x.md", Modified}, {"gone.log", Deleted}, {"t.log", Modified}}
+	if got := changes(t, v); !reflect.DeepEqual(got, want) {
+		t.Fatalf("status = %v, want %v", got, want)
+	}
+	_, err = v.Commit(ctx, "edit ignored but tracked files", "Ada", "ada@example.invalid")
+	must(t, err)
+	if got := gitCLI(t, dir, "ls-tree", "-r", "--name-only", "HEAD"); got != ".gitignore\ndir/x.md\nnotes/a.md\nt.log" {
+		t.Fatalf("committed files = %q", got)
+	}
+	if got := gitCLI(t, dir, "show", "HEAD:t.log") + gitCLI(t, dir, "show", "HEAD:dir/x.md"); got != "22" {
+		t.Fatalf("the tracked files' new content wasn't committed: %q", got)
+	}
+}
+
+// TestIgnoredDirectoryIsNotWalked: an ignored directory such as node_modules/ is never
+// listed. Its subdirectory can't be read, so walking into it fails the status.
+func TestIgnoredDirectoryIsNotWalked(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads unreadable directories")
+	}
+	v, dir := newVault(t)
+	files := map[string]string{".gitignore": "node_modules/\n"}
+	for i := range 200 {
+		files["node_modules/pkg/f"+strings.Repeat("x", i%7)+string(rune('a'+i%26))+".js"] = "x"
+	}
+	writeFiles(t, dir, files)
+	locked := filepath.Join(dir, "node_modules", "locked")
+	must(t, os.Mkdir(locked, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) }) //nolint:gosec // removing a directory needs its x bit
+	_, err := v.EnableGit()
+	must(t, err)
+	if got := paths(changes(t, v)); !reflect.DeepEqual(got, []string{".gitignore", "notes/a.md"}) {
+		t.Fatalf("status = %v", got)
+	}
+}
+
+// TestAdoptedRepositoryExcludesTheTrash: adopting a repository adds PostelMD's reserved
+// folders to .git/info/exclude once, keeping the user's lines, so a host `git add -A`
+// never commits the trash.
+func TestAdoptedRepositoryExcludesTheTrash(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"a.md": "A", "b.md": "B"})
+	gitCLI(t, dir, "init", "-q", "-b", "main")
+	writeFiles(t, dir, map[string]string{".git/info/exclude": "# mine\n*.secret"})
+	for range 2 { // a restart adopts it again
+		v, err := Open(dir)
+		must(t, err)
+		_, err = v.EnableGit()
+		must(t, err)
+		_ = v.Close()
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	must(t, err)
+	if want := "# mine\n*.secret\n/.postelmd-trash/\n/.postelmd-tmp/\n"; string(b) != want {
+		t.Fatalf("info/exclude = %q, want %q", b, want)
+	}
+	v, err := Open(dir)
+	must(t, err)
+	defer func() { _ = v.Close() }()
+	_, err = v.EnableGit()
+	must(t, err)
+	_, err = v.Delete(ctx, "b.md")
+	must(t, err)
+	gitCLI(t, dir, "add", "-A")
+	if got := gitCLI(t, dir, "diff", "--cached", "--name-only"); got != "a.md" {
+		t.Fatalf("git add -A staged %q, want only a.md", got)
+	}
+}
