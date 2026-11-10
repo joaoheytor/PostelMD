@@ -12,6 +12,13 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/store/git"
 )
 
+// Git types the API returns, so callers above the vault never import the git store.
+type (
+	Hash     = git.Hash
+	Version  = git.Version
+	LockInfo = git.LockInfo
+)
+
 // MaxCommitFile is the largest file a commit includes; larger ones are listed as skipped.
 const MaxCommitFile = 50 << 20
 
@@ -23,7 +30,12 @@ var (
 	ErrGitLocked = errors.New("vault: a git lock is blocking commits")
 	// ErrGitMoved: something outside PostelMD committed meanwhile; retry.
 	ErrGitMoved = errors.New("vault: the branch moved during the commit, retry")
+	// ErrDetached: the repository's HEAD isn't on a branch; the user fixes it on the host.
+	ErrDetached = errors.New("vault: git HEAD is detached; check out a branch on the host")
 )
+
+// InitialImportMessage is the message of the commit setup makes for an adopted folder.
+const InitialImportMessage = "Initial import"
 
 // ChangeKind of an uncommitted change.
 type ChangeKind string
@@ -85,6 +97,9 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 		return nil, git.Hash{}, nil, ErrNoGit
 	}
 	branch, head, err := v.git.Head()
+	if errors.Is(err, git.ErrDetached) {
+		return nil, head, nil, fmt.Errorf("%w: %w", ErrDetached, err)
+	}
 	if err != nil {
 		return nil, head, nil, err
 	}
@@ -217,6 +232,43 @@ func lockErr(err error) error {
 	return err
 }
 
+// PendingImport returns how many files the initial import would commit: the uncommitted
+// files of a repository without commits, or 0 once it has one (ADR-0020: setup shows the
+// count before it commits them).
+func (v *Vault) PendingImport(ctx context.Context) (int, error) {
+	unlock, err := v.lock(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+	st, head, _, err := v.status(false)
+	if err != nil || !head.IsZero() {
+		return 0, err
+	}
+	return len(st.Changes), nil
+}
+
+// ImportInitial commits every file of a repository without commits as "Initial import"
+// and returns how many it committed; a repository with commits is left alone (0).
+func (v *Vault) ImportInitial(ctx context.Context, name, email string) (int, error) {
+	n, err := v.PendingImport(ctx)
+	if err != nil || n == 0 {
+		return 0, err
+	}
+	if _, err := v.Commit(ctx, InitialImportMessage, name, email); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// ParseCommit parses a full hex commit ID; anything else is ErrNotFound.
+func ParseCommit(s string) (git.Hash, error) {
+	if len(s) != 40 || strings.Trim(strings.ToLower(s), "0123456789abcdef") != "" {
+		return git.Hash{}, fmt.Errorf("%w: commit %q", ErrNotFound, s)
+	}
+	return git.NewHash(strings.ToLower(s)), nil
+}
+
 // History lists the commits that changed note p, newest first.
 func (v *Vault) History(p string, limit int) ([]git.Version, error) {
 	if err := checkPath(p); err != nil {
@@ -232,15 +284,19 @@ func (v *Vault) History(p string, limit int) ([]git.Version, error) {
 	return v.git.Log(head, p, limit)
 }
 
-// Version returns note p's content in commit.
-func (v *Vault) Version(p string, commit git.Hash) ([]byte, error) {
+// Version returns note p's content in commit (a full hex ID).
+func (v *Vault) Version(p, commit string) ([]byte, error) {
 	if err := checkPath(p); err != nil {
 		return nil, err
 	}
 	if v.git == nil {
 		return nil, ErrNoGit
 	}
-	b, err := v.git.File(commit, p, MaxNoteSize)
+	h, err := ParseCommit(commit)
+	if err != nil {
+		return nil, err
+	}
+	b, err := v.git.File(h, p, MaxNoteSize)
 	if errors.Is(err, git.ErrNotInCommit) {
 		return nil, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
@@ -249,7 +305,7 @@ func (v *Vault) Version(p string, commit git.Hash) ([]byte, error) {
 
 // Restore writes note p's content from commit through the save path (ADR-0020): it
 // replaces the note only if it is still at base, and never recreates a deleted note.
-func (v *Vault) Restore(ctx context.Context, p string, commit git.Hash, base Rev) (Rev, error) {
+func (v *Vault) Restore(ctx context.Context, p, commit string, base Rev) (Rev, error) {
 	b, err := v.Version(p, commit)
 	if err != nil {
 		return "", err

@@ -82,7 +82,9 @@ func writeNote(w stdhttp.ResponseWriter, status int, p string, b []byte, rev vau
 	h.Set("Content-Type", ct)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	h.Set("ETag", etag(rev))
+	if rev != "" {
+		h.Set("ETag", etag(rev))
+	}
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_, _ = w.Write(b) //nolint:gosec // G705: user content served as inert data; see the headers above

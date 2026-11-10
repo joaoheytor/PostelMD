@@ -40,6 +40,9 @@ func newServer(t *testing.T, tls bool) (*httptest.Server, *auth.Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = v.Close() })
+	if _, err := v.EnableGit(); err != nil {
+		t.Fatal(err)
+	}
 	h := NewRouter(svc, v, slog.New(slog.DiscardHandler))
 	srv := httptest.NewUnstartedServer(h)
 	if tls {

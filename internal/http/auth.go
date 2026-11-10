@@ -20,6 +20,14 @@ type Auth interface {
 	Check(cookie string) error
 	ChangePassword(ctx context.Context, ip, cookie, current, next string) (string, error)
 	LogoutEverywhere(ctx context.Context, cookie string) error
+	CheckSetupToken(ctx context.Context, token string) error
+	Author() (name, email string)
+}
+
+// Importer makes the first commit when setup adopts a folder (ADR-0020).
+type Importer interface {
+	PendingImport(ctx context.Context) (int, error)
+	ImportInitial(ctx context.Context, name, email string) (int, error)
 }
 
 // Cookie names. Over TLS the __Host- prefix pins the cookie to this host, with Secure and
@@ -31,18 +39,21 @@ const (
 
 // AuthAPI serves:
 //
-//	POST   /api/v1/setup             {token, password, name, email}: first run only
+//	POST   /api/v1/setup/check       {token}: the token is valid; {files} the import will commit
+//	POST   /api/v1/setup             {token, password, name, email}: first run only; {imported}
 //	GET    /api/v1/session           204 with a valid session, else 401
 //	POST   /api/v1/session           {password}: log in
 //	DELETE /api/v1/session           log out this browser
 //	POST   /api/v1/session/revoke    log out everywhere
 //	PUT    /api/v1/password          {current, next}
 type AuthAPI struct {
-	auth Auth
-	log  *slog.Logger
+	auth     Auth
+	importer Importer
+	log      *slog.Logger
 }
 
 func (a *AuthAPI) register(mux *stdhttp.ServeMux) {
+	mux.HandleFunc("POST /api/v1/setup/check", a.checkSetup)
 	mux.HandleFunc("POST /api/v1/setup", a.setup)
 	mux.HandleFunc("GET /api/v1/session", a.session)
 	mux.HandleFunc("POST /api/v1/session", a.login)
@@ -110,7 +121,32 @@ func (a *AuthAPI) setup(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	setSession(w, r, cookie)
-	w.WriteHeader(stdhttp.StatusCreated)
+	// An adopted folder's files become the first commit (ADR-0020). Setup already
+	// succeeded; if the import fails, the files stay uncommitted changes the user commits.
+	imported, err := a.importer.ImportInitial(r.Context(), req.Name, req.Email)
+	if err != nil {
+		a.log.Error("initial import", "err", oneLine(err.Error()))
+	}
+	writeJSON(w, stdhttp.StatusCreated, map[string]int{"imported": imported})
+}
+
+// checkSetup lets the setup page check the token and show how many files the setup will
+// commit before the user confirms (ADR-0020). Only the token holder learns the count.
+func (a *AuthAPI) checkSetup(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var req struct{ Token string }
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := a.auth.CheckSetupToken(r.Context(), req.Token); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	n, err := a.importer.PendingImport(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, map[string]int{"files": n})
 }
 
 func (a *AuthAPI) session(w stdhttp.ResponseWriter, r *stdhttp.Request) {
