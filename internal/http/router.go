@@ -70,6 +70,14 @@ func setupGate(a Auth, next stdhttp.Handler) stdhttp.Handler {
 	})
 }
 
+// csp is the web app's Content Security Policy (ADR-0007, ADR-0019): scripts, styles and
+// Workers only from our origin, with no inline script or style; and Trusted Types, so HTML
+// reaches the page only through the preview's sanitizing policy. The other two names are
+// DOMPurify's internal policy and Lit's, which only ever sees Lit's own template strings.
+const csp = "default-src 'self'; script-src 'self'; style-src 'self'; worker-src 'self'; " +
+	"img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; " +
+	"require-trusted-types-for 'script'; trusted-types postelmd-preview dompurify lit-html"
+
 // securityHeaders sets the headers every response carries. Handlers may tighten them (a
 // note's CSP is "sandbox").
 func securityHeaders(next stdhttp.Handler) stdhttp.Handler {
@@ -78,7 +86,7 @@ func securityHeaders(next stdhttp.Handler) stdhttp.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		h.Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})
 }

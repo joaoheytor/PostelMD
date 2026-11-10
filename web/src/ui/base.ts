@@ -1,6 +1,7 @@
 import { LitElement, type ReactiveController, type ReactiveControllerHost } from "lit";
 import type { Disposable } from "../core/disposable";
 import type { Store } from "../core/store";
+import type { Workspace } from "../core/workspace";
 
 /**
  * Shell components render in the light DOM (ADR-0019), so ARIA references work across them
@@ -58,4 +59,10 @@ export function fields(form: HTMLFormElement): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of new FormData(form)) if (typeof v === "string") out[k] = v;
   return out;
+}
+
+/** Opens a note, after saving the open one; asks first if some of its edits can't be saved. */
+export async function openNote(workspace: Workspace, path: string): Promise<void> {
+  if (!(await workspace.saveOpen()) && !confirm("Some edits to the open note aren't saved. Leave them?")) return;
+  await workspace.open(path);
 }

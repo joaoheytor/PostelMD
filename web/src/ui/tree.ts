@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
 import { join, parent } from "../core/tree";
 import { isNote, type Workspace } from "../core/workspace";
-import { LightElement, StoreController } from "./base";
+import { LightElement, openNote, StoreController } from "./base";
 import "./move";
 
 type Creating = "note" | "folder" | undefined;
@@ -36,8 +36,7 @@ export class FileTree extends LightElement {
 
   private async open(path: string): Promise<void> {
     this.folder = parent(path);
-    if (!(await this.workspace.saveOpen()) && !confirm("Some edits to the open note aren't saved. Leave them?")) return;
-    await this.workspace.open(path);
+    await openNote(this.workspace, path);
   }
 
   private async toggle(path: string): Promise<void> {

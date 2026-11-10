@@ -26,3 +26,7 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - A container image (`make image`): distroless, non-root, about 24 MB, for amd64 and arm64,
   with a health check and `/data` owned by the image's user so a named volume needs no
   `--user`. Not published yet.
+- A live preview beside the editor (the Preview button): CommonMark and GFM (tables, task
+  lists, strikethrough, autolinks) and YAML front matter, rendered off the main thread and
+  sanitized before it reaches the page. A relative link to a note opens it. The web app's CSP
+  now requires Trusted Types and allows no inline script or style.

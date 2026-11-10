@@ -1,31 +1,11 @@
-import AxeBuilder from "@axe-core/playwright";
-import { expect, type Page, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { env, expect, login, noSeriousA11yViolations, password, test } from "./helpers";
 
-// One user and one vault: each test builds on the one before.
+// One user and one vault, set up by the first test. The files run in name order, and each
+// test builds on the one before.
 test.describe.configure({ mode: "serial" });
-
-const password = "correct horse battery staple";
-
-function env(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is unset: run through playwright.config.ts`);
-  return v;
-}
-
-async function noSeriousA11yViolations(page: Page): Promise<void> {
-  const { violations } = await new AxeBuilder({ page }).analyze();
-  expect(violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
-}
-
-async function login(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("navigation", { name: "Notes" })).toBeVisible();
-}
 
 test("first-run setup with the server's token", async ({ page }) => {
   await page.goto("/");
