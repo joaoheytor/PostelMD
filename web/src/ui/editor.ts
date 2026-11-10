@@ -5,6 +5,7 @@ import { type Disposable, DisposableStore } from "../core/disposable";
 import type { OpenNote, Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
 import { LightElement, listen, StoreController } from "./base";
+import "./history";
 import "./move";
 
 const statusText: Record<DocState["status"], string> = {
@@ -22,10 +23,12 @@ const statusText: Record<DocState["status"], string> = {
  * the tab is hidden.
  */
 export class NoteEditor extends LightElement {
-  static override properties = { workspace: { attribute: false }, moving: { state: true } };
+  static override properties = { workspace: { attribute: false }, moving: { state: true }, browsing: { state: true } };
   declare workspace: Workspace;
   /** The rename-or-move form is open. */
   declare moving: boolean;
+  /** The history dialog is open. */
+  declare browsing: boolean;
 
   private readonly ws = new StoreController(this, () => this.workspace?.state);
   private editor: Editor | undefined;
@@ -36,6 +39,7 @@ export class NoteEditor extends LightElement {
   constructor() {
     super();
     this.moving = false;
+    this.browsing = false;
   }
 
   override connectedCallback(): void {
@@ -112,9 +116,13 @@ export class NoteEditor extends LightElement {
         <span class="pm-editor-status" data-status=${st.status} role="status"
           >${statusText[st.status]}${st.message ? `: ${st.message}` : ""}</span
         >
+        <button type="button" @click=${() => (this.browsing = true)}>History</button>
         <button type="button" @click=${() => (this.moving = true)}>Rename or move</button>
         <button type="button" @click=${() => this.trash(note.doc.path)}>Delete</button>
       </header>
+      ${this.browsing
+        ? html`<pm-history .workspace=${this.workspace} .onClose=${() => (this.browsing = false)}></pm-history>`
+        : nothing}
       ${this.moving
         ? html`<pm-move .workspace=${this.workspace} .path=${note.doc.path} .kind=${"file"} .onDone=${() => (this.moving = false)}></pm-move>`
         : nothing}

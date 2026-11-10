@@ -196,3 +196,31 @@ export async function commit(message: string): Promise<string> {
 export async function removeGitLocks(): Promise<void> {
   await ok(await request("POST", "/api/v1/git/locks/remove", json({ confirmNoOtherGit: true })));
 }
+
+export interface Version {
+  commit: string;
+  message: string;
+  author: string;
+  when: string;
+  /** The commit removed the note: there is no content to show. */
+  deleted: boolean;
+}
+
+/** The commits that changed the note, newest first. */
+export async function history(path: string): Promise<Version[]> {
+  const resp = await ok(await request("GET", `/api/v1/history/${encodePath(path)}`));
+  return ((await resp.json()) as { versions: Version[] }).versions;
+}
+
+/** The note's text in a commit. */
+export async function version(commit: string, path: string): Promise<string> {
+  return (await ok(await request("GET", `/api/v1/versions/${encodeURIComponent(commit)}/${encodePath(path)}`))).text();
+}
+
+/** Writes the note's text from commit through the save path; 412 if it isn't at base. */
+export async function restore(path: string, commit: string, baseETag: string): Promise<string> {
+  const resp = await ok(
+    await request("POST", "/api/v1/restore", { ...json({ path, commit }), headers: { "Content-Type": "application/json", "If-Match": baseETag } }),
+  );
+  return resp.headers.get("ETag") ?? "";
+}

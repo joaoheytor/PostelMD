@@ -56,6 +56,11 @@ export class DocumentSession implements Disposable {
     this.debounceMs = opts.debounceMs ?? 1000;
   }
 
+  /** The ETag of the last version saved or read: the If-Match base. */
+  get etag(): string {
+    return this.baseETag;
+  }
+
   /** True while some edit isn't saved. */
   get dirty(): boolean {
     return this.gen !== this.savedGen;

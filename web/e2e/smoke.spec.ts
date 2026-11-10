@@ -174,3 +174,39 @@ test("a stale git lock is removed only after the user confirms", async ({ page }
   await expect(dialog.getByRole("heading", { name: "A git lock is blocking commits" })).toBeHidden();
   expect(existsSync(lock)).toBe(false);
 });
+
+test("see what changed since an older version, and restore it", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "ops" }).click();
+  await page.getByRole("button", { name: "runbook.md" }).click();
+  const text = page.getByRole("textbox", { name: "Text of ops/runbook.md" });
+  await text.press("ControlOrMeta+End");
+  await text.pressSequentially(" (v2)");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+
+  await page.getByRole("button", { name: "Commit…" }).click();
+  const commit = page.getByRole("dialog", { name: "Commit changes" });
+  await commit.getByLabel("Commit message").fill("Edit the runbook");
+  await commit.getByRole("button", { name: "Commit", exact: true }).click();
+  await expect(commit.getByRole("status")).toContainText("Committed");
+  await commit.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "History" }).click();
+  const history = page.getByRole("dialog", { name: "History of ops/runbook.md" });
+  const versions = history.getByRole("list", { name: "Versions" });
+  await expect(versions.getByRole("listitem")).toHaveCount(2);
+  await versions.getByRole("button", { name: /Add the first runbooks/ }).click();
+  const diff = history.getByLabel("Changes from this version to the current text");
+  await expect(diff.getByRole("insertion")).toContainText("(v2)");
+  await noSeriousA11yViolations(page);
+
+  await history.getByRole("button", { name: "Whole version" }).click();
+  await expect(history.getByLabel("Text of this version")).not.toContainText("(v2)");
+
+  page.once("dialog", (d) => void d.accept());
+  await history.getByRole("button", { name: "Restore this version" }).click();
+  await expect(history).toBeHidden();
+  await expect(text).toContainText("and in the browser");
+  await expect(text).not.toContainText("(v2)");
+  expect(readFileSync(join(env("PM_E2E_VAULT"), "ops", "runbook.md"), "utf8")).not.toContain("(v2)");
+});
