@@ -3,6 +3,7 @@ import type { Entry } from "../core/api";
 import { join, parent } from "../core/tree";
 import { isNote, type Workspace } from "../core/workspace";
 import { LightElement, StoreController } from "./base";
+import "./move";
 
 type Creating = "note" | "folder" | undefined;
 
@@ -11,9 +12,16 @@ type Creating = "note" | "folder" | undefined;
  * notes open. New notes and folders go into the selected folder.
  */
 export class FileTree extends LightElement {
-  static override properties = { workspace: { attribute: false }, creating: { state: true }, folder: { state: true } };
+  static override properties = {
+    workspace: { attribute: false },
+    creating: { state: true },
+    moving: { state: true },
+    folder: { state: true },
+  };
   declare workspace: Workspace;
   declare creating: Creating;
+  /** The rename-or-move form for the selected folder is open. */
+  declare moving: boolean;
   /** The selected folder: where a new note or folder goes. */
   declare folder: string;
 
@@ -23,6 +31,7 @@ export class FileTree extends LightElement {
   constructor() {
     super();
     this.folder = "";
+    this.moving = false;
   }
 
   private async open(path: string): Promise<void> {
@@ -81,7 +90,21 @@ export class FileTree extends LightElement {
         <div class="pm-tree-actions">
           <button type="button" @click=${() => (this.creating = "note")}>New note</button>
           <button type="button" @click=${() => (this.creating = "folder")}>New folder</button>
+          ${this.folder === ""
+            ? nothing
+            : html`<button type="button" @click=${() => (this.moving = true)}>Rename or move folder</button>`}
         </div>
+        ${this.moving && this.folder !== ""
+          ? html`<pm-move
+              .workspace=${this.workspace}
+              .path=${this.folder}
+              .kind=${"folder"}
+              .onDone=${(to?: string) => {
+                this.moving = false;
+                if (to) this.folder = to;
+              }}
+            ></pm-move>`
+          : nothing}
         ${this.creating
           ? html`<form class="pm-tree-create" @submit=${this.create}>
               <label>${this.creating === "note" ? "Note" : "Folder"} name in ${where}

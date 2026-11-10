@@ -337,3 +337,16 @@ func TestOpenRefusesAFilesystemWithoutNoReplace(t *testing.T) {
 		t.Fatalf("the probe left %d files", len(entries))
 	}
 }
+
+func TestMoveIntoItself(t *testing.T) {
+	v, dir := newVault(t)
+	must(t, v.Mkdir(ctx, "notes/sub"))
+	for _, to := range []string{"notes/sub/notes", "notes/notes"} {
+		if err := v.Move(ctx, "notes", to); !errors.Is(err, ErrIntoItself) {
+			t.Fatalf("Move(notes, %s) = %v, want ErrIntoItself", to, err)
+		}
+	}
+	if content(t, dir, "notes/a.md") != "A" {
+		t.Fatal("a refused Move changed the vault")
+	}
+}

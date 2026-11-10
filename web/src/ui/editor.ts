@@ -5,6 +5,7 @@ import { type Disposable, DisposableStore } from "../core/disposable";
 import type { OpenNote, Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
 import { LightElement, listen, StoreController } from "./base";
+import "./move";
 
 const statusText: Record<DocState["status"], string> = {
   clean: "Saved",
@@ -21,14 +22,21 @@ const statusText: Record<DocState["status"], string> = {
  * the tab is hidden.
  */
 export class NoteEditor extends LightElement {
-  static override properties = { workspace: { attribute: false } };
+  static override properties = { workspace: { attribute: false }, moving: { state: true } };
   declare workspace: Workspace;
+  /** The rename-or-move form is open. */
+  declare moving: boolean;
 
   private readonly ws = new StoreController(this, () => this.workspace?.state);
   private editor: Editor | undefined;
   private mounted: { note: OpenNote; host: Element } | undefined;
   private docSub: Disposable | undefined;
   private listeners: DisposableStore | undefined;
+
+  constructor() {
+    super();
+    this.moving = false;
+  }
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -104,8 +112,12 @@ export class NoteEditor extends LightElement {
         <span class="pm-editor-status" data-status=${st.status} role="status"
           >${statusText[st.status]}${st.message ? `: ${st.message}` : ""}</span
         >
+        <button type="button" @click=${() => (this.moving = true)}>Rename or move</button>
         <button type="button" @click=${() => this.trash(note.doc.path)}>Delete</button>
       </header>
+      ${this.moving
+        ? html`<pm-move .workspace=${this.workspace} .path=${note.doc.path} .kind=${"file"} .onDone=${() => (this.moving = false)}></pm-move>`
+        : nothing}
       ${st.status === "conflict" && st.conflict
         ? html`<section class="pm-banner" role="alert" aria-labelledby="pm-conflict-title">
             <h3 id="pm-conflict-title">This note changed outside this editor</h3>

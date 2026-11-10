@@ -160,6 +160,11 @@ export async function createFolder(path: string): Promise<void> {
   await ok(await request("POST", `/api/v1/folders/${encodePath(path)}`));
 }
 
+/** Renames a note or folder; fails with 409 if the destination exists (never overwrites). */
+export async function move(from: string, to: string): Promise<void> {
+  await ok(await request("POST", "/api/v1/move", json({ from, to })));
+}
+
 /** Moves a note or folder into the vault's trash. */
 export async function trash(path: string, kind: "file" | "folder"): Promise<void> {
   const base = kind === "file" ? "notes" : "folders";

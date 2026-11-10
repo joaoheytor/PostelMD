@@ -8,6 +8,7 @@ import (
 	iofs "io/fs"
 	"path"
 	"strconv"
+	"strings"
 )
 
 // Save replaces the note at p with content if its current revision is base (If-Match).
@@ -98,13 +99,17 @@ func (v *Vault) Mkdir(ctx context.Context, p string) error {
 	return v.root.SyncDir(parent(p))
 }
 
-// Move renames a note or folder. It never replaces the destination (ErrExists).
+// Move renames a note or folder. It never replaces the destination (ErrExists), and a
+// folder never moves into its own subtree (ErrIntoItself).
 func (v *Vault) Move(ctx context.Context, from, to string) error {
 	if err := checkPath(from); err != nil {
 		return err
 	}
 	if err := checkPath(to); err != nil {
 		return err
+	}
+	if strings.HasPrefix(to, from+"/") {
+		return ErrIntoItself
 	}
 	unlock, err := v.lock(ctx)
 	if err != nil {
