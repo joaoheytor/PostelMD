@@ -125,7 +125,7 @@ func (v *Vault) Move(ctx context.Context, from, to string) error {
 }
 
 // Delete moves a note or folder into the vault's trash and returns its path there,
-// "<stamp>/<name>" (ADR-0020): a new folder named after the UTC time of the delete holds the
+// "<stamp>/<name>" (ADR-0022): a new folder named after the UTC time of the delete holds the
 // item under its own, unchanged name, so any name that fits on disk fits in the trash.
 // Nothing is unlinked (CLAUDE.md rule 4); the trash is emptied by the user.
 //

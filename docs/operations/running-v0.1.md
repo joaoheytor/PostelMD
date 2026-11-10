@@ -232,7 +232,7 @@ instead. The trash doesn't record the folder the note was in. There's no trash v
 To restore, move it back under a name that doesn't exist, then reload the page:
 
 ```sh
-ls -lt ~/postelmd/vaults/notes/.postelmd-trash/ | head
+ls -lt ~/postelmd/vaults/notes/.postelmd-trash/*/ | head -20
 mv -n ~/postelmd/vaults/notes/.postelmd-trash/20261110T143005.123456789Z/runbook.md \
   ~/postelmd/vaults/notes/runbook.md
 ```

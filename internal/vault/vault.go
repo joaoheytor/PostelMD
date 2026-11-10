@@ -1,7 +1,8 @@
 // Package vault is the MVP's note store (ADR-0020): reads, conditional saves, creates,
-// moves and trash deletes on one vault, serialized by one mutex. Every mutation is a single
-// atomic rename, so none needs an intent (CLAUDE.md rule 14); a delete first makes the
-// empty trash folder it renames into, and that folder is its intent (see Delete). All file I/O goes through
+// moves and trash deletes on one vault, serialized by one mutex. Every mutation's one data-bearing
+// step is a single atomic rename, so none needs an intent (CLAUDE.md rule 14). A delete first makes the
+// empty trash folder it renames into: that step holds no data, so a crash after it needs no
+// recovery (ADR-0022's table). All file I/O goes through
 // internal/store/fs, and every path a caller supplies is checked with fs.IsReserved.
 package vault
 
