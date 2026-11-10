@@ -7,7 +7,8 @@ Modes (first CLI argument):
            (absolute home paths, private IPs, unknown email addresses, and
            terms from the git-ignored local denylist .claude/public-guard.local.txt).
   adr      Write/Edit: ask before changing the Decision section of an ADR that is Accepted
-           on main (the merge base of HEAD and origin/main; HEAD without origin/main).
+           on main (at the merge base of HEAD and origin/main, or at origin/main's tip; HEAD
+           without origin/main). scripts/adr-immutable.sh is the enforced check (pre-commit, CI).
   git      Bash: outward-facing commands (push, tags, releases, PRs, issues, repo
            settings, mutating API calls) always get a human permission prompt ("ask");
            enforce DCO sign-off + Conventional Commit subjects; forbid skipping hooks;
@@ -25,7 +26,7 @@ import re
 import subprocess
 import sys
 
-from bash_writes import repo_write_targets
+from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets
 
 # A command position: start of the command, or after ; & | ( or a newline, optionally after
 # VAR=value assignments or sudo/env/command/xargs. Anchoring here keeps text inside
@@ -142,27 +143,35 @@ def check_public(tool_input):
 
 
 def git_out(cwd, *args):
-    """git's stdout, or None when git fails or isn't there."""
+    """git's stdout, or None when git fails or isn't there. SAFE_GIT: a repository's own
+    config can't make this run its commands (core.fsmonitor, hooks)."""
     try:
-        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=5)
+        r = subprocess.run([*SAFE_GIT, "-C", cwd, *args], capture_output=True, text=True,
+                           timeout=5, env=SAFE_GIT_ENV)
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout if r.returncode == 0 else None
 
 
+ACCEPTED = re.compile(r"^- \*\*Status:\*\* Accepted", re.M)
+
+
 def adr_on_main(full):
-    """(the ADR as on main, where) — main is the merge base of HEAD and origin/main, or HEAD
-    without origin/main. The text is "" when main doesn't have the file yet (it is still being
+    """(the ADR as Accepted on main, where): main is the merge base of HEAD and origin/main
+    or origin/main's tip (a stale fork point mustn't hide an ADR accepted since), or HEAD
+    without origin/main. The text is "" when no ref has it Accepted (Proposed, or still being
     written on this branch), and None outside a git repository."""
     d = os.path.dirname(full) or "."
+    if git_out(d, "rev-parse", "--verify", "-q", "HEAD^{commit}") is None:
+        return None, "HEAD"
     base = (git_out(d, "merge-base", "HEAD", "origin/main") or "").strip()
-    where = "main"
-    if not base:
-        base, where = "HEAD", "HEAD (no origin/main to compare with)"
-    if git_out(d, "rev-parse", "--verify", "-q", base + "^{commit}") is None:
-        return None, where
-    text = git_out(d, "show", f"{base}:./{os.path.basename(full)}")
-    return (text if text is not None else ""), where
+    refs = [(base, "main"), ("origin/main", "main")] if base else [
+        ("HEAD", "HEAD (no origin/main to compare with)")]
+    for ref, where in refs:
+        text = git_out(d, "show", f"{ref}:./{os.path.basename(full)}")
+        if text and ACCEPTED.search(text):
+            return text, where
+    return "", refs[0][1]
 
 
 def check_adr(tool_input):
@@ -178,7 +187,7 @@ def check_adr(tool_input):
     on_main, where = adr_on_main(full)
     if on_main is None:  # not in git: judge the file as it is
         on_main, where = current, "the file on disk"
-    if not re.search(r"^- \*\*Status:\*\* Accepted", on_main, re.M):
+    if not ACCEPTED.search(on_main):
         return  # Proposed on main, or new on this branch: still editable
     if tool_input.get("content") is not None:
         respond("ask", f"{path} is ACCEPTED on {where}: rewriting the whole file may change its "

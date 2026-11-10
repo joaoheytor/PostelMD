@@ -61,6 +61,7 @@ class WriteTargets(unittest.TestCase):
         ("FOO=1 sudo tee /etc/x < in", ["/etc/x"]),
         ("echo x >&2", []),
         ("cmd 'unbalanced > x", []),
+        ("echo \"<<EOF\" > doc.md\necho y > b.md", ["doc.md", "b.md"]),  # no closing EOF line
     ]
 
     def test_targets(self):
@@ -70,15 +71,33 @@ class WriteTargets(unittest.TestCase):
 
 
 class RepoWriteTargets(unittest.TestCase):
+    """A throwaway repository as the project: inside the project, a temp dir isn't scratch."""
+
     def setUp(self):
         self.repo = new_repo()
         self.addCleanup(shutil.rmtree, self.repo)
         with open(os.path.join(self.repo, ".gitignore"), "w", encoding="utf-8") as fh:
             fh.write("/bin/\n")
-        # The throwaway repo lives in the temp dir, which counts as scratch: only /dev is here.
-        patcher = mock.patch.object(bash_writes, "scratch", lambda p: p.startswith("/dev/"))
+        patcher = mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.repo})
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_foreign_fsmonitor_never_runs(self):
+        marker = os.path.join(self.repo, "fsmonitor-ran")
+        hook = os.path.join(self.repo, "fsmonitor.sh")
+        with open(hook, "w", encoding="utf-8") as fh:
+            fh.write(f"#!/bin/sh\ntouch '{marker}'\n")
+        os.chmod(hook, 0o755)
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "config", "core.fsmonitor", hook)
+        self.assertEqual(bash_writes.repo_write_targets("echo x > a.md", self.repo), ["a.md"])
+        run_guard("git", {"cwd": self.repo, "tool_input": {"command": "echo x > a.md"}}, self.repo)
+        path = os.path.join(self.repo, "docs", "adr", "0001-x.md")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        run_guard("adr", {"tool_input": {"file_path": path, "old_string": "x"}}, self.repo)
+        self.assertFalse(os.path.exists(marker), "the repository's core.fsmonitor ran")
 
     def test_judges_each_target(self):
         outside = tempfile.mkdtemp()
@@ -97,15 +116,16 @@ class RepoWriteTargets(unittest.TestCase):
 
 
 class GuardBashMode(unittest.TestCase):
-    """The hook end to end, judging (never running) commands in this checkout."""
-    ROOT = os.path.dirname(os.path.dirname(HERE))
+    """The hook end to end, judging (never running) commands in a throwaway project."""
 
     def setUp(self):
-        if bash_writes.scratch(self.ROOT + "/"):
-            self.skipTest("this checkout is in a temp dir, which the guard treats as scratch")
+        self.repo = new_repo()
+        self.addCleanup(shutil.rmtree, self.repo)
+        with open(os.path.join(self.repo, ".gitignore"), "w", encoding="utf-8") as fh:
+            fh.write("/bin/\n")
 
     def guard(self, command):
-        return run_guard("git", {"cwd": self.ROOT, "tool_input": {"command": command}}, self.ROOT)
+        return run_guard("git", {"cwd": self.repo, "tool_input": {"command": command}}, self.repo)
 
     def test_asks_before_a_shell_write(self):
         got = self.guard("echo x > CLAUDE.md")
@@ -161,6 +181,17 @@ class AdrCheck(unittest.TestCase):
         got = self.edit("0001-main.md", "We use X.")
         self.assertEqual(got["permissionDecision"], "ask")
         self.assertIn("ACCEPTED on main", got["permissionDecisionReason"])
+
+    def test_accepted_on_main_after_the_fork_point_asks(self):
+        git(self.repo, "switch", "-q", "-c", "later", self.main)
+        self.write("0003-later.md", adr("Accepted", "Later."))
+        git(self.repo, "add", "docs")
+        git(self.repo, "commit", "-q", "-m", "later")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.repo, "switch", "-q", "feature")
+        self.write("0003-later.md", adr("Proposed", "Later."))  # stale copy on the branch
+        got = self.edit("0003-later.md", "Later.")
+        self.assertEqual(got["permissionDecision"], "ask")
 
     def test_without_origin_compares_with_head(self):
         got = self.edit("0002-branch.md", "First draft.")

@@ -1,7 +1,9 @@
 #!/bin/sh
-# Tests the Accepted-ADR check of .githooks/pre-commit against a throwaway repository.
+# Tests the Accepted-ADR check (.githooks/pre-commit, scripts/adr-immutable.sh) against a
+# throwaway repository.
 set -eu
 hook="$(cd "$(dirname "$0")/.." && pwd)/.githooks/pre-commit"
+check="$(cd "$(dirname "$0")" && pwd)/adr-immutable.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 failures=0
@@ -76,5 +78,41 @@ expect pass "an ADR new in this branch can be edited, though Accepted at HEAD"
 adr 0001-accepted.md Accepted "We use Z."
 g add docs
 expect fail "an ADR Accepted on main still can't change on a branch"
+
+g mv docs/adr/0001-accepted.md docs/adr/0001-renamed.md
+adr 0001-renamed.md Accepted "We use Z."
+g add docs
+expect fail "renaming an ADR Accepted on main and changing its Decision"
+
+g mv docs/adr/0001-accepted.md docs/adr/0001-renamed.md
+expect pass "renaming an ADR Accepted on main, Decision unchanged"
+
+g rm -q docs/adr/0001-accepted.md
+expect fail "deleting an ADR Accepted on main"
+
+g rm -q docs/adr/0002-proposed.md
+expect pass "deleting a Proposed ADR"
+
+# main moves on after the fork point: 0002 is Accepted there, Proposed at the merge base.
+g switch -q main
+adr 0002-proposed.md Accepted "We might use Y."
+g add docs && g commit -q -m "accept ADR 0002"
+g update-ref refs/remotes/origin/main HEAD
+g switch -q feature
+adr 0002-proposed.md Proposed "We use Y now."
+g add docs
+expect fail "an ADR Accepted on main after an old fork point"
+
+# CI mode: the PR's commits against its base.
+adr 0001-accepted.md Accepted "We use Z."
+g add docs && g commit -q -m "change ADR 0001"
+if (cd "$work/repo" && "$check" "$main" HEAD "$main" 2>"$work/err"); then
+  echo "FAIL CI mode: a commit that changes an Accepted Decision passed"; failures=$((failures + 1))
+elif grep -q "0001-accepted.md is Accepted" "$work/err"; then
+  echo "ok   CI mode: a commit that changes an Accepted Decision fails"
+else echo "FAIL CI mode failed for another reason: $(cat "$work/err")"; failures=$((failures + 1)); fi
+if (cd "$work/repo" && "$check" "$main" HEAD~1 "$main"); then
+  echo "ok   CI mode: a branch that only adds an ADR passes"
+else echo "FAIL CI mode: a branch that only adds an ADR failed"; failures=$((failures + 1)); fi
 
 [ "$failures" -eq 0 ] && echo "all pre-commit ADR tests passed" || exit 1

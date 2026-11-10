@@ -4,13 +4,26 @@ Write/Edit calls pass through the guard's secrets, public-repo and ADR checks; `
 `perl -pi`, `tee` and `>`/`>>` redirects don't. This finds their targets so the guard can ask
 first. It keeps false positives low rather than catching everything: heredoc bodies and quoted
 text are not commands, fd duplications (2>&1) and /dev/* aren't files, targets in /tmp,
-$TMPDIR or outside any git repository are scratch, git-ignored paths are build output, and a
-target that is an unexpanded variable can't be judged before the command runs.
+$TMPDIR or outside any git repository are scratch (unless they are inside the project, which
+may itself live in a temp dir), git-ignored paths are build output, and a target that is an
+unexpanded variable can't be judged before the command runs.
+
+It asks; it doesn't block, and it is a guardrail, not a boundary. It does NOT catch: cp, mv,
+install, ln, rsync, dd of=, truncate, touch, git apply/checkout/restore, patch, editors,
+`python -c`/`node -e`/`awk` writing files, `bash -c "… > f"` and `eval` (the inner string is
+quoted text), `$var` or `$(…)` targets, and a `<<WORD` that appears inside quotes and is
+followed later by a line that is exactly WORD (that text is then skipped as a heredoc body).
 """
 import os
 import re
 import shlex
 import subprocess
+
+# Every git call in the guard: a repository's own config must not make the hook run its
+# commands before the permission prompt (core.fsmonitor; hooks for good measure).
+SAFE_GIT = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+SAFE_GIT_ENV = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+                "GIT_CONFIG_NOSYSTEM": "1"}
 
 REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
 PREFIXES = {"sudo", "env", "command", "xargs", "time", "nohup", "exec"}
@@ -19,16 +32,19 @@ HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([\w.-]+)\2")
 
 
 def strip_heredocs(cmd):
-    """The command without heredoc bodies: their text is data, not shell."""
+    """The command without heredoc bodies: their text is data, not shell. A `<<WORD` with no
+    closing WORD line isn't a heredoc (e.g. "<<EOF" in quotes): nothing is skipped for it."""
     out, lines, i = [], cmd.split("\n"), 0
     while i < len(lines):
         line = lines[i]
         out.append(line)
         i += 1
         for m in HEREDOC.finditer(line):  # several heredocs on one line: bodies follow in order
-            while i < len(lines) and (lines[i].lstrip("\t") if m.group(1) else lines[i]) != m.group(3):
-                i += 1
-            i += 1
+            end = i
+            while end < len(lines) and (lines[end].lstrip("\t") if m.group(1) else lines[end]) != m.group(3):
+                end += 1
+            if end < len(lines):
+                i = end + 1
     return "\n".join(out)
 
 
@@ -112,11 +128,18 @@ def write_targets(cmd):
     return targets + command_targets(words)
 
 
-def scratch(path):
-    prefixes = ["/dev/", "/tmp/", "/var/tmp/"]
-    if os.environ.get("TMPDIR"):
-        prefixes.append(os.environ["TMPDIR"].rstrip("/") + "/")
-    return path == "/dev/null" or any(path.startswith(p) for p in prefixes)
+def under(path, root):
+    return bool(root) and (path + "/").startswith(os.path.normpath(root) + "/")
+
+
+def scratch(path, homes=()):
+    """/dev/*, or a temp dir that isn't one of homes (the project, which may live in one)."""
+    if path.startswith("/dev/"):
+        return True
+    if any(under(path, h) for h in homes):
+        return False
+    tmps = ["/tmp", "/var/tmp", os.environ.get("TMPDIR", "")]
+    return any(under(path, t) for t in tmps)
 
 
 def git_tracks(path):
@@ -125,12 +148,12 @@ def git_tracks(path):
     while d and not os.path.isdir(d):
         d = os.path.dirname(d)
     try:
-        top = subprocess.run(["git", "-C", d or "/", "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True, timeout=5)
+        top = subprocess.run([*SAFE_GIT, "-C", d or "/", "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, timeout=5, env=SAFE_GIT_ENV)
         if top.returncode != 0:
             return False  # outside any repository
-        ignored = subprocess.run(["git", "-C", d, "check-ignore", "-q", "--", path],
-                                 capture_output=True, timeout=5)
+        ignored = subprocess.run([*SAFE_GIT, "-C", d, "check-ignore", "-q", "--", path],
+                                 capture_output=True, timeout=5, env=SAFE_GIT_ENV)
     except (OSError, subprocess.SubprocessError):
         return False
     return ignored.returncode == 1  # 0: ignored (build output); 128: git can't tell
@@ -149,6 +172,6 @@ def repo_write_targets(cmd, cwd):
         if "$" in t or "`" in t:
             continue  # unexpanded variable or substitution: unknown before it runs
         path = os.path.normpath(os.path.join(cwd, os.path.expanduser(t)))
-        if not scratch(path) and git_tracks(path):
+        if not scratch(path, (project,)) and git_tracks(path):
             found.append(t)
     return found

@@ -106,6 +106,23 @@ jobs:
       - name: Install yamllint
         run: pipx install "yamllint==${YAMLLINT_VERSION}"
       - run: make lint-web lint-repo
+      # The pre-commit hook's ADR check, enforced: an ADR Accepted on the base can't have its
+      # Decision changed, be deleted, or be renamed and changed (docs/adr/README.md). It runs
+      # the base's copy of the script, so a PR can't weaken the check it is judged by; only
+      # the PR that adds the script runs its own copy.
+      - name: Accepted ADRs are immutable
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          check="$RUNNER_TEMP/adr-immutable.sh"
+          if git cat-file -e "$BASE_SHA:scripts/adr-immutable.sh" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/adr-immutable.sh" > "$check"
+          else
+            cp scripts/adr-immutable.sh "$check"
+          fi
+          bash "$check" "$BASE_SHA" HEAD "$BASE_SHA"
 
   test-go:
     runs-on: ubuntu-24.04

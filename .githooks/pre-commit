@@ -15,9 +15,10 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 
 # Materialize the staged blobs (added, copied, modified, renamed, type-changed).
 g diff --cached --name-only -z --diff-filter=ACMRT > "$tmp/files"
-[ -s "$tmp/files" ] || exit 0
 mkdir "$tmp/tree"
-xargs -0 git -c core.fsmonitor=false checkout-index --prefix="$tmp/tree/" -- < "$tmp/files"
+if [ -s "$tmp/files" ]; then
+  xargs -0 git -c core.fsmonitor=false checkout-index --prefix="$tmp/tree/" -- < "$tmp/files"
+fi
 fail=0
 
 # 1. Secrets. The config comes from HEAD, never from the staged change, so a commit can't
@@ -80,25 +81,19 @@ done < "$tmp/src"
 #    skipped. Without origin/main (offline clone, no remote) it compares with HEAD. The
 #    Write/Edit hook (.claude/hooks/postelmd_guard.py, check_adr) asks about this too; this
 #    check also covers files written any other way.
-decision() { awk '/^## / { if (d) exit; d = ($0 == "## Decision"); next } d' "$1"; }
-tr '\0' '\n' < "$tmp/files" | grep -E '^docs/adr/[0-9]{4}-[^/]+\.md$' > "$tmp/adrs" || true
-if [ -s "$tmp/adrs" ]; then
-  if ! base=$(g merge-base HEAD origin/main 2>/dev/null); then
-    base=HEAD
+#    An ADR Accepted at the merge base OR at origin/main's tip counts, so a stale fork point
+#    doesn't hide one accepted on main since. Deletions and renames (git mv + edit) are
+#    checked too. CI runs the same script against the PR's base (ci.yaml, lint job).
+if g diff --cached --name-only -- docs/adr | grep -qE '^docs/adr/[0-9]{4}-[^/]+\.md$'; then
+  if g rev-parse -q --verify HEAD >/dev/null; then from=HEAD; else
+    from=$(g hash-object -t tree /dev/null); fi  # first commit: diff against the empty tree
+  if base=$(g merge-base HEAD origin/main 2>/dev/null); then
+    set -- "$base" origin/main
+  else
+    set -- "$from"
     echo "pre-commit: note: no merge base with origin/main; comparing Accepted ADRs with HEAD." >&2
   fi
+  "$(dirname "$0")/../scripts/adr-immutable.sh" "$from" --index "$@" || fail=1
 fi
-while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  g show "$base:$f" > "$tmp/adr-head" 2>/dev/null || continue
-  grep -q '^- \*\*Status:\*\* Accepted' "$tmp/adr-head" || continue
-  decision "$tmp/adr-head" > "$tmp/decision-head"
-  decision "$tmp/tree/$f" > "$tmp/decision-staged"
-  if ! cmp -s "$tmp/decision-head" "$tmp/decision-staged"; then
-    echo "pre-commit: $f is Accepted on main and its Decision section changed. Supersede it with a new" >&2
-    echo "  ADR, or append a dated entry under '## Clarifications' (docs/adr/README.md)." >&2
-    fail=1
-  fi
-done < "$tmp/adrs"
 
 exit "$fail"

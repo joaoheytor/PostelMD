@@ -23,10 +23,12 @@ merged. There is no CLA.
 ## Development setup
 
 You need Go (the version in `go.mod`; an older Go downloads it automatically), Node 24,
-`golangci-lint`, `actionlint`, `shellcheck` and `yamllint`. With [mise](https://mise.jdx.dev):
+Docker, `golangci-lint` and `yamllint`. `make lint` runs `actionlint` and `shellcheck` from
+images pinned in the `Makefile`, so it needs Docker but not those tools. With
+[mise](https://mise.jdx.dev):
 
 ```sh
-mise use go@1.27 node@24 golangci-lint actionlint shellcheck
+mise use go@1.27 node@24 golangci-lint
 pipx install yamllint
 make ci   # the same checks as the CI `required` job
 ```

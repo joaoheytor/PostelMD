@@ -16,7 +16,9 @@ TRIVY_IMAGE ?= ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1ac
 # SHELLCHECK_IMAGE). Bump both together, to releases at least two weeks old (ADR-0015).
 ACTIONLINT_IMAGE ?= docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
 SHELLCHECK_IMAGE ?= docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
-LINT_RUN = docker run --rm --network none -v "$(CURDIR):/repo:ro" -w /repo
+# SELinux hosts (Fedora, RHEL; Podman) need a relabelled mount: LINT_MOUNT=ro,z
+LINT_MOUNT ?= ro
+LINT_RUN = docker run --rm --network none -v "$(CURDIR):/repo:$(LINT_MOUNT)" -w /repo
 # image-push and image-gate (candidate.yaml)
 REPO        ?=
 DIGEST_FILE ?= bin/image-digest
@@ -107,6 +109,7 @@ lint-web: web-deps
 
 lint-repo:
 	scripts/check-file-size.sh
+	@command -v docker >/dev/null 2>&1 || { echo 'lint-repo: docker not found. actionlint and shellcheck run from pinned images: install Docker (or Podman with its docker command).' >&2; exit 1; }
 	$(LINT_RUN) $(ACTIONLINT_IMAGE)
 	$(LINT_RUN) $(SHELLCHECK_IMAGE) scripts/*.sh .githooks/*
 	yamllint --strict .
