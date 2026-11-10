@@ -43,7 +43,7 @@
 | `scorecard.yaml` | weekly, `push` to `main` | OpenSSF Scorecard (keeps the hygiene honest) | `contents: read`, `security-events: write`, `id-token: write` |
 | `perf-noise.yaml` | `workflow_dispatch`; `pull_request` touching `test/perf/editor/**` | Runs the editor benchmark (`test/perf/editor`, PRD procedure) on 10 runners in parallel and summarizes the noise between and within runners (#33). Informational, not required. | `contents: read` |
 | `perf.yaml` | `workflow_dispatch`; `pull_request` touching `test/perf/app/**` | Runs the PRD budgets for one user against the real binary (`test/perf/app`, `make perf`): typing with the preview open against a `<textarea>` control, saves while typing, cold start and idle RSS on a 10,000-note vault. Fails on a missed budget; not a required check until the v0.2 regression gate |
-| `candidate.yaml` (from v0.1) | `push` to `main` | Builds and publishes **candidate** images (`:sha-<short>`, `:main`) to GHCR only: signed (`cosign sign --recursive`), with build provenance and a per-platform SBOM attested. Publish job in concurrency group `ghcr-referrers`. | `contents: read`, `packages: write`, `id-token: write`, `attestations: write` |
+| `candidate.yaml` (from v0.1) | `push` to `main`; `pull_request` touching the image build (`build` job only) | Builds and publishes **candidate** images (`:sha-<short>`, `:main`) to GHCR only: signed (`cosign sign --recursive`), with build provenance and a per-platform SBOM attested (§4, *Candidates*). Publish job in concurrency group `ghcr-referrers`. | `build`: `contents: read`; `publish`: `contents: read`, `packages: write`, `id-token: write`, `attestations: write` |
 | `prerelease.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+` | **The only workflow that builds a release image.** Test jobs (no secrets, `contents: read`) build and gate; a publish job (concurrency group `ghcr-referrers`) pushes the digest **untagged** to GHCR, signs it (`--recursive`), attests build provenance (index) and an SBOM per platform (the only build provenance a release has; §4), applies `:X.Y.Z-rc.N`, and creates a GitHub *pre-release* that records the index digest. Never touches Docker Hub or the stable tags; no `release` environment. | test jobs: `contents: read`; publish job: `contents: write`, `packages: write`, `id-token: write`, `attestations: write` |
 | `release.yaml` (from v0.1) | `push` of tags matching `v[0-9]+.[0-9]+.[0-9]+` (stable only; RC tags don't match) | **Promotes, never rebuilds.** A `verify` job (no secrets) finds the latest `vX.Y.Z-rc.N` on the same commit, takes its digest from that pre-release record, checks its signature, attestations and gate results pinned to that exact RC, and checks the vulnerability thresholds again. A `publish` job (environment `release`, concurrency group `ghcr-referrers`) then signs at GHCR, copies the digest and the RC's verified bundles to Docker Hub and signs there, verifies both addresses, moves the stable tags and creates the GitHub Release (binaries, SBOMs, checksums; chart from v0.3). It never creates build provenance (§4). | `verify`: `contents: read` (+ `attestations: read` if `gh attestation verify` needs it); `publish`: `contents: write`, `packages: write`, `id-token: write` (no `attestations: write`: it attests nothing) |
 
@@ -147,6 +147,22 @@ branch, so fork PRs can't poison `main`'s cache.
 - **Docker Hub description:** updated by hand for now. Syncing it automatically needs a token
   with *Read, Write, Delete* scope, broader than the push token; revisit later with a separate
   token.
+
+### Candidates (`candidate.yaml`)
+
+- `build` (also on PRs that touch the image build; no secrets) builds the binaries once,
+  pushes the image by digest to a registry service on the runner (`make image-push`), and
+  gates each platform digest (`make image-gate`: smoke tests and Trivy on amd64, Trivy on
+  arm64, a Syft SBOM of each). `publish` (push to `main` only) builds no code: it pushes the
+  same binaries to GHCR, fails unless the digest matches the gated one, signs and attests by
+  digest, then tags. `:main` moves only if the commit is still `main`'s head.
+- `publish` doesn't wait for `ci.yaml`; the merge was already gated, and candidates are not
+  for users.
+- A same-repo PR could edit the workflow, so verifiers pin the identity to `main`:
+  `--certificate-identity https://github.com/joaoheytor/PostelMD/.github/workflows/candidate.yaml@refs/heads/main`.
+- SBOMs are attested per **platform** digest:
+  `gh attestation verify oci://ghcr.io/joaoheytor/postelmd@<amd64-digest> -R joaoheytor/PostelMD --predicate-type https://spdx.dev/Document/v2.3`.
+- Untagged digests from failed runs may accumulate in the package; prune them by hand.
 
 ### Verifying (for users and for the homelab)
 
