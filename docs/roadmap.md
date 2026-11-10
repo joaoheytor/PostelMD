@@ -115,8 +115,8 @@ PostelMD is worth using before building the rest of the design.
 - CM6 editor, live preview (sanitized, with Mermaid), copy buttons;
 - safe save: content-hash ETag, `If-Match`/`If-None-Match`, atomic replace, conflict view,
   IndexedDB drafts;
-- local git: commit with a message (optional auto-commit), history and diff per file, restore a
-  version;
+- local git: commit with a message, history and diff per file, restore a version (auto-commit
+  waits for v0.2's commit gate: ADR-0020);
 - secret warning on save and paste;
 - fuzzy finder and the template starter pack;
 - reserved paths; `/healthz`, `/readyz`; multi-arch image.
@@ -162,6 +162,8 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   ADR-0003).
 - Push and fast-forward-only pull through the egress client (ADR-0010, ADR-0016, #40); remote
   credentials; the commit and push secret gates and findings.
+- Auto-commit after a quiet window (ADR-0010), behind the commit gate: a file whose bytes
+  have a finding is not auto-committed. Set in `config.yaml`.
 - File watcher + reconciler + SSE (snapshot handoff, replay).
 - SQLite FTS5 search; `reindex`. Image paste and drag-drop.
 
