@@ -135,11 +135,14 @@ make ci         # everything the CI `required` check runs, locally (no signing o
 make test       # go test -race ./... and the web tests (Vitest)
 make lint       # golangci-lint, tsc + eslint, file size, actionlint, shellcheck, yamllint
 make vuln       # govulncheck + npm audit --omit=dev
-make build      # bin/postelmd
+make build      # bin/postelmd, with the web app embedded
+make e2e        # Playwright smoke tests against bin/postelmd
+make image      # the container image for this machine, as postelmd:dev
+make image-smoke  # the `docker run` smoke test of ADR-0009 on postelmd:dev
 ```
 
 Planned, with the code that needs them: `make dev` (go run + Vite dev server),
-`make scenarios` (test/scenarios), `make e2e` (Playwright), `make image` (multi-arch).
+`make scenarios` (test/scenarios).
 
 ## Testing conventions
 
