@@ -23,6 +23,8 @@ var (
 	ErrEscape = errors.New("store/fs: path escapes the vault root")
 	// ErrNotRegular: the path is not a regular file (a directory, device, FIFO...).
 	ErrNotRegular = errors.New("store/fs: not a regular file")
+	// ErrNotDir: a component used as a directory is not one.
+	ErrNotDir = errors.New("store/fs: not a directory")
 	// ErrNoReplaceUnsupported: the filesystem can't rename without replacing (for example
 	// 9p, used by WSL and Docker Desktop bind mounts). Callers use the two-step fallback
 	// from ADR-0003 §2 under a structural intent.

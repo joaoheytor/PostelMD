@@ -134,12 +134,61 @@ func checkPath(p string) error {
 	return nil
 }
 
-// notFound maps the store's "missing" and "not a regular file" errors to ErrNotFound.
+// notFound maps every "there's nothing usable at that path" error from the store to
+// ErrNotFound: missing, the wrong kind, or reached through a symlink (never followed).
 func notFound(err error) error {
-	if errors.Is(err, iofs.ErrNotExist) || errors.Is(err, fs.ErrNotRegular) {
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
+	for _, e := range []error{iofs.ErrNotExist, fs.ErrNotRegular, fs.ErrNotDir, fs.ErrSymlink, fs.ErrEscape, fs.ErrInvalidPath} {
+		if errors.Is(err, e) {
+			return fmt.Errorf("%w: %w", ErrNotFound, err)
+		}
 	}
 	return err
+}
+
+// Kind of a folder entry.
+type Kind string
+
+const (
+	KindFile   Kind = "file"
+	KindFolder Kind = "folder"
+	KindOther  Kind = "other" // a symlink, device or socket: listed, never opened
+)
+
+// Entry is one item in a folder listing.
+type Entry struct {
+	Name string `json:"name"`
+	Kind Kind   `json:"kind"`
+}
+
+// List returns a folder's entries sorted by name ("" for the vault root). Reserved entries
+// (.git, the trash, Syncthing files…) are hidden.
+func (v *Vault) List(p string) ([]Entry, error) {
+	dir := "."
+	if p != "" {
+		if err := checkPath(p); err != nil {
+			return nil, err
+		}
+		dir = p
+	}
+	des, err := v.root.ReadDir(dir)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	out := make([]Entry, 0, len(des))
+	for _, d := range des {
+		if fs.IsReserved(path.Join(p, d.Name())) {
+			continue
+		}
+		kind := KindOther
+		switch {
+		case d.Type().IsRegular():
+			kind = KindFile
+		case d.IsDir():
+			kind = KindFolder
+		}
+		out = append(out, Entry{Name: d.Name(), Kind: kind})
+	}
+	return out, nil
 }
 
 // Read returns a note and its revision. It takes no lock: a note is only ever replaced by
