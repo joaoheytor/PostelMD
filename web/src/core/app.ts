@@ -1,4 +1,5 @@
 import * as api from "./api";
+import type { Drafts } from "./drafts";
 import { Git } from "./git";
 import { Store } from "./store";
 import { message, Workspace } from "./workspace";
@@ -29,8 +30,10 @@ export class App {
     });
   }
 
-  async boot(): Promise<void> {
+  /** drafts opens this tab's drafts; it runs before any note opens (ADR-0003 §7). */
+  async boot(drafts: () => Promise<Drafts>): Promise<void> {
     try {
+      this.workspace.useDrafts(await drafts());
       this.state.set({ phase: await api.sessionState(), reauth: false });
     } catch (err) {
       this.state.set({ phase: "failed", reauth: false, error: `PostelMD didn't answer: ${message(err)}` });

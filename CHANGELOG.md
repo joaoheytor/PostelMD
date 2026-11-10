@@ -36,3 +36,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - Mermaid diagrams in the preview. They render in a sandboxed frame that can't reach the
   app or the network, and are shown as images named by the diagram's `accTitle`. A diagram
   with an error keeps its code and shows the error under it.
+- Unsaved edits are kept as drafts in the browser until the server has them. If a tab crashes,
+  closes or reloads before a save lands, opening the note offers the draft: compare it with
+  the saved text, restore it or discard it. "Unsaved drafts" lists every draft on the device,
+  and a draft of a note deleted meanwhile can be saved as a new note. PostelMD never deletes
+  a draft without asking.

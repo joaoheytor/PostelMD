@@ -4,8 +4,7 @@ import { type DiffLine, diffLines } from "../core/diff";
 import { History } from "../core/history";
 import type { Workspace } from "../core/workspace";
 import { LightElement, StoreController } from "./base";
-
-const mark: Record<DiffLine["kind"], string> = { same: "  ", added: "+ ", removed: "- " };
+import { diffView } from "./diff";
 
 /**
  * The open note's history: the commits that changed it; for the one selected, what changed
@@ -78,13 +77,7 @@ export class HistoryDialog extends LightElement {
     if (sel.content === undefined) return html`<p class="pm-history-hint">Loading…</p>`;
     const body = this.whole
       ? html`<pre class="pm-diff" aria-label="Text of this version">${sel.content}</pre>`
-      : html`<pre class="pm-diff" aria-label="Changes from this version to the current text">${this.changes(sel.content).map((l) =>
-          l.kind === "same"
-            ? html`<span>${mark.same}${l.text}\n</span>`
-            : l.kind === "added"
-              ? html`<ins>${mark.added}${l.text}\n</ins>`
-              : html`<del>${mark.removed}${l.text}\n</del>`,
-        )}</pre>`;
+      : diffView(this.changes(sel.content), "Changes from this version to the current text");
     return html`
       <div class="pm-dialog-actions">
         <button type="button" aria-pressed=${!this.whole} @click=${() => (this.whole = false)}>Changes since</button>

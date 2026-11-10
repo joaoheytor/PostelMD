@@ -181,3 +181,8 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 .pm-diagram { display: block; max-width: 100%; height: auto; margin: 0 0 1em; }
 .pm-diagram-error { color: var(--danger); font-size: 0.875rem; }
 .pm-diagram-frame { position: fixed; top: 0; left: -10000px; width: 1200px; height: 800px; border: 0; visibility: hidden; }
+
+/* Unsaved drafts (ADR-0003 §7). */
+.pm-draft-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.pm-draft-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
+.pm-draft-list li > span { flex: 1 1 12rem; }

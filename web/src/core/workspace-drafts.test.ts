@@ -1,0 +1,97 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "./api";
+import { type Draft, Drafts, MemoryDraftBackend } from "./drafts";
+import { Workspace } from "./workspace";
+
+vi.mock("./api", async (actual) => ({
+  ...(await actual<typeof import("./api")>()),
+  listFolder: vi.fn(async () => []),
+  readNote: vi.fn(async (path: string) => ({ content: `# ${path}`, etag: '"e1"' })),
+  saveNote: vi.fn(async () => ({ kind: "saved", etag: '"e2"' })),
+  createNote: vi.fn(async () => '"e5"'),
+}));
+
+const other = (over: Partial<Draft> = {}): Draft => ({ path: "a.md", esid: "closed-tab", text: "lost edit", base: '"e0"', gen: 4, savedAt: 1, ...over });
+
+describe("Workspace drafts (ADR-0003 §7)", () => {
+  let backend: MemoryDraftBackend;
+  let ws: Workspace;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    backend = new MemoryDraftBackend();
+    await backend.put(other());
+    await backend.put(other({ path: "gone.md", esid: "crashed" }));
+    ws = new Workspace();
+    ws.useDrafts(await Drafts.open(backend, "me", () => "moved"));
+  });
+
+  const rows = async () => (await backend.all()).map((d) => `${d.path} ${d.esid} ${d.text}`).sort();
+
+  it("opening a note offers the drafts other tabs left for it", async () => {
+    await ws.open("a.md");
+    expect(ws.noteDrafts.value.map((d) => d.text)).toEqual(["lost edit"]);
+    await ws.open("b.md");
+    expect(ws.noteDrafts.value).toEqual([]);
+  });
+
+  it("an edit of the open note goes to this tab's draft", async () => {
+    await ws.open("b.md");
+    ws.reader = () => "typed";
+    ws.state.value.open?.doc.edit();
+    await ws.state.value.open?.doc.writeDraft();
+    await ws.drafts?.idle();
+    expect(await rows()).toContain("b.md me typed");
+  });
+
+  it("restoring a draft puts it in the editor as an edit, keeps it as this tab's draft, then removes the old one", async () => {
+    await ws.open("a.md");
+    let editor = "# a.md";
+    ws.reader = () => editor;
+    const d = ws.noteDrafts.value[0];
+    if (!d) throw new Error("no draft offered");
+    const open = ws.state.value.open;
+    await ws.recoverDraft(d, (t) => (editor = t));
+    expect(ws.state.value.open).toBe(open); // the same note: the editor isn't remounted
+    expect(editor).toBe("lost edit");
+    expect(ws.state.value.open?.doc.dirty).toBe(true); // it saves through the normal path
+    expect(await rows()).toEqual(["a.md me lost edit", "gone.md crashed lost edit"]);
+    expect(ws.noteDrafts.value).toEqual([]);
+  });
+
+  it("discards only the draft the user picked", async () => {
+    await ws.open("a.md");
+    const d = ws.noteDrafts.value[0];
+    if (!d) throw new Error("no draft offered");
+    await ws.discardDraft(d);
+    expect(await rows()).toEqual(["gone.md crashed lost edit"]);
+    expect(ws.noteDrafts.value).toEqual([]);
+  });
+
+  it("saves an orphaned draft as a new note, and only then removes it", async () => {
+    await ws.refreshOffered();
+    expect(ws.offered.value.map((x) => x.path)).toEqual(["a.md", "gone.md"]);
+    const [d] = ws.offered.value.filter((x) => x.path === "gone.md");
+    if (!d) throw new Error("no orphan");
+    vi.mocked(api.createNote).mockRejectedValueOnce(new api.ApiError(409, "exists"));
+    await ws.saveDraftAsNew(d);
+    expect(ws.state.value.error).toContain("gone-recovered.md");
+    expect(await rows()).toContain("gone.md crashed lost edit"); // kept: nothing was saved
+    await ws.saveDraftAsNew(d);
+    expect(api.createNote).toHaveBeenLastCalledWith("gone-recovered.md", "lost edit");
+    expect(await rows()).not.toContain("gone.md crashed lost edit");
+    expect(ws.state.value.open?.doc.path).toBe("gone-recovered.md");
+    expect(ws.offered.value.map((x) => x.path)).toEqual(["a.md"]);
+  });
+
+  it("after saving a deleted note's text as a new note, its old draft goes", async () => {
+    await ws.open("b.md");
+    ws.reader = () => "typed";
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "gone" });
+    ws.state.value.open?.doc.edit();
+    await ws.state.value.open?.doc.flush();
+    await ws.saveAsNew();
+    await ws.drafts?.idle();
+    expect((await rows()).filter((r) => r.startsWith("b.md "))).toEqual([]);
+  });
+});
