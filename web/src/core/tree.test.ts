@@ -1,6 +1,59 @@
 import { describe, expect, it } from "vitest";
 import type { Entry } from "./api";
-import { join, moveTarget, parent, rebase, Tree } from "./tree";
+import { ancestors, join, moveTarget, parent, rebase, Tree } from "./tree";
+
+/** A vault of folders: each path lists its subfolders; anything not listed is empty. */
+function lister(folders: Record<string, string[]>, calls: string[] = []) {
+  return async (p: string): Promise<Entry[]> => {
+    calls.push(p);
+    return (folders[p] ?? []).map((name) => ({ name, kind: "folder" }));
+  };
+}
+
+describe("Tree.reveal and Tree.missing", () => {
+  it("expands every folder above a note, loading only those not loaded yet", async () => {
+    const calls: string[] = [];
+    const tree = new Tree(lister({ "": ["ops"], ops: ["db"] }, calls));
+    await tree.load("");
+    await tree.reveal("ops/db/failover.md");
+    const s = tree.state.value;
+    expect([...s.expanded].sort()).toEqual(["", "ops", "ops/db"]);
+    expect(calls.sort()).toEqual(["", "ops", "ops/db"]);
+    await tree.reveal("ops/db/other.md");
+    expect(calls).toHaveLength(3);
+    expect(ancestors("a.md")).toEqual([""]);
+  });
+
+  it("knows a folder is missing only from a loaded listing, checked again first", async () => {
+    const vault: Record<string, string[]> = { "": ["runbooks"] };
+    const calls: string[] = [];
+    const tree = new Tree(lister(vault, calls));
+    expect(await tree.missing("runbooks/tls")).toBe(false); // nothing loaded: can't tell
+    await tree.load("");
+    expect(await tree.missing("")).toBe(false);
+    expect(await tree.missing("runbooks")).toBe(false);
+    expect(await tree.missing("runbooks/tls")).toBe(false); // runbooks isn't loaded
+    await tree.load("runbooks");
+    calls.length = 0;
+    expect(await tree.missing("runbooks/tls")).toBe(true);
+    expect(calls).toEqual(["runbooks"]); // reloaded before saying so
+    expect(await tree.missing("nowhere/deep")).toBe(true);
+
+    vault["runbooks"] = ["tls"]; // created outside the editor since
+    expect(await tree.missing("runbooks/tls")).toBe(false);
+  });
+
+  it("can't tell when the listing fails to load again", async () => {
+    let fail = false;
+    const tree = new Tree(async () => {
+      if (fail) throw new Error("offline");
+      return [];
+    });
+    await tree.load("");
+    fail = true;
+    expect(await tree.missing("x")).toBe(false);
+  });
+});
 
 describe("Tree", () => {
   it("loads a folder when it is first expanded, and reloads after a change", async () => {

@@ -5,7 +5,8 @@ import { Workspace } from "./workspace";
 
 vi.mock("./api", async (actual) => ({
   ...(await actual<typeof import("./api")>()),
-  listFolder: vi.fn(async () => []),
+  // The vault holds three folders, all empty.
+  listFolder: vi.fn(async (path: string) => (path === "" ? ["ops", "archive", "ops-old"].map((name) => ({ name, kind: "folder" as const })) : [])),
   readNote: vi.fn(async (path: string) => ({ content: `# ${path}`, etag: '"e1"' })),
   saveNote: vi.fn(async () => ({ kind: "saved", etag: '"e2"' })),
   move: vi.fn(async () => {}),
@@ -54,6 +55,21 @@ describe("Workspace.move", () => {
     expect(await ws.move("ops/a.md", "b.md")).toBe(false);
     expect(ws.state.value.open?.doc.path).toBe("ops/a.md");
     expect(ws.state.value.error).toBe("Couldn't move ops/a.md: b.md already exists");
+  });
+
+  it("refuses a move into a folder that doesn't exist, before asking the server", async () => {
+    ws.state.value.open?.doc.edit();
+    expect(await ws.move("ops/a.md", "runbooks/tls/a.md")).toBe(false);
+    expect(log).toEqual([]); // not even the save: nothing was closed
+    expect(api.move).not.toHaveBeenCalled();
+    expect(ws.state.value.open?.doc.path).toBe("ops/a.md");
+    expect(ws.state.value.error).toBe("Folder runbooks/tls doesn't exist. Create it first with New folder.");
+  });
+
+  it("says which sides may be missing when the server answers not found", async () => {
+    vi.mocked(api.move).mockRejectedValue(new api.ApiError(404, "not found"));
+    expect(await ws.move("ops/a.md", "archive/a.md")).toBe(false);
+    expect(ws.state.value.error).toBe("Couldn't move ops/a.md: ops/a.md or the folder archive doesn't exist any more");
   });
 
   it("leaves an open note outside the moved folder alone", async () => {

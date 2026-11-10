@@ -65,7 +65,25 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - A runbook for running v0.1: backups, a restore drill, logs, upgrade and rollback, and
   recovering from a lost password, a git lock or a deleted note.
 
+### Changed
+- The conflict banner shows a line diff between your text and the other version, and says
+  what "Keep my version" and "Use the other version" each do.
+- The file tree shows the open note however it was opened (Ctrl+P, a link, "Save it as a new
+  note"): its folders expand, it is marked as current and scrolled into view.
+- Setup shows the password rule (at least 12 characters) under the field, and says how many
+  files from the notes folder became the first commit.
+- Save errors read as plain sentences, e.g. "Not saved: can't reach the server. Retrying;
+  your edits are kept in this browser.", never a raw browser error.
+
 ### Fixed
+- New note, New folder, Rename or move and the second setup step put the focus in their
+  field, so typing a name and pressing Enter works. Cancelling gives the focus back to the
+  button; after Delete it goes to the note's folder, and after a restore to the editor.
+- Moving a note into a folder that doesn't exist says so ("Create it first with New folder")
+  and keeps what was typed, instead of "not found" and a reset field.
+- Error messages in setup, login and the commit dialog are red again, not grey.
+- Accessibility: the login and setup pages have a main landmark, diffs can be scrolled from
+  the keyboard, and text areas, selects and expandable summaries show a focus ring.
 - An idle server no longer keeps about 65 MB after a login: the memory the password hash
   (argon2id) needs is handed back at once, so idle memory stays near 15 MB, well under the
   80 MB budget.

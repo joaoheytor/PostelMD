@@ -61,6 +61,15 @@ export function fields(form: HTMLFormElement): Record<string, string> {
   return out;
 }
 
+/**
+ * Puts the focus on el once host has rendered, if el is still on the page: an inline form
+ * that closes gives the focus back to the button that opened it.
+ */
+export async function refocus(host: LitElement, el: Element | null | undefined): Promise<void> {
+  await host.updateComplete;
+  if (el instanceof HTMLElement && el.isConnected) el.focus();
+}
+
 /** Opens a note, after saving the open one; asks first if some of its edits can't be saved. */
 export async function openNote(workspace: Workspace, path: string): Promise<void> {
   if (!(await workspace.saveOpen()) && !confirm("Some edits to the open note aren't saved. Leave them?")) return;

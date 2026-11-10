@@ -76,7 +76,7 @@ export class HistoryDialog extends LightElement {
     if (sel.version.deleted) return html`<p class="pm-history-hint">This commit deleted the note.</p>`;
     if (sel.content === undefined) return html`<p class="pm-history-hint">Loading…</p>`;
     const body = this.whole
-      ? html`<pre class="pm-diff" aria-label="Text of this version">${sel.content}</pre>`
+      ? html`<pre class="pm-diff" tabindex="0" aria-label="Text of this version">${sel.content}</pre>`
       : diffView(this.changes(sel.content), "Changes from this version to the current text");
     return html`
       <div class="pm-dialog-actions">
