@@ -108,12 +108,13 @@ func crashEverywhere(t *testing.T, op func(v *Vault) error, check func(t *testin
 	}
 }
 
-// trashed returns the content of the single trashed copy of a.md, or "" if none.
+// trashed returns the content of the single trashed copy of a.md
+// (.postelmd-trash/<stamp>/a.md), or "" if none.
 func trashed(t *testing.T, files map[string]string) string {
 	t.Helper()
 	var found []string
 	for k, c := range files {
-		if strings.HasPrefix(k, TrashDir+"/") && strings.HasSuffix(k, "-a.md") {
+		if parts := strings.Split(k, "/"); len(parts) == 3 && parts[0] == TrashDir && parts[2] == "a.md" {
 			found = append(found, c)
 		}
 	}

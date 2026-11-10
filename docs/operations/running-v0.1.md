@@ -224,19 +224,22 @@ vault through `\\wsl$`. Close those first.
 
 ## Restoring a deleted note
 
-Deleting moves the note or folder into `~/postelmd/vaults/notes/.postelmd-trash/`, renamed
-with the UTC time of the delete in front:
-`20261110T143005.123456789Z-runbook.md` (a second delete in the same instant adds `-1-`).
-There's no trash view in v0.1. To restore, move it back under a name that doesn't exist, then
-reload the page:
+Deleting moves the note or folder into `~/postelmd/vaults/notes/.postelmd-trash/`, into a
+folder named after the UTC time of the delete, under its own name:
+`20261110T143005.123456789Z/runbook.md` (a second delete in the same instant uses a folder
+ending in `-1`). Deletes made before this layout are named `20261110T143005.123456789Z-runbook.md`
+instead. The trash doesn't record the folder the note was in. There's no trash view in v0.1.
+To restore, move it back under a name that doesn't exist, then reload the page:
 
 ```sh
-ls -lt ~/postelmd/vaults/notes/.postelmd-trash/ | head
-mv -n ~/postelmd/vaults/notes/.postelmd-trash/20261110T143005.123456789Z-runbook.md \
+ls -lt ~/postelmd/vaults/notes/.postelmd-trash/*/ | head -20
+mv -n ~/postelmd/vaults/notes/.postelmd-trash/20261110T143005.123456789Z/runbook.md \
   ~/postelmd/vaults/notes/runbook.md
 ```
 
-The trash is never emptied automatically. Delete old entries by hand when you're sure.
+An empty time-named folder in the trash is what a crash during a delete leaves: the note
+is still where it was, and the folder can be removed. The trash is never emptied
+automatically. Delete old entries by hand when you're sure.
 
 ## Disk full, or permission errors
 

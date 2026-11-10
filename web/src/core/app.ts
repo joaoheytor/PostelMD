@@ -15,6 +15,24 @@ export interface AppState {
   notice?: string | undefined;
 }
 
+const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
+
+/**
+ * What setup's initial import did, or nothing if it imported nothing. ADR-0020: the import
+ * commits the files as they are, without a secret check, and leaves out files over 50 MB.
+ */
+export function importNotice({ imported, skipped }: api.SetupResult): string | undefined {
+  const parts: string[] = [];
+  if (imported > 0) {
+    parts.push(
+      `Imported ${files(imported)} from your notes folder as the first commit. ` +
+        "Check them for secrets before you push this repository anywhere.",
+    );
+  }
+  if (skipped > 0) parts.push(`${files(skipped)} over 50 MB ${skipped === 1 ? "was" : "were"} left out of git.`);
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
 /** The app's top-level state: which screen shows, and the workspace once logged in. */
 export class App {
   readonly state = new Store<AppState>({ phase: "loading", reauth: false });
@@ -53,15 +71,9 @@ export class App {
 
   /** First-run setup; returns how many files the initial commit imported. */
   async setup(form: api.SetupForm): Promise<number> {
-    const imported = await api.setup(form);
-    // ADR-0020: the import commits the files as they are, without a secret check.
-    const notice =
-      imported > 0
-        ? `Imported ${imported} file${imported === 1 ? "" : "s"} from your notes folder as the first commit. ` +
-          "Check them for secrets before you push this repository anywhere."
-        : undefined;
-    this.state.set({ phase: "ready", reauth: false, notice });
-    return imported;
+    const result = await api.setup(form);
+    this.state.set({ phase: "ready", reauth: false, notice: importNotice(result) });
+    return result.imported;
   }
 
   dismissNotice(): void {

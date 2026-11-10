@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SaveResult } from "./api";
 import { DocumentSession } from "./document";
-import type { NoteDrafts } from "./drafts";
+import { Drafts, MemoryDraftBackend, type NoteDrafts } from "./drafts";
 
 describe("DocumentSession drafts (ADR-0003 §7)", () => {
   let saves: { content: string; answer: (r: SaveResult) => void }[];
@@ -96,6 +96,55 @@ describe("DocumentSession drafts (ADR-0003 §7)", () => {
   it("writes no draft for a clean note", async () => {
     await doc.writeDraft();
     expect(draft.writes).toEqual([]);
+  });
+
+  describe("closed while its save is in flight", () => {
+    let backend: MemoryDraftBackend;
+    let closing: DocumentSession;
+
+    beforeEach(async () => {
+      backend = new MemoryDraftBackend();
+      const drafts = await Drafts.open(backend, "me", () => "moved");
+      closing = new DocumentSession("a.md", '"e0"', {
+        save: (_p, content) => new Promise((answer) => saves.push({ content, answer })),
+        read: () => text,
+        debounceMs: 1000,
+        draft: drafts.forNote("a.md"),
+      });
+      text = "v1";
+      closing.edit();
+      void closing.flush(); // the save of gen 1 is in flight
+      closing.dispose(); // closing writes the draft of gen 1
+      await drafts.idle();
+    });
+
+    // After a reload this tab's leftover drafts are offered like a closed tab's.
+    const offeredAfterReload = async () => (await Drafts.open(backend, "me", () => "reloaded")).offered("a.md");
+
+    it("the save that lands clears the draft it covered: reopening offers no stale draft", async () => {
+      expect((await backend.all()).map((d) => d.gen)).toEqual([1]);
+      saves.at(-1)?.answer({ kind: "saved", etag: '"e1"' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await backend.all()).toEqual([]);
+      expect(await offeredAfterReload()).toEqual([]);
+    });
+
+    it("a save that fails keeps the draft", async () => {
+      saves.at(-1)?.answer({ kind: "error", message: "down", retryAfterMs: 0, retry: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await offeredAfterReload()).map((d) => d.text)).toEqual(["v1"]);
+    });
+  });
+
+  it("an edit made after the save started keeps its draft when the save lands after closing", async () => {
+    type("v1");
+    void doc.flush(); // gen 1 in flight
+    type("v2");
+    doc.dispose(); // the draft holds gen 2
+    saves.at(-1)?.answer({ kind: "saved", etag: '"e1"' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(draft.writes.at(-1)).toEqual(["v2", '"e0"', 2]);
+    expect(draft.saved).toEqual([1]); // clears only up to gen 1: the gen 2 draft stays
   });
 
   it("taking the other version drops this tab's draft: the user chose", async () => {

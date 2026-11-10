@@ -41,5 +41,6 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
 | [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Accepted |
-| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted |
+| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022) |
 | [0021](0021-mermaid-in-a-sandboxed-frame.md) | Mermaid renders in a sandboxed frame, shown as images | Accepted |
+| [0022](0022-mvp-trash-layout.md) | The MVP trash keeps each item's name in a folder of its own | Accepted |

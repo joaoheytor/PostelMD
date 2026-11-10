@@ -39,6 +39,8 @@ export interface NoteDrafts {
 export class Drafts {
   /** This tab's writes and clears, applied in the order they were made. */
   private queue: Promise<void> = Promise.resolve();
+  /** The session that last wrote each note's draft in this tab. */
+  private readonly writers = new Map<string, object>();
 
   private constructor(
     private readonly backend: DraftBackend,
@@ -55,10 +57,21 @@ export class Drafts {
     return new Drafts(backend, esid);
   }
 
+  /**
+   * One session of a note. Each session counts its generations from 0, and a closed session's
+   * save can still land, so a save clears the note's draft only while that session wrote it
+   * last: never the draft of a session opened on the note since.
+   */
   forNote(path: string): NoteDrafts {
+    const session = {};
     return {
-      write: (text, base, gen) => this.enqueue(() => this.backend.put({ path, esid: this.esid, text, base, gen, savedAt: Date.now() })),
-      saved: (gen) => void this.enqueue(() => this.backend.deleteUpTo(path, this.esid, gen)),
+      write: (text, base, gen) =>
+        this.enqueue(() => {
+          this.writers.set(path, session);
+          return this.backend.put({ path, esid: this.esid, text, base, gen, savedAt: Date.now() });
+        }),
+      saved: (gen) =>
+        void this.enqueue(() => (this.writers.get(path) === session ? this.backend.deleteUpTo(path, this.esid, gen) : Promise.resolve())),
       drop: () => void this.enqueue(() => this.backend.delete(path, this.esid)),
     };
   }

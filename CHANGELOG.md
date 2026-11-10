@@ -109,6 +109,15 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   `!` re-includes, `**`, character classes and `core.ignorecase`. If
   `.git/info/exclude` is a symlink, commits stop with a message asking you to replace it
   with a regular file, rather than skip the patterns it holds.
+- Reopening a note that was closed while it was saving no longer offers an unsaved draft that
+  is the same as, or older than, what was saved.
+- Deleting a note or folder whose name is close to the 255-byte limit works instead of
+  failing with an internal error. Deleted items now go into a folder named after the time of
+  the delete, keeping their full name, so they can be found and restored under it. A new,
+  renamed or moved note or folder whose name is over 255 bytes is refused with a plain
+  message instead of an internal error.
+- The notice after setup counts exactly the files the first commit holds, and says how many
+  files over 50 MB were left out of git instead of implying the whole folder was imported.
 
 ### Security
 - PostelMD answers only to `localhost`, IP addresses and the host names in the new

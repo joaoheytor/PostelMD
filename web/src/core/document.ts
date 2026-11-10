@@ -186,12 +186,14 @@ export class DocumentSession implements Disposable {
     const snap = { content: this.opts.read(), gen: this.gen, base: this.baseETag };
     this.state.set({ status: "saving" });
     const r = await this.opts.save(this.path, snap.content, snap.base);
+    // The server holds snap.gen now, even if the note was closed meanwhile: its draft (written
+    // on close, under this tab's esid) is cleared up to that generation, never past it.
+    if (r.kind === "saved") this.opts.draft?.saved(snap.gen);
     if (this.disposed) return;
     switch (r.kind) {
       case "saved":
         this.baseETag = r.etag;
         this.savedGen = snap.gen;
-        this.opts.draft?.saved(snap.gen);
         this.failures = 0;
         if (this.dirty) {
           // Edits arrived during the save: save them after the debounce, not at once, so
