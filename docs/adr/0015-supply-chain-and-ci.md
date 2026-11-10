@@ -251,3 +251,24 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   actionlint image bundles shellcheck 0.11.0, the same as `SHELLCHECK_IMAGE`. They are linters, not
   security tools: they run with no network and a read-only mount, and the digest pin is the
   control. A bump moves both together, to releases at least two weeks old.
+- **2026-11-10, the release workflows** (`prerelease.yaml`, `release.yaml`). No new
+  dependency: they reuse `candidate.yaml`'s actions and tools, plus crane v0.22.1 pinned as
+  above.
+  - **Binaries follow the image:** built once by `prerelease.yaml`, gated with it, attested
+    there (build provenance on the binaries and SBOM files) and attached to the pre-release.
+    `release.yaml` verifies each against the exact RC identity and commit, attaches them to
+    the release, and signs a `SHA256SUMS` with `cosign sign-blob` under the release identity
+    (the "blob signatures plus checksums" above). No GoReleaser until there are archives
+    for more platforms.
+  - **A release reports its RC's version** (`X.Y.Z-rc.N`), in the binaries and in the SBOMs:
+    promotion keeps the tested bytes, so nothing is rebuilt to change the string. The release
+    notes and `verify-images.md` say so. SemVer orders `X.Y.Z-rc.N` before `X.Y.Z`, so a
+    scanner may treat a release as older than it is; security advisories name the RC
+    version too.
+  - **One RC tag, one digest:** `prerelease.yaml` claims the digest in a draft pre-release
+    before its first push or signature, and a run that builds another digest stops there.
+  - **The release re-checks the vulnerability thresholds** (Trivy on both platform digests,
+    `govulncheck` on the tagged source) instead of trusting the RC's results alone: a CVE
+    published since the RC blocks the release.
+  - **No caches in release builds**, and harden-runner **blocks** egress in both workflows,
+    with per-job allow-lists (`docs/ci-cd.md` §3).

@@ -22,7 +22,7 @@ REPO        ?=
 DIGEST_FILE ?= bin/image-digest
 GATE_DIR    ?= bin/candidate
 
-.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan image-push image-gate test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan image-push image-gate print-trivy-image test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -74,6 +74,9 @@ image-push: ## Push the image untagged, by digest, to REPO=<registry>/<name> (ca
 image-gate: ## Candidate gates (scripts/candidate-gate.sh) on REPO@$(DIGEST_FILE): smoke, Trivy, SBOMs
 	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/candidate-gate.sh $(REPO) "$$(cat $(DIGEST_FILE))" $(GATE_DIR)
 
+print-trivy-image: ## Print the digest-pinned Trivy image (release.yaml rescans the RC with it)
+	@echo '$(TRIVY_IMAGE)'
+
 test: test-go test-web test-scripts ## Go, web and script tests
 
 test-go:
@@ -87,6 +90,7 @@ e2e: build ## Playwright smoke tests against bin/postelmd (once: `cd web && npx 
 
 test-scripts: ## Tests for release scripts, git hooks and the agent guard hook (throwaway repos and SSH keys)
 	scripts/verify-release-tag_test.sh
+	scripts/release-meta_test.sh
 	scripts/pre-commit-adr_test.sh
 	python3 -B -m unittest discover -s .claude/hooks -p '*_test.py'
 
