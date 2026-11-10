@@ -86,6 +86,11 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   for secrets before you push the repository anywhere.
 
 ### Fixed
+- A note closed while its edits couldn't be saved, then opened again in the same tab, now
+  offers those edits as a draft to restore or compare, as it does after a reload. Typing in
+  the reopened note no longer writes over them, and "Unsaved drafts" lists them at once.
+  Restoring a draft made before the note's last save shows the conflict view, so you choose
+  between the two instead of losing the newer text.
 - A diagram whose renderer can't load now shows an error after 15 seconds instead of waiting
   forever, and editing a diagram no longer keeps every earlier version of it in memory.
 - Opening two notes in quick succession always shows the one opened last, even when the

@@ -20,6 +20,7 @@ describe("DocumentSession drafts (ADR-0003 §7)", () => {
       },
       saved: (gen) => void draft.saved.push(gen),
       drop: () => void draft.dropped++,
+      close: () => {},
     };
     text = "v0";
     doc = new DocumentSession("a.md", '"e0"', {

@@ -81,6 +81,7 @@ export class Workspace {
       const doc = new DocumentSession(path, note.etag, { save, read, ...(draft && { draft }) });
       this.noteDrafts.set(offered);
       this.state.set({ open: { doc, initial: note.content } });
+      await this.refreshOffered(); // the note closed to open this one may have left a draft
       await this.tree.reveal(path); // the tree shows it, however it was opened
     } catch (err) {
       if (seq === this.opens) this.state.set({ error: `Couldn't open ${path}: ${message(err)}` });
@@ -215,7 +216,7 @@ export class Workspace {
     }
     await this.tree.changed(path);
     await this.open(path); // closing the old note writes its draft, which goes next
-    this.drafts?.forNote(open.doc.path).drop();
+    open.doc.dropDraft();
   }
 
   /** Reads the drafts to offer again. */
@@ -225,13 +226,20 @@ export class Workspace {
 
   /**
    * Puts a draft of the open note in the editor (put replaces its text) as an edit, which then
-   * saves through the normal path (If-Match). The old draft is removed only once this tab's
-   * own draft holds the text.
+   * saves through the normal path. A draft is based on the version it was edited from: its
+   * save sends If-Match with that base, so a draft older than the saved note gets a 412 and the
+   * conflict view, never a silent overwrite. The old draft is removed only once this tab's own
+   * draft holds the text.
    */
   async recoverDraft(d: Draft, put: (text: string) => void): Promise<void> {
     const open = this.state.value.open;
     if (!open || open.doc.path !== d.path) return;
+    if (d.base !== open.doc.etag) {
+      await open.doc.flush(); // no save in flight may move the base past the draft's
+      if (this.state.value.open !== open) return;
+    }
     put(d.text);
+    open.doc.rebase(d.base);
     open.doc.edit();
     await open.doc.writeDraft();
     await this.discardDraft(d);

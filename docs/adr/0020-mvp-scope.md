@@ -1,6 +1,6 @@
 # ADR-0020: MVP scope: one user, one vault, no database
 
-- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md)
+- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md) and its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md)
 - **Date:** 2026-11-09
 
 ## Context

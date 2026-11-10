@@ -329,8 +329,11 @@ recovery, and asserts the table's outcome. A committed SQLite transaction counts
   - if it is dirty, **never overwrite it**: show "changed on server" and resolve with a 3-way
     merge (base = the snapshot's base content).
 - `412` opens the conflict view: mine / theirs / merge.
-- **Drafts are per editing session.** Each tab gets a persistent **editing-session ID**
-  (`esid`, a ULID kept in `sessionStorage`, so it survives a tab reload).
+- **Drafts are per note session.** Each tab gets a persistent **editing-session ID**
+  (`esid`, a ULID kept in `sessionStorage`, so it survives a tab reload). Edit generations
+  restart each time a note is opened, so each opening of a note in the tab is a **note
+  session** with its own **draft key** `<esid>.<n>` (`n` counts the tab's note sessions;
+  [ADR-0023](0023-a-draft-key-per-note-session.md)). The `esid` stays per tab.
   - **Cloned identities:** duplicating a tab, or opening a window that has an opener, can
     copy `sessionStorage`, and with it the `esid`. On load, the tab must **claim** its `esid`
     with the Web Locks API (`navigator.locks.request('esid:'+esid, {ifAvailable: true})`,
@@ -341,14 +344,18 @@ recovery, and asserts the table's outcome. A committed SQLite transaction counts
     one on every page load before any draft write. Drafts from earlier `esid`s show up in the
     recovery dialog on open, so a reload costs one extra recovery prompt and never causes a
     shared identity.
-  - Drafts are keyed `instanceID/userID/vaultID/fileID/esid` and hold the base ETag and edit
-    generation.
-  - A save acknowledgement clears **only the draft with the same `esid` and edit generation**.
-    It never touches another tab's draft.
-  - On open, if drafts from other editing sessions (closed tabs, crashed browsers) exist for the
-    file, the recovery dialog lists all of them.
-  - **Orphaned drafts.** On vault load, the client lists every local draft for that vault
-    whose `esid` no live tab holds and that wasn't opened yet: drafts of closed tabs, of files
+  - Drafts are keyed `instanceID/userID/vaultID/fileID/<draft key>` and hold the base ETag
+    and edit generation. A reload moves the drafts of every draft key of the tab's `esid` to
+    a fresh one before any write.
+  - A save acknowledgement clears **only the draft with the same draft key, up to that edit
+    generation**. It never touches another tab's or another note session's draft.
+  - Restoring a draft saves it with If-Match on the draft's base ETag: if the file changed
+    since, the `412` opens the conflict view instead of overwriting the newer version.
+  - On open, if drafts from other note sessions (closed tabs, crashed browsers, earlier
+    openings in this tab) exist for the file, the recovery dialog lists all of them.
+  - **Orphaned drafts.** On vault load and each time a note is opened, the client lists every
+    local draft for that vault whose `esid` no live tab holds, or whose note session in this
+    tab has closed, and that wasn't opened yet: drafts of closed tabs and notes, of files
     tombstoned or moved since (`410`), and of files the user can no longer open. Each can be
     opened beside the current version, saved as a new file, exported or discarded.
     **PostelMD never deletes a draft without asking**; the only exceptions are in ADR-0018
