@@ -12,7 +12,7 @@ PLATFORMS ?= linux/amd64,linux/arm64
 # Trivy v0.76.1, its cosign signature verified against aquasecurity/trivy's release workflow.
 TRIVY_IMAGE ?= ghcr.io/aquasecurity/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
 
-.PHONY: help ci build web-build image-bins image image-multiarch image-smoke image-scan test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -75,6 +75,9 @@ lint-repo:
 	actionlint
 	shellcheck scripts/*.sh .githooks/*
 	yamllint --strict .
+
+perf: build ## PRD budgets for one user against bin/postelmd (SAMPLES sessions per mode, default 30)
+	cd test/perf/app && npm ci --ignore-scripts && npm run --silent bench
 
 vuln: web-deps ## govulncheck and npm audit (shipped dependencies)
 	go tool govulncheck ./...

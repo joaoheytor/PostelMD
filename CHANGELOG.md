@@ -49,3 +49,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - Note templates: **New note** can start from a runbook, postmortem, ADR or on-call handoff.
   The note's name and today's date are filled in; the form asks for the rest, and anything left
   empty stays as a `{{placeholder}}` to fill in later.
+
+### Fixed
+- An idle server no longer keeps about 65 MB after a login: the memory the password hash
+  (argon2id) needs is handed back at once, so idle memory stays near 15 MB, well under the
+  80 MB budget.
