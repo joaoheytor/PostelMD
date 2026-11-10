@@ -3,10 +3,14 @@
 package vault
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -128,6 +132,70 @@ func TestIgnoredDirectoryIsNotWalked(t *testing.T) {
 	must(t, err)
 	if got := paths(changes(t, v)); !reflect.DeepEqual(got, []string{".gitignore", "notes/a.md"}) {
 		t.Fatalf("status = %v", got)
+	}
+}
+
+// TestUnwritableOrOddExcludeDoesntStopGit: adopting a repository whose .git/info can't be
+// written, or whose info/exclude is a symlink or a FIFO, still starts: EnableGit succeeds
+// and a warning names only the repository-relative file. A read-only info/exclude still
+// applies, so Status works. One PostelMD can't read safely fails Status and Commit closed
+// (git would follow the symlink and apply its patterns; PostelMD won't leave the vault).
+func TestUnwritableOrOddExcludeDoesntStopGit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(t *testing.T, info string)
+		root   bool // needs a non-root user
+		unsafe bool // Status and Commit fail with ErrUnsafeExclude
+	}{
+		{"read-only info", func(t *testing.T, info string) {
+			must(t, os.Chmod(info, 0o500))                  //nolint:gosec // read-only, but still listable
+			t.Cleanup(func() { _ = os.Chmod(info, 0o700) }) //nolint:gosec // removing a directory needs its x bit
+		}, true, false},
+		{"symlinked exclude", func(t *testing.T, info string) {
+			must(t, os.WriteFile(filepath.Join(info, "elsewhere"), []byte("a.md\n"), 0o600))
+			must(t, os.Remove(filepath.Join(info, "exclude")))
+			must(t, os.Symlink("elsewhere", filepath.Join(info, "exclude")))
+		}, false, true},
+		{"FIFO exclude", func(t *testing.T, info string) {
+			must(t, os.Remove(filepath.Join(info, "exclude")))
+			must(t, syscall.Mkfifo(filepath.Join(info, "exclude"), 0o600))
+		}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.root && os.Geteuid() == 0 {
+				t.Skip("root writes read-only directories")
+			}
+			dir := t.TempDir()
+			writeFiles(t, dir, map[string]string{"a.md": "A"})
+			gitCLI(t, dir, "init", "-q", "-b", "main")
+			info := filepath.Join(dir, ".git", "info")
+			writeFiles(t, dir, map[string]string{".git/info/exclude": "# mine\n"})
+			tc.setup(t, info)
+			var logs bytes.Buffer
+			v, err := Open(dir)
+			must(t, err)
+			defer func() { _ = v.Close() }()
+			v.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+			_, err = v.EnableGit()
+			must(t, err)
+			if tc.unsafe {
+				if _, err := v.Status(ctx); !errors.Is(err, ErrUnsafeExclude) {
+					t.Fatalf("Status = %v, want ErrUnsafeExclude", err)
+				}
+				if _, err := v.Commit(ctx, "x", "Ada", "a@b"); !errors.Is(err, ErrUnsafeExclude) {
+					t.Fatalf("Commit = %v, want ErrUnsafeExclude", err)
+				}
+				if got := gitCLI(t, dir, "rev-list", "--all"); got != "" {
+					t.Fatalf("something was committed: %q", got)
+				}
+			} else if got := paths(changes(t, v)); !reflect.DeepEqual(got, []string{"a.md"}) {
+				t.Fatalf("status = %v", got)
+			}
+			out := logs.String()
+			if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "info/exclude") || strings.Contains(out, dir) {
+				t.Fatalf("want a warning naming only info/exclude, got %q", out)
+			}
+		})
 	}
 }
 

@@ -57,6 +57,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = v.Close() }()
+	v.SetLogger(log)
 	created, err := v.EnableGit()
 	if err != nil {
 		return err

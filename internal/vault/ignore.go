@@ -1,11 +1,18 @@
 package vault
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
 	"github.com/joaoheytor/PostelMD/internal/store/git"
 )
+
+// ErrUnsafeExclude: .git/info/exclude is a symlink or not a regular file, so PostelMD can't
+// tell what git would ignore; status and commit refuse until the user replaces it.
+var ErrUnsafeExclude = errors.New("vault: .git/info/exclude is a symlink or not a regular file; " +
+	"PostelMD can't read it safely, replace it with a regular file")
 
 // commitWalk is walk for commits: it applies git's ignore rules (git.Ignore), so what
 // PostelMD commits is what `git add -A` would.
@@ -20,7 +27,20 @@ type commitWalk struct {
 	fn      func(p string, size int64, ignored bool) error
 }
 
-func (v *Vault) walkForCommit(exclude []byte, committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error) error {
+func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error) error {
+	exclude, err := v.git.Exclude()
+	if errors.Is(err, git.ErrExcludeNotRegular) {
+		// Git would follow it and apply its patterns; reading past it could commit what
+		// the user excluded, and following it could leave the vault. Fail closed.
+		return fmt.Errorf("%w: %w", ErrUnsafeExclude, err)
+	}
+	if err != nil {
+		return err
+	}
+	fold, err := v.git.IgnoreCase()
+	if err != nil {
+		return err
+	}
 	w := &commitWalk{v: v, tracked: map[string]bool{}, fn: fn}
 	for p := range committed {
 		for d := p; strings.Contains(d, "/"); {
@@ -28,8 +48,7 @@ func (v *Vault) walkForCommit(exclude []byte, committed map[string]git.Hash, fn 
 			w.tracked[d] = true
 		}
 	}
-	var none *git.Ignore
-	return w.walk(".", none.With(exclude, "."), false)
+	return w.walk(".", git.NewIgnore(fold).With(exclude, "."), false)
 }
 
 func (w *commitWalk) walk(dir string, ign *git.Ignore, ignored bool) error {

@@ -73,4 +73,7 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   `.git/info/exclude` ignore (such as `.env` or `node_modules/`), as `git add -A` does;
   files already in the history stay tracked. An existing repository you adopt also gets
   PostelMD's trash folder added to `.git/info/exclude`, so your own `git add -A` no longer
-  commits deleted notes.
+  commits deleted notes. Patterns are matched exactly as git matches them, including
+  `!` re-includes, `**`, character classes and `core.ignorecase`. If
+  `.git/info/exclude` is a symlink, commits stop with a message asking you to replace it
+  with a regular file, rather than skip the patterns it holds.
