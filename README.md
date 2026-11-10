@@ -28,6 +28,18 @@ docker logs postelmd   # prints a one-time setup URL
 (See [ADR-0009](docs/adr/0009-zero-infra-distribution.md). The image isn't published yet: until the
 first release, build it with `make image`, which tags it `postelmd:dev`, and use that name above.)
 
+Settings are optional. They come from flags, then `POSTELMD_*` environment variables, then
+`.postelmd/config.yaml` in the data directory (`~/postelmd/.postelmd/config.yaml` above), then
+defaults. An unknown key in the file stops the server with its name, so a typo never goes
+unnoticed:
+
+```yaml
+listen: ":8080"          # POSTELMD_LISTEN, --listen
+allow_network_fs: false  # POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
+```
+
+The data directory itself is set with `--data` or `POSTELMD_DATA_DIR`, never in the file.
+
 ## Documentation
 
 | Doc | Purpose |
