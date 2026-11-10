@@ -67,7 +67,9 @@ type Vault struct {
 	mu   chan struct{} // the vault mutex; a channel so waiting is bounded
 	wait time.Duration
 	now  func() time.Time
-	log  *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
+	// afterCheck, in tests only, runs once a commit's check has passed, still under the mutex.
+	afterCheck func()
+	log        *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
 }
 
 // Open opens the vault at dir, removes every leftover temp file (a save that didn't finish

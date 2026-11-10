@@ -21,6 +21,7 @@ export class App {
   readonly workspace = new Workspace();
   readonly git = new Git({
     status: api.gitStatus,
+    readFile: api.readFileBytes,
     commit: api.commit,
     removeLocks: api.removeGitLocks,
     saveOpen: () => this.workspace.saveOpen(),
@@ -53,7 +54,12 @@ export class App {
   /** First-run setup; returns how many files the initial commit imported. */
   async setup(form: api.SetupForm): Promise<number> {
     const imported = await api.setup(form);
-    const notice = imported > 0 ? `Imported ${imported} file${imported === 1 ? "" : "s"} from your notes folder as the first commit.` : undefined;
+    // ADR-0020: the import commits the files as they are, without a secret check.
+    const notice =
+      imported > 0
+        ? `Imported ${imported} file${imported === 1 ? "" : "s"} from your notes folder as the first commit. ` +
+          "Check them for secrets before you push this repository anywhere."
+        : undefined;
     this.state.set({ phase: "ready", reauth: false, notice });
     return imported;
   }
