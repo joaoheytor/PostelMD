@@ -183,7 +183,12 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
 - The vault is the git repository: the working tree is `/data/vaults/notes`, and its git
   metadata is `/data/vaults/notes/.git` (the repository setup adopts or creates). `/data`
   itself is never a repository. The editor shows the uncommitted changes, and the user
-  commits them with a message. Optionally, an auto-commit runs after a quiet window.
+  commits them with a message. **There is no auto-commit in the MVP.** ADR-0010 allows it
+  only behind the commit gate (the server scans the exact bytes it commits and skips a file
+  with a finding), and the MVP's secret warning runs in the editor only. A manual commit is
+  safe because the user has seen the warning first; an auto-commit would put a pasted secret
+  into the history unseen, and removing it means rewriting history. Auto-commit arrives in
+  v0.2, with the gate.
 - A commit is built from bytes (#39), its objects are durable before the ref moves (#56),
   and the ref is moved with git's lockfile protocol (#54). After a crash, the branch is the
   old or the new commit. Files whose commit didn't land are still uncommitted changes, so the
