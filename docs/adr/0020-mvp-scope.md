@@ -88,6 +88,9 @@ side effect):
   `RENAME_NOREPLACE`. The trash lives inside the vault, so the rename never crosses a
   filesystem, and nothing is unlinked in place (CLAUDE.md rule 4). The trash is emptied by
   hand from the UI.
+- After a move or a delete, the destination folder is synced before the source. So a power
+  loss in between can leave the item in **both** places, a duplicate to clean up, but never in
+  neither. The crash tests check this, under both the process-kill and power-loss models.
 - A filesystem without `RENAME_NOREPLACE` is refused at startup (ADR-0006's fallbacks are
   deferred), as are 9p, FUSE and NFS (ADR-0014).
 - **One vault mutex** serializes every mutation (ADR-0003 §4, simplified: no per-file

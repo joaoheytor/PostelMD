@@ -5,6 +5,7 @@ package fs
 import (
 	"errors"
 	"fmt"
+	iofs "io/fs"
 )
 
 // Root is not implemented outside Linux yet. The portable fallback (an O_NOFOLLOW walk
@@ -43,3 +44,6 @@ func (r *Root) Remove(string) error { return errors.ErrUnsupported }
 
 // SyncFile is unsupported on this platform.
 func (r *Root) SyncFile(string) error { return errors.ErrUnsupported }
+
+// ReadDir is unsupported on this platform.
+func (r *Root) ReadDir(string) ([]iofs.DirEntry, error) { return nil, errors.ErrUnsupported }

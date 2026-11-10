@@ -7,6 +7,7 @@ import (
 	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,32 @@ func TestSyncFile(t *testing.T) {
 	}
 	if err := r.SyncFile("link-outside"); !errors.Is(err, ErrSymlink) {
 		t.Fatalf("SyncFile on a symlink = %v, want ErrSymlink", err)
+	}
+}
+
+func TestReadDir(t *testing.T) {
+	r, _ := newVault(t)
+	entries, err := r.ReadDir(".")
+	mustDo(t, err)
+	var got []string
+	for _, e := range entries {
+		kind := "file"
+		switch {
+		case e.Type()&iofs.ModeSymlink != 0:
+			kind = "symlink"
+		case e.IsDir():
+			kind = "dir"
+		}
+		got = append(got, e.Name()+":"+kind)
+	}
+	want := "dir:dir dirlink:symlink escape-dir:symlink link-inside:symlink link-outside:symlink"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("ReadDir(.) = %v, want %s", got, want)
+	}
+	if _, err := r.ReadDir("dirlink"); !errors.Is(err, ErrSymlink) {
+		t.Fatalf("ReadDir through a symlink = %v, want ErrSymlink", err)
+	}
+	if _, err := r.ReadDir("dir/note.md"); err == nil {
+		t.Fatal("ReadDir on a file succeeded")
 	}
 }
