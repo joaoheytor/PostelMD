@@ -22,6 +22,9 @@ var (
 	ErrNotInCommit = errors.New("store/git: no such file in that commit")
 )
 
+// NewHash parses a hex object ID.
+func NewHash(s string) Hash { return plumbing.NewHash(s) }
+
 // BlobHash is the git object ID of a file with content data.
 func BlobHash(data []byte) Hash { return plumbing.ComputeHash(plumbing.BlobObject, data) }
 
@@ -72,7 +75,7 @@ func (g *Repo) Files(commit Hash) (map[string]Hash, error) {
 
 // Version is one commit that changed a file.
 type Version struct {
-	Commit  Hash      `json:"commit"`
+	Commit  string    `json:"commit"` // hex
 	Message string    `json:"message"`
 	Author  string    `json:"author"`
 	When    time.Time `json:"when"`
@@ -96,7 +99,7 @@ func (g *Repo) Log(head Hash, path string, limit int) ([]Version, error) {
 	err = iter.ForEach(func(c *object.Commit) error {
 		_, ferr := c.File(path)
 		out = append(out, Version{
-			Commit: c.Hash, Message: strings.TrimSpace(c.Message), Author: c.Author.Name,
+			Commit: c.Hash.String(), Message: strings.TrimSpace(c.Message), Author: c.Author.Name,
 			When: c.Author.When, Deleted: errors.Is(ferr, object.ErrFileNotFound),
 		})
 		if len(out) >= limit {

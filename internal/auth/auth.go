@@ -116,6 +116,22 @@ func (s *Service) NewSetupToken() (string, error) {
 	return s.setupToken, nil
 }
 
+// CheckSetupToken reports whether token is the current, unexpired setup token
+// (ErrBadToken otherwise, ErrAlreadySetUp after setup). It doesn't use the token up.
+func (s *Service) CheckSetupToken(ctx context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cred != nil {
+		return ErrAlreadySetUp
+	}
+	if s.setupToken == "" || !s.now().Before(s.setupExpires) ||
+		subtle.ConstantTimeCompare([]byte(token), []byte(s.setupToken)) != 1 {
+		s.audit.Record(ctx, "setup.rejected")
+		return ErrBadToken
+	}
+	return nil
+}
+
 // Setup sets the password and the git author with the setup token, and returns a session.
 func (s *Service) Setup(ctx context.Context, token, password, name, email string) (string, error) {
 	if err := checkProfile(name, email); err != nil {

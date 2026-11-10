@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
-	"github.com/joaoheytor/PostelMD/internal/store/git"
 )
 
 // gitCLI runs the real git on dir: the repository PostelMD writes must stay a plain git
@@ -46,12 +45,22 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	if _, err := v.Delete(ctx, "b.md"); err != nil { // a trashed note is never committed
 		t.Fatal(err)
 	}
+	if n, err := v.PendingImport(ctx); err != nil || n != 1 {
+		t.Fatalf("PendingImport = %d, %v", n, err)
+	}
 	want := []Change{{"notes/a.md", Added}}
 	if got := changes(t, v); !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %v, want %v", got, want)
 	}
-	first, err := v.Commit(ctx, "  Initial import  ", "Ada", "ada@example.invalid")
+	if n, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil || n != 1 {
+		t.Fatalf("ImportInitial = %d, %v", n, err)
+	}
+	if n, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil || n != 0 {
+		t.Fatalf("a second ImportInitial = %d, %v; want 0", n, err)
+	}
+	hist, err := v.History("notes/a.md", 1)
 	must(t, err)
+	first := hist[0].Commit
 	if got := gitCLI(t, dir, "ls-files"); got != "notes/a.md" {
 		t.Fatalf("committed files = %q", got)
 	}
@@ -84,7 +93,7 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	_, err = v.Commit(ctx, "Remove c", "Ada", "ada@example.invalid")
 	must(t, err)
 
-	hist, err := v.History("notes/a.md", 10)
+	hist, err = v.History("notes/a.md", 10)
 	must(t, err)
 	if len(hist) != 2 || hist[0].Message != "Edit" || hist[1].Commit != first {
 		t.Fatalf("history = %+v", hist)
@@ -103,6 +112,9 @@ func TestAdoptCommitAndHistory(t *testing.T) {
 	}
 	if _, err := v.Restore(ctx, "c.md", first, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("restoring a note absent from that commit = %v", err)
+	}
+	if _, err := v.Version("notes/a.md", "HEAD"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a non-hex commit = %v, want ErrNotFound", err)
 	}
 	if _, err := v.History(".git/config", 10); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("history of a reserved path = %v", err)
@@ -134,7 +146,7 @@ func TestAdoptAnExistingRepository(t *testing.T) {
 	}
 
 	gitCLI(t, dir, "checkout", "-q", "--detach")
-	if _, err := v.Commit(ctx, "x", "Ada", "a@b"); !errors.Is(err, git.ErrDetached) {
+	if _, err := v.Commit(ctx, "x", "Ada", "a@b"); !errors.Is(err, ErrDetached) {
 		t.Fatalf("commit on a detached HEAD = %v", err)
 	}
 }

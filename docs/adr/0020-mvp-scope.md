@@ -138,6 +138,22 @@ Authentication:
 | `DELETE /api/v1/session` | log out this browser |
 | `POST /api/v1/session/revoke` | log out everywhere (bumps the epoch) |
 | `PUT /api/v1/password` `{current, next}` | `204` + a new session; every other session is revoked |
+| `POST /api/v1/setup/check` `{token}` | before setup: `{files}`, the number of files setup will commit; `403` on a wrong token |
+
+Setup answers `{imported}`: an adopted folder's files become the "Initial import" commit,
+with the author entered at setup. If that commit fails, setup still succeeds and the files
+stay uncommitted changes.
+
+Git (every request needs a session):
+
+| Request | Result |
+|---|---|
+| `GET /api/v1/git/status` | `{branch, changes: [{path, kind}], skipped, locks}` |
+| `POST /api/v1/git/commit` `{message}` | `201 {commit}`; `409` nothing to commit, branch moved or detached HEAD; `422` empty message; `423` a git lock blocks commits |
+| `POST /api/v1/git/locks/remove` `{confirmNoOtherGit: true}` | removes the leftover locks; `422` without the confirmation |
+| `GET /api/v1/history/{path}?limit=` | `{versions: [{commit, message, author, when, deleted}]}`, newest first |
+| `GET /api/v1/versions/{commit}/{path}` | the note's bytes in that commit, without an `ETag` |
+| `POST /api/v1/restore` `{path, commit}` with `If-Match` | through the save path: `204` + `ETag`, `412` with the current note, `404` if the note is gone, `428` without `If-Match` |
 
 Every notes request needs a session (`401` otherwise). Non-safe cross-origin requests are
 refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints accept only
