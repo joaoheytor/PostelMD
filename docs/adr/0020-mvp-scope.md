@@ -69,7 +69,9 @@ identity, the watcher, search and multiple users.
   it would let anyone delay the owner's login (ADR-0005's account rule assumes passkeys).
   Password checks run one at a time, because each argon2id takes 64 MB.
 - argon2id comes from `golang.org/x/crypto`, already in the module graph through go-git; the
-  MVP makes it a direct dependency (CLAUDE.md rule 5).
+  MVP makes it a direct dependency (CLAUDE.md rule 5). `postelmd reset-password` reads the
+  password without echo through `golang.org/x/term`, also already in the graph (go-git's
+  SSH transport); it becomes direct too.
 
 ### Saving
 ADR-0003's client rules stay. Its server side is replaced, for the MVP, by single-rename

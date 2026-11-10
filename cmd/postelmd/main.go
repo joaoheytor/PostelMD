@@ -1,14 +1,19 @@
 // Command postelmd is the PostelMD server and its operational subcommands.
 //
-// Only `version` exists so far; `serve` and the other subcommands listed in CLAUDE.md
-// arrive with the milestones in docs/roadmap.md.
+// The MVP has serve, reset-password, healthcheck and version (ADR-0020); the other
+// subcommands listed in CLAUDE.md arrive with the milestones in docs/roadmap.md.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
+
+	"github.com/joaoheytor/PostelMD/internal/config"
 )
 
 // Set at build time with -ldflags "-X main.version=... -X main.commit=...".
@@ -20,7 +25,10 @@ var (
 const usage = `Usage: postelmd <command>
 
 Commands:
-  version   Print the version and build information
+  serve            Run the server (flags: --data, --listen)
+  reset-password   Set a new password, with the server stopped
+  healthcheck      Exit 0 if the local server answers /healthz
+  version          Print the version and build information
 `
 
 func main() {
@@ -34,6 +42,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "serve", "reset-password", "healthcheck":
+		cfg, err := config.Load(args[0], args[1:], stderr)
+		if err != nil {
+			return 2
+		}
+		return report(stderr, args[0], runCommand(args[0], cfg, stdout))
 	case "version", "--version", "-v":
 		fmt.Fprintf(stdout, "postelmd %s (commit %s, %s, %s/%s)\n",
 			version, commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
@@ -45,4 +59,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "postelmd: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+func runCommand(name string, cfg config.Config, stdout io.Writer) error {
+	switch name {
+	case "serve":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return serve(ctx, cfg, stdout, nil)
+	case "reset-password":
+		return resetPassword(cfg, os.Stdin, stdout)
+	default:
+		return healthcheck(cfg)
+	}
+}
+
+func report(stderr io.Writer, name string, err error) int {
+	if err != nil {
+		fmt.Fprintf(stderr, "postelmd %s: %v\n", name, err)
+		return 1
+	}
+	return 0
 }

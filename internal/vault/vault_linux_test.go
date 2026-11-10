@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -229,8 +231,8 @@ func TestConcurrentSavesWithTheSameRev(t *testing.T) {
 	}
 }
 
-// blockOn pauses the first step of kind until release is closed, while the operation holds
-// the vault mutex.
+// blockOn pauses the first step of kind on a vault path until release is closed, while
+// the operation holds the vault mutex.
 type blockOn struct {
 	kind             fs.OpKind
 	reached, release chan struct{}
@@ -242,7 +244,7 @@ func newBlock(kind fs.OpKind) *blockOn {
 }
 
 func (b *blockOn) Before(op fs.Op) error {
-	if op.Kind == b.kind {
+	if op.Kind == b.kind && !strings.HasPrefix(op.Path, TmpDir+"/") { // not Open's probe
 		b.once.Do(func() { close(b.reached); <-b.release })
 	}
 	return nil
@@ -310,5 +312,28 @@ func TestList(t *testing.T) {
 	}
 	if _, _, err := v.Read("link.md"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Read through a symlink = %v, want ErrNotFound (never followed)", err)
+	}
+}
+
+// noReplace9p fails every RENAME_NOREPLACE with EINVAL, as a Docker Desktop Windows-path
+// bind mount (9p) does.
+type noReplace9p struct{}
+
+func (noReplace9p) Before(op fs.Op) error {
+	if op.Kind == fs.OpRenameNoReplace {
+		return syscall.EINVAL // the same Errno the store checks for
+	}
+	return nil
+}
+func (noReplace9p) After(fs.Op, error) {}
+
+func TestOpenRefusesAFilesystemWithoutNoReplace(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Open(dir, fs.WithHook(noReplace9p{}))
+	if !errors.Is(err, fs.ErrNoReplaceUnsupported) || !strings.Contains(err.Error(), "named volume") {
+		t.Fatalf("Open on a 9p-like filesystem = %v, want ErrNoReplaceUnsupported with the fix", err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, TmpDir)); len(entries) != 0 {
+		t.Fatalf("the probe left %d files", len(entries))
 	}
 }
