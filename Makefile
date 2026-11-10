@@ -15,7 +15,7 @@ PLATFORMS ?= linux/amd64,linux/arm64
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-ci: lint test vuln build image-multiarch image-smoke ## Everything the CI `required` check runs (needs Docker)
+ci: lint test vuln build e2e image-multiarch image-smoke ## Everything the CI `required` check runs (needs Docker)
 
 build: web-build ## Build the postelmd binary, with the web app embedded, into bin/
 	CGO_ENABLED=0 go build -trimpath -tags webui -ldflags "$(LDFLAGS)" -o bin/postelmd ./cmd/postelmd
@@ -48,7 +48,7 @@ test-go:
 test-web: web-deps
 	cd web && npm test
 
-e2e: build ## Playwright smoke tests against bin/postelmd (needs `npx playwright install chromium`)
+e2e: build ## Playwright smoke tests against bin/postelmd (once: `cd web && npx playwright install --with-deps chromium`)
 	cd web && npx playwright test
 
 test-scripts: ## Tests for release scripts (throwaway repos and SSH keys)
