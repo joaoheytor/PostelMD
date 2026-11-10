@@ -1,6 +1,6 @@
 # ADR-0020: MVP scope: one user, one vault, no database
 
-- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md)
+- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md) and its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md)
 - **Date:** 2026-11-09
 
 ## Context
@@ -334,12 +334,3 @@ design.
 | No auth for a single user | Auth stays on (ADR-0005, FrankMD lesson); one password costs little. |
 | A few trusted accounts with equal access | Not needed yet: the maintainer is the only user. Accounts come with roles in v0.3. |
 | Push in the MVP, without the secret gate | Pushing a secret to a remote is the one MVP-sized mistake we can't undo; push waits for the gate. |
-
-## Clarifications
-- **2026-11-10, a draft's `esid` names the note session (#105).** Edit generations restart
-  each time a note is opened, so within a tab each opening of a note is its own editing
-  session, and its drafts are keyed `<esid>.<n>` + path, `n` counting the tab's note
-  sessions. A save clears only its own session's draft. Drafts of notes closed in this tab
-  are offered like a closed tab's, so reopening a note whose save failed offers its draft
-  instead of writing over it. A reload moves every draft under the tab's `esid` or one of its
-  `<esid>.<n>` keys to a fresh one, as above.
