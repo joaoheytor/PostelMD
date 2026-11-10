@@ -123,8 +123,9 @@ side effect):
   - **Without IndexedDB** (some private modes), drafts live in memory: they survive a closed
     note, not a closed tab.
   - **Not in the first drafts change:** one-tab-at-a-time editing over `BroadcastChannel`
-    (until then, two tabs on one note still get `412` and the conflict view), and ADR-0018's
-    logout prompt and shared-computer mode.
+    ([#76](https://github.com/joaoheytor/PostelMD/issues/76); until then, two tabs on one note
+    still get `412` and the conflict view), and ADR-0018's logout prompt and shared-computer
+    mode ([#77](https://github.com/joaoheytor/PostelMD/issues/77)).
 - **External writers:** no watcher yet. A change made outside PostelMD shows when the note is
   reopened, and a save over it gets `412` because the hash moved. The uncoordinated race in
   ADR-0003 §1 is documented as before.
