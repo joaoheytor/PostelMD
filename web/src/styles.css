@@ -79,8 +79,8 @@ pm-login, pm-setup { display: block; }
 
 /* Workspace */
 pm-app, pm-workspace { display: flex; flex-direction: column; height: 100%; }
-.pm-top { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid var(--line); }
-.pm-top-name { font-weight: 700; }
+.pm-top { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.pm-top-name { flex: 1; font-weight: 700; }
 .pm-top-error { margin: 0; padding: 6px 12px; }
 .pm-main { display: flex; flex: 1; min-height: 0; }
 .pm-side { width: 280px; flex-shrink: 0; overflow: auto; padding: 8px; background: var(--side); border-right: 1px solid var(--line); }
@@ -129,3 +129,11 @@ pm-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .pm-move { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--line); }
 .pm-move label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 12rem; font-size: 0.85rem; color: var(--muted); }
 pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
+.pm-dialog { width: min(36rem, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); padding: 0; }
+.pm-dialog .pm-card { margin: 0; border: 0; max-width: none; }
+.pm-dialog .pm-banner { margin: 0; }
+.pm-dialog-actions { display: flex; gap: 8px; }
+.pm-card .pm-check { flex-direction: row; align-items: center; margin-bottom: 8px; }
+.pm-commit-changes { margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow: auto; }
+.pm-commit-kind { display: inline-block; min-width: 5.5em; color: var(--muted); }
+.pm-commit-kind[data-kind="deleted"] { color: var(--danger); }

@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import type { App } from "../core/app";
 import { LightElement, StoreController } from "./base";
+import "./commit";
 import "./editor";
 import "./login";
 import "./setup";
@@ -8,10 +9,17 @@ import "./tree";
 
 /** The workspace: the file tree beside the open note. */
 export class WorkspaceView extends LightElement {
-  static override properties = { app: { attribute: false } };
+  static override properties = { app: { attribute: false }, committing: { state: true } };
   declare app: App;
+  /** The commit dialog is open. */
+  declare committing: boolean;
 
   private readonly ws = new StoreController(this, () => this.app?.workspace.state);
+
+  constructor() {
+    super();
+    this.committing = false;
+  }
 
   protected override firstUpdated(): void {
     const w = this.app.workspace;
@@ -34,6 +42,7 @@ export class WorkspaceView extends LightElement {
     return html`
       <header class="pm-top">
         <span class="pm-top-name">PostelMD</span>
+        <button type="button" @click=${() => (this.committing = true)}>Commit…</button>
         <button type="button" @click=${() => this.app.logout()}>Log out</button>
       </header>
       ${error
@@ -45,6 +54,9 @@ export class WorkspaceView extends LightElement {
         <pm-tree class="pm-side" .workspace=${w}></pm-tree>
         <main class="pm-note"><pm-editor .workspace=${w}></pm-editor></main>
       </div>
+      ${this.committing
+        ? html`<pm-commit .git=${this.app.git} .onClose=${() => (this.committing = false)}></pm-commit>`
+        : nothing}
     `;
   }
 }

@@ -17,3 +17,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - Rename or move a note or folder from the web app. A move never overwrites an existing note
   or folder, an open note is saved first and follows the move, and a folder can't move into
   itself (the API now answers 400 instead of an internal error).
+- Commit from the web app: a dialog lists the changes since the last commit and commits them
+  with a message, after saving the open note. A git lock left by a crash is shown with its
+  age and removed only after you confirm that no other git command is running.
