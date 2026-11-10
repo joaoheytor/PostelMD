@@ -215,7 +215,7 @@ export class Workspace {
     }
     await this.tree.changed(path);
     await this.open(path); // closing the old note writes its draft, which goes next
-    this.drafts?.forNote(open.doc.path).drop();
+    open.doc.dropDraft();
   }
 
   /** Reads the drafts to offer again. */

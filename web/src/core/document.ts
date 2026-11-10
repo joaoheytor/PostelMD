@@ -135,9 +135,18 @@ export class DocumentSession implements Disposable {
     return c.content;
   }
 
-  /** Stops saving. An edit not in a draft yet is written to one: closing never loses it. */
+  /** Drops this session's draft: the user kept its text elsewhere (saved as a new note). */
+  dropDraft(): void {
+    this.opts.draft?.drop();
+  }
+
+  /**
+   * Stops saving. An edit not in a draft yet is written to one: closing never loses it, and the
+   * draft is offered when the note is opened again.
+   */
   dispose(): void {
     void this.writeDraft();
+    this.opts.draft?.close();
     this.disposed = true;
     this.cancelTimer();
   }
@@ -187,7 +196,7 @@ export class DocumentSession implements Disposable {
     this.state.set({ status: "saving" });
     const r = await this.opts.save(this.path, snap.content, snap.base);
     // The server holds snap.gen now, even if the note was closed meanwhile: its draft (written
-    // on close, under this tab's esid) is cleared up to that generation, never past it.
+    // on close, under this session's key) is cleared up to that generation, never past it.
     if (r.kind === "saved") this.opts.draft?.saved(snap.gen);
     if (this.disposed) return;
     switch (r.kind) {

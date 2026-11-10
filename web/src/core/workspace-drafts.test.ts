@@ -35,13 +35,32 @@ describe("Workspace drafts (ADR-0003 §7)", () => {
     expect(ws.noteDrafts.value).toEqual([]);
   });
 
+  it("a note closed while its save fails, then reopened in this tab, offers that draft and keeps it until the user decides (#105)", async () => {
+    await ws.open("b.md");
+    ws.reader = () => "unsaved edit";
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "error", message: "down", retryAfterMs: 0, retry: true });
+    ws.state.value.open?.doc.edit();
+    expect(await ws.saveOpen()).toBe(false);
+    await ws.open("b.md"); // closing writes the draft: the edit's only other copy
+    expect(ws.noteDrafts.value.map((d) => d.text)).toEqual(["unsaved edit"]);
+
+    ws.reader = () => "typed after reopening";
+    ws.state.value.open?.doc.edit();
+    await ws.state.value.open?.doc.writeDraft();
+    expect(await ws.saveOpen()).toBe(true);
+    await ws.drafts?.idle();
+    expect((await backend.all()).filter((d) => d.path === "b.md").map((d) => d.text)).toEqual(["unsaved edit"]);
+    await ws.refreshOffered();
+    expect(ws.offered.value.map((d) => d.text)).toContain("unsaved edit");
+  });
+
   it("an edit of the open note goes to this tab's draft", async () => {
     await ws.open("b.md");
     ws.reader = () => "typed";
     ws.state.value.open?.doc.edit();
     await ws.state.value.open?.doc.writeDraft();
     await ws.drafts?.idle();
-    expect(await rows()).toContain("b.md me typed");
+    expect(await rows()).toContain("b.md me.1 typed"); // the tab's esid and the note session
   });
 
   it("restoring a draft puts it in the editor as an edit, keeps it as this tab's draft, then removes the old one", async () => {
@@ -55,7 +74,7 @@ describe("Workspace drafts (ADR-0003 §7)", () => {
     expect(ws.state.value.open).toBe(open); // the same note: the editor isn't remounted
     expect(editor).toBe("lost edit");
     expect(ws.state.value.open?.doc.dirty).toBe(true); // it saves through the normal path
-    expect(await rows()).toEqual(["a.md me lost edit", "gone.md crashed lost edit"]);
+    expect(await rows()).toEqual(["a.md me.1 lost edit", "gone.md crashed lost edit"]);
     expect(ws.noteDrafts.value).toEqual([]);
   });
 

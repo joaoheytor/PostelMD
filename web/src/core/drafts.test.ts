@@ -29,7 +29,7 @@ describe("Drafts (ADR-0003 §7)", () => {
     await drafts.idle();
     expect((await backend.all()).map((d) => [d.esid, d.text])).toEqual([
       ["other", "another tab"],
-      ["me", "v3"],
+      ["me.1", "v3"],
     ]);
     mine.saved(3);
     await drafts.idle();
@@ -45,6 +45,40 @@ describe("Drafts (ADR-0003 §7)", () => {
     closed.saved(5); // the old save lands: it covers "old", not the reopened session's edit
     await drafts.idle();
     expect((await backend.all()).map((d) => d.text)).toEqual(["new edit"]);
+  });
+
+  it("a closed session's draft is offered, and a session opened on the note since never writes over it (#105)", async () => {
+    const { backend, drafts } = await setup();
+    const closed = drafts.forNote("a.md");
+    closed.write("unsaved", '"e0"', 5);
+    closed.close(); // its save failed: the draft is the edit's only copy
+    expect((await drafts.offered("a.md")).map((d) => d.text)).toEqual(["unsaved"]);
+    const reopened = drafts.forNote("a.md");
+    reopened.write("new edit", '"e0"', 1);
+    reopened.saved(1);
+    await drafts.idle();
+    expect((await backend.all()).map((d) => d.text)).toEqual(["unsaved"]);
+    expect((await drafts.offered()).map((d) => d.text)).toEqual(["unsaved"]);
+  });
+
+  it("an open session's own draft is never offered", async () => {
+    const { drafts } = await setup();
+    drafts.forNote("a.md").write("mine", '"e0"', 1);
+    expect(await drafts.offered("a.md")).toEqual([]);
+  });
+
+  it("a reload moves every earlier session's draft of this tab aside", async () => {
+    const backend = new MemoryDraftBackend();
+    const before = await Drafts.open(backend, "me", () => "unused");
+    before.forNote("a.md").write("first", '"e0"', 1);
+    before.forNote("a.md").write("second", '"e0"', 1);
+    await before.idle();
+    let n = 0;
+    const after = await Drafts.open(backend, "me", () => `moved-${++n}`);
+    expect((await after.offered("a.md")).map((d) => d.esid).sort()).toEqual(["moved-1", "moved-2"]);
+    after.forNote("a.md").write("third", '"e0"', 1);
+    await after.idle();
+    expect((await backend.all()).map((d) => d.text).sort()).toEqual(["first", "second", "third"]);
   });
 
   it("applies a tab's writes and clears in order", async () => {

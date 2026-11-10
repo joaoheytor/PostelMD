@@ -1,9 +1,10 @@
 /**
  * Local drafts of unsaved edits (ADR-0003 §7, ADR-0020): until the server answers a save with
- * 200, the draft is the only other copy of the edit. Each tab writes its own drafts, under its
- * esid; a save clears only its own tab's draft, and only up to the generation it saved. Every
- * other draft, of closed or crashed tabs and of earlier loads of this tab, is offered to the
- * user, who alone decides to restore or discard it: PostelMD never deletes a draft unasked.
+ * 200, the draft is the only other copy of the edit. Each note session of a tab writes its own
+ * draft, under its esid and session number; a save clears only its own session's draft, and
+ * only up to the generation it saved. Every other draft, of closed or crashed tabs, of notes
+ * closed in this tab and of earlier loads of it, is offered to the user, who alone decides to
+ * restore or discard it: PostelMD never deletes a draft unasked.
  */
 
 export interface Draft {
@@ -34,13 +35,17 @@ export interface NoteDrafts {
   write(text: string, base: string, gen: number): Promise<void>;
   saved(gen: number): void;
   drop(): void;
+  /** The note was closed: from now on its draft is offered like a closed tab's. */
+  close(): void;
 }
 
 export class Drafts {
   /** This tab's writes and clears, applied in the order they were made. */
   private queue: Promise<void> = Promise.resolve();
-  /** The session that last wrote each note's draft in this tab. */
-  private readonly writers = new Map<string, object>();
+  /** How many note sessions this tab has opened: each writes under its own key. */
+  private sessions = 0;
+  /** The keys of this tab's sessions still open: only their drafts aren't offered. */
+  private readonly live = new Set<string>();
 
   private constructor(
     private readonly backend: DraftBackend,
@@ -49,37 +54,40 @@ export class Drafts {
 
   /**
    * Opens the drafts for a tab whose esid was just claimed. Drafts already under that esid are
-   * an earlier load's (a reload keeps the esid but restarts the edit generations), so they are
-   * moved to a fresh esid and offered like a closed tab's, never written over.
+   * an earlier load's (a reload keeps the esid but restarts the session count), so they are
+   * moved to fresh esids and offered like a closed tab's, never written over.
    */
   static async open(backend: DraftBackend, esid: string, mint: () => string): Promise<Drafts> {
-    if ((await backend.all()).some((d) => d.esid === esid)) await backend.rekey(esid, mint());
+    const earlier = new Set((await backend.all()).map((d) => d.esid).filter((k) => ownedBy(k, esid)));
+    for (const k of earlier) await backend.rekey(k, mint());
     return new Drafts(backend, esid);
   }
 
   /**
-   * One session of a note. Each session counts its generations from 0, and a closed session's
-   * save can still land, so a save clears the note's draft only while that session wrote it
-   * last: never the draft of a session opened on the note since.
+   * One session of a note, with a draft key of its own (`<esid>.<n>`). Each session counts its
+   * generations from 0 and a closed session's save can still land, so sessions never share a
+   * draft: a session opened on the note since can neither write over a closed one's draft nor
+   * have its own cleared by that late save.
    */
   forNote(path: string): NoteDrafts {
-    const session = {};
+    const key = `${this.esid}.${++this.sessions}`;
+    this.live.add(key);
     return {
-      write: (text, base, gen) =>
-        this.enqueue(() => {
-          this.writers.set(path, session);
-          return this.backend.put({ path, esid: this.esid, text, base, gen, savedAt: Date.now() });
-        }),
-      saved: (gen) =>
-        void this.enqueue(() => (this.writers.get(path) === session ? this.backend.deleteUpTo(path, this.esid, gen) : Promise.resolve())),
-      drop: () => void this.enqueue(() => this.backend.delete(path, this.esid)),
+      write: (text, base, gen) => this.enqueue(() => this.backend.put({ path, esid: key, text, base, gen, savedAt: Date.now() })),
+      saved: (gen) => void this.enqueue(() => this.backend.deleteUpTo(path, key, gen)),
+      drop: () => void this.enqueue(() => this.backend.delete(path, key)),
+      close: () => void this.live.delete(key),
     };
   }
 
-  /** The drafts to offer, newest first: of other tabs and earlier loads, for path or all. */
+  /**
+   * The drafts to offer, newest first, for path or all: every draft but those of this tab's
+   * open notes. Waits for this tab's pending writes, so a note just closed has its draft in.
+   */
   async offered(path?: string): Promise<Draft[]> {
+    await this.idle();
     const all = await this.backend.all();
-    return all.filter((d) => d.esid !== this.esid && (path === undefined || d.path === path)).sort((a, b) => b.savedAt - a.savedAt);
+    return all.filter((d) => !this.live.has(d.esid) && (path === undefined || d.path === path)).sort((a, b) => b.savedAt - a.savedAt);
   }
 
   /** Deletes a draft the user chose to discard (or restored). */
@@ -131,6 +139,11 @@ export class MemoryDraftBackend implements DraftBackend {
       await this.put({ ...d, esid: to });
     }
   }
+}
+
+/** True for the tab's esid itself (drafts written before sessions had keys) and its sessions'. */
+function ownedBy(key: string, esid: string): boolean {
+  return key === esid || key.startsWith(`${esid}.`);
 }
 
 function id(path: string, esid: string): string {
