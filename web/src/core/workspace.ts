@@ -2,6 +2,7 @@ import * as api from "./api";
 import { DocumentSession } from "./document";
 import type { Draft, Drafts } from "./drafts";
 import { Store } from "./store";
+import { sameFindings, scanSecrets, type SecretFinding } from "./secrets";
 import { join, rebase, Tree } from "./tree";
 
 /** The note open in the editor, with the text it was loaded with. */
@@ -15,6 +16,15 @@ export interface WorkspaceState {
   /** A failed action the user should see (opening, creating or deleting). */
   error?: string | undefined;
 }
+
+/** The open note's secret warning (ADR-0020): findings from the last scan, and whether hidden. */
+export interface SecretWarning {
+  findings: SecretFinding[];
+  /** The user dismissed these findings; a different set shows again. */
+  dismissed: boolean;
+}
+
+const noSecrets: SecretWarning = { findings: [], dismissed: false };
 
 /** Note files the editor opens; anything else is listed but not opened as text. */
 export function isNote(name: string): boolean {
@@ -39,6 +49,8 @@ export class Workspace {
    * remount the editor.
    */
   readonly noteDrafts = new Store<Draft[]>([]);
+  /** What the last scan of the open note found: it runs on every save and on paste. */
+  readonly secrets = new Store<SecretWarning>(noSecrets);
 
   useDrafts(drafts: Drafts): void {
     this.drafts = drafts;
@@ -60,11 +72,17 @@ export class Workspace {
     this.state.value.open?.doc.dispose();
     this.state.set({});
     this.noteDrafts.set([]);
+    this.secrets.set(noSecrets);
     try {
       const note = await api.readNote(path);
       const read = () => this.reader?.() ?? note.content;
       const draft = this.drafts?.forNote(path);
-      const doc = new DocumentSession(path, note.etag, { save: api.saveNote, read, ...(draft && { draft }) });
+      // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
+      const save = (p: string, content: string, base: string) => {
+        this.checkSecrets(content);
+        return api.saveNote(p, content, base);
+      };
+      const doc = new DocumentSession(path, note.etag, { save, read, ...(draft && { draft }) });
       this.noteDrafts.set((await this.drafts?.offered(path)) ?? []);
       this.state.set({ open: { doc, initial: note.content } });
     } catch (err) {
@@ -234,6 +252,21 @@ export class Workspace {
     await this.refreshOffered();
     await this.tree.changed(path);
     if (await this.saveOpen()) await this.open(path);
+  }
+
+  /** Something was pasted into the open note: scan it now, not at the next save. */
+  pasted(): void {
+    if (this.state.value.open && this.reader) this.checkSecrets(this.reader());
+  }
+
+  dismissSecrets(): void {
+    this.secrets.update((w) => ({ ...w, dismissed: true }));
+  }
+
+  private checkSecrets(text: string): void {
+    const findings = scanSecrets(text);
+    if (sameFindings(findings, this.secrets.value.findings)) return; // a dismissed warning stays dismissed
+    this.secrets.set({ findings, dismissed: false });
   }
 
   dismissError(): void {

@@ -53,6 +53,7 @@ export class NoteEditor extends LightElement {
   declare previewing: boolean;
 
   private readonly ws = new StoreController(this, () => this.workspace?.state);
+  private readonly secrets = new StoreController(this, () => this.workspace?.secrets);
   private editor: Editor | undefined;
   private mounted: { note: OpenNote; host: Element } | undefined;
   private docSub: Disposable | undefined;
@@ -126,6 +127,7 @@ export class NoteEditor extends LightElement {
       label: `Text of ${note.doc.path}`,
       onEdit: () => note.doc.edit(),
       onChange: () => this.preview?.pane.update(() => editor.text()),
+      onPaste: () => this.workspace.pasted(),
     });
     this.editor = editor;
     this.mounted = { note, host };
@@ -175,6 +177,20 @@ export class NoteEditor extends LightElement {
     if (url.host === "vault.invalid" && isNote(path)) void openNote(this.workspace, path);
   }
 
+  /** ADR-0020: a warning only. It names each finding by rule, line and a short hint, never the secret. */
+  private secretWarning() {
+    const w = this.secrets.value;
+    if (!w || w.dismissed || w.findings.length === 0) return nothing;
+    return html`<section class="pm-banner" role="alert" aria-labelledby="pm-secret-title">
+      <h3 id="pm-secret-title">This note looks like it contains a secret</h3>
+      <ul>
+        ${w.findings.map((f) => html`<li>${f.rule} on line ${f.line} (<code>${f.hint}</code>)</li>`)}
+      </ul>
+      <p>It is saved in the note, and a commit would keep it in the git history. Remove it, and rotate it if it is real.</p>
+      <button type="button" @click=${() => this.workspace.dismissSecrets()}>Dismiss</button>
+    </section>`;
+  }
+
   private takeTheirs(note: OpenNote): void {
     this.editor?.replace(note.doc.takeTheirs());
   }
@@ -216,6 +232,7 @@ export class NoteEditor extends LightElement {
             <button type="button" @click=${() => this.takeTheirs(note)}>Use the other version</button>
           </section>`
         : nothing}
+      ${this.secretWarning()}
       <pm-draft-banner .workspace=${this.workspace} .put=${(t: string) => this.editor?.replace(t)}></pm-draft-banner>
       ${st.status === "gone"
         ? html`<section class="pm-banner" role="alert" aria-labelledby="pm-gone-title">

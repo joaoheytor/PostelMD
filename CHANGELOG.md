@@ -41,3 +41,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   the saved text, restore it or discard it. "Unsaved drafts" lists every draft on the device,
   and a draft of a note deleted meanwhile can be saved as a new note. PostelMD never deletes
   a draft without asking.
+- A warning when a note looks like it contains a secret (cloud and SaaS tokens, private
+  keys, JWTs, kubeconfig client keys, passwords in URLs): at once on paste, and on every save.
+  It names the kind of secret and the line, never the secret itself, and doesn't block saving.
