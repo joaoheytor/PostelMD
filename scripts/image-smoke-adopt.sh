@@ -12,16 +12,17 @@ image=${1:-postelmd:dev}
 name=postelmd-smoke-adopt-$$
 port=${SMOKE_PORT:-18090}
 base=http://127.0.0.1:$port
-work=$(mktemp -d)
-jar=$work/cookies
 # shellcheck source=scripts/image-smoke-lib.sh
 . "$(dirname "$0")/image-smoke-lib.sh"
+work=$(smoke_workdir)
+jar=$work/cookies
 
 cleanup() {
 	docker rm -f "$name" >/dev/null 2>&1 || true
 	rm -rf "$work"
 }
 trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 notes='README.md
 ops/on-call.md
