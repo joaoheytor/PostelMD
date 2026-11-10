@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"unicode/utf8"
 
@@ -52,7 +53,7 @@ func HashPassword(pw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := idKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	b64 := base64.RawStdEncoding
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads, b64.EncodeToString(salt), b64.EncodeToString(key)), nil
@@ -76,6 +77,15 @@ func VerifyPassword(encoded, pw string) (bool, error) {
 	if err1 != nil || err2 != nil || len(salt) == 0 || len(want) == 0 || len(want) > 64 {
 		return false, errBadHash
 	}
-	got := argon2.IDKey([]byte(pw), salt, t, m, p, uint32(len(want))) //nolint:gosec // G115: len(want) <= 64, checked above
+	got := idKey([]byte(pw), salt, t, m, p, uint32(len(want))) //nolint:gosec // G115: len(want) <= 64, checked above
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
+}
+
+// idKey is argon2.IDKey, then hands its memory (64 MiB by default) back to the OS. Go would
+// otherwise keep it after a login and an idle server would sit over the PRD's 80 MB RSS
+// budget. Hashing is rare (setup, login, a password change) and rate-limited, so the forced
+// collection costs little next to the hash itself.
+func idKey(pw, salt []byte, t, m uint32, p uint8, keyLen uint32) []byte {
+	defer debug.FreeOSMemory()
+	return argon2.IDKey(pw, salt, t, m, p, keyLen)
 }

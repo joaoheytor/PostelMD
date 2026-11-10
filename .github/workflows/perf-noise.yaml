@@ -12,7 +12,7 @@ on:
         default: "30"
   pull_request:
     paths:
-      - test/perf/**
+      - test/perf/editor/**
       - .github/workflows/perf-noise.yaml
 
 permissions: {}

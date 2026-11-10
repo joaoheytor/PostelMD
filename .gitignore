@@ -19,4 +19,6 @@
 /test/perf/editor/node_modules/
 /test/perf/editor/dist/
 /test/perf/editor/result-*.json
+/test/perf/app/node_modules/
+/test/perf/app/result.json
 /coverage/
