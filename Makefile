@@ -56,8 +56,9 @@ test-web: web-deps
 e2e: build ## Playwright smoke tests against bin/postelmd (once: `cd web && npx playwright install --with-deps chromium`)
 	cd web && npx playwright test
 
-test-scripts: ## Tests for release scripts (throwaway repos and SSH keys)
+test-scripts: ## Tests for release scripts and git hooks (throwaway repos and SSH keys)
 	scripts/verify-release-tag_test.sh
+	scripts/pre-commit-adr_test.sh
 
 fuzz: ## Every Go fuzz target for FUZZTIME (default 30s)
 	scripts/fuzz.sh
