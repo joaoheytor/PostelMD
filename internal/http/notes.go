@@ -249,11 +249,16 @@ func oneLine(s string) string {
 // form can't send application/json without a preflight) and unknown fields. On failure it
 // has already answered.
 func decodeJSON(w stdhttp.ResponseWriter, r *stdhttp.Request, v any) bool {
+	return decodeJSONMax(w, r, v, 8<<10)
+}
+
+// decodeJSONMax is decodeJSON for a body of at most max bytes.
+func decodeJSONMax(w stdhttp.ResponseWriter, r *stdhttp.Request, v any, max int64) bool {
 	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		writeError(w, stdhttp.StatusUnsupportedMediaType, "send application/json")
 		return false
 	}
-	dec := json.NewDecoder(stdhttp.MaxBytesReader(w, r.Body, 8<<10))
+	dec := json.NewDecoder(stdhttp.MaxBytesReader(w, r.Body, max))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, "invalid JSON body")

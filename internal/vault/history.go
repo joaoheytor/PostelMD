@@ -46,10 +46,14 @@ const (
 	Deleted  ChangeKind = "deleted"
 )
 
-// Change is one uncommitted file.
+// Change is one uncommitted file. Blob is the git blob ID of the file's bytes and Rev their
+// revision (the ETag a read of the note answers), both from the same read; a deletion has
+// neither. The commit dialog scans the bytes whose Rev it read, and commits by Blob.
 type Change struct {
 	Path string     `json:"path"`
 	Kind ChangeKind `json:"kind"`
+	Blob *string    `json:"blob"`
+	Rev  Rev        `json:"rev,omitempty"`
 }
 
 // Status is the working tree compared with the branch.
@@ -129,14 +133,16 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 		if err != nil {
 			return err
 		}
+		blob := git.BlobHash(b)
+		kind := Modified
 		switch {
 		case !tracked:
-			st.Changes = append(st.Changes, Change{p, Added})
-		case old != git.BlobHash(b):
-			st.Changes = append(st.Changes, Change{p, Modified})
-		default:
+			kind = Added
+		case old == blob:
 			return nil
 		}
+		id := blob.String()
+		st.Changes = append(st.Changes, Change{Path: p, Kind: kind, Blob: &id, Rev: RevOf(b)})
 		if load {
 			content[p] = b
 		}
@@ -147,7 +153,7 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 	}
 	for p := range committed {
 		if !seen[p] && !fs.IsReserved(p) {
-			st.Changes = append(st.Changes, Change{p, Deleted})
+			st.Changes = append(st.Changes, Change{Path: p, Kind: Deleted})
 			content[p] = nil
 		}
 	}
@@ -188,58 +194,6 @@ func (v *Vault) walk(dir string, fn func(p string, size int64) error) error {
 	return nil
 }
 
-// Commit commits every uncommitted change with msg, as author. It holds the vault mutex from
-// reading the files to moving the branch, so the commit has exactly the bytes on disk. A
-// crash leaves the branch on the old or the new commit; uncommitted files stay uncommitted
-// changes, so the next commit includes them (ADR-0020: no intent needed).
-func (v *Vault) Commit(ctx context.Context, msg, name, email string) (git.Hash, error) {
-	msg = strings.TrimSpace(msg)
-	if msg == "" || len(msg) > 10000 || strings.ContainsRune(msg, 0) {
-		return git.Hash{}, ErrBadMessage
-	}
-	unlock, err := v.lock(ctx)
-	if err != nil {
-		return git.Hash{}, err
-	}
-	defer unlock()
-	st, head, changes, err := v.status(true)
-	if err != nil {
-		return git.Hash{}, err
-	}
-	if len(changes) == 0 {
-		return git.Hash{}, ErrNothingToCommit
-	}
-	if locks, err := v.git.Locks(st.Branch); err != nil || len(locks) > 0 {
-		return git.Hash{}, errors.Join(err, fmt.Errorf("%w: %s", ErrGitLocked, locks))
-	}
-	sig := git.Signature{Name: name, Email: email, When: v.now()}
-	c, err := v.git.Commit(head, changes, msg+"\n", sig, sig)
-	if err != nil {
-		return git.Hash{}, err
-	}
-	// The index first: if the branch then doesn't move, the user's git sees the changes as
-	// staged, which is true; the reverse order would show them as reverted.
-	if err := v.git.ResetIndex(c); err != nil {
-		return git.Hash{}, lockErr(err)
-	}
-	switch err := v.git.SetBranch(st.Branch, head, c); {
-	case errors.Is(err, git.ErrRefLocked):
-		return git.Hash{}, lockErr(err)
-	case errors.Is(err, git.ErrRefMoved):
-		return git.Hash{}, fmt.Errorf("%w: %w", ErrGitMoved, err)
-	case err != nil:
-		return git.Hash{}, err
-	}
-	return c, nil
-}
-
-func lockErr(err error) error {
-	if errors.Is(err, git.ErrRefLocked) || errors.Is(err, git.ErrIndexLocked) {
-		return fmt.Errorf("%w: %w", ErrGitLocked, err)
-	}
-	return err
-}
-
 // PendingImport returns how many files the initial import would commit: the uncommitted
 // files of a repository without commits, or 0 once it has one (ADR-0020: setup shows the
 // count before it commits them).
@@ -263,7 +217,9 @@ func (v *Vault) ImportInitial(ctx context.Context, name, email string) (int, err
 	if err != nil || n == 0 {
 		return 0, err
 	}
-	if _, err := v.Commit(ctx, InitialImportMessage, name, email); err != nil {
+	// Unchecked: the user saw the count at setup, and the notice asks them to check the
+	// files for secrets before pushing (ADR-0020).
+	if _, err := v.commit(ctx, InitialImportMessage, name, email, nil); err != nil {
 		return 0, err
 	}
 	return n, nil

@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import type { GitStatus } from "../core/api";
+import { type FileScan, withFindings } from "../core/commit-scan";
 import type { Git } from "../core/git";
 import { fields, LightElement, StoreController } from "./base";
 
@@ -10,8 +11,9 @@ const kindText: Record<GitStatus["changes"][number]["kind"], string> = {
 };
 
 /**
- * The commit dialog: the changes since the last commit, a message, and the way out of a
- * git lock left by a crash. The owner renders it to open it; closing calls onClose.
+ * The commit dialog: the changes since the last commit, a secret check of exactly those
+ * bytes, a message, and the way out of a git lock left by a crash. The owner renders it to
+ * open it; closing calls onClose.
  */
 export class CommitDialog extends LightElement {
   static override properties = {
@@ -38,10 +40,19 @@ export class CommitDialog extends LightElement {
 
   private close = () => this.querySelector("dialog")?.close();
 
+  /** The plain Commit button. With findings there is none, so Enter can't commit. */
   private async submit(e: SubmitEvent): Promise<void> {
     e.preventDefault();
+    if (this.git.hasFindings()) return;
     const form = e.target as HTMLFormElement;
     if (await this.git.commit(fields(form)["message"] ?? "")) form.reset();
+  }
+
+  /** "Commit anyway": a plain button, never the form's default action. */
+  private async commitAnyway(): Promise<void> {
+    const form = this.querySelector("form");
+    if (!form?.reportValidity()) return;
+    if (await this.git.commit(fields(form)["message"] ?? "", true)) form.reset();
   }
 
   private async removeLocks(): Promise<void> {
@@ -70,9 +81,40 @@ export class CommitDialog extends LightElement {
 
   private changes(st: GitStatus) {
     if (st.changes.length === 0) return html`<p>No changes since the last commit.</p>`;
-    return html`<ul class="pm-commit-changes" aria-label="Changes to commit">
+    // Focusable: a long list scrolls, and the keyboard must reach it.
+    return html`<ul class="pm-commit-changes" aria-label="Changes to commit" tabindex="0">
       ${st.changes.map((c) => html`<li><span class="pm-commit-kind" data-kind=${c.kind}>${kindText[c.kind]}</span> ${c.path}</li>`)}
     </ul>`;
+  }
+
+  /** ADR-0020: each finding by file, rule, line and a short hint; never the secret. */
+  private secrets(scan: FileScan[] | undefined) {
+    const found = withFindings(scan);
+    const notText = (scan ?? []).filter((f) => f.result === "not-text").map((f) => f.path);
+    return html`${found.length
+      ? html`<section class="pm-banner pm-commit-secrets" role="alert" aria-labelledby="pm-secrets-title">
+          <h3 id="pm-secrets-title">These changes look like they contain secrets</h3>
+          <ul aria-label="Possible secrets">
+            ${found.flatMap((f) =>
+              f.findings.map((s) => html`<li>${f.path}: ${s.rule} on line ${s.line} (<code>${s.hint}</code>)</li>`),
+            )}
+          </ul>
+          <p>A commit keeps them in the git history; removing them later means rewriting that history.</p>
+        </section>`
+      : nothing}
+    ${notText.length ? html`<p>Not checked for secrets (not text): ${notText.join(", ")}</p>` : nothing}`;
+  }
+
+  private actions() {
+    const s = this.st.value;
+    const ready = !!s?.status?.changes.length && !!s.scan && !s.busy && !s.scanning;
+    const commit = this.git.hasFindings()
+      ? html`<button type="button" class="pm-danger" ?disabled=${!ready} @click=${this.commitAnyway}>Commit anyway</button>`
+      : html`<button type="submit" ?disabled=${!ready}>Commit</button>`;
+    return html`<div class="pm-dialog-actions">
+      ${commit}
+      <button type="button" @click=${this.close}>Close</button>
+    </div>`;
   }
 
   protected override render() {
@@ -82,6 +124,7 @@ export class CommitDialog extends LightElement {
       <dialog class="pm-dialog" aria-labelledby="pm-commit-title" @close=${() => this.onClose()}>
         <form class="pm-card" @submit=${this.submit}>
           <h1 id="pm-commit-title">Commit changes</h1>
+          ${s?.notice ? html`<p class="pm-banner" role="alert">${s.notice}</p>` : nothing}
           ${st
             ? html`<p>On branch <code>${st.branch}</code></p>
                 ${this.locks(st)} ${this.changes(st)}
@@ -89,13 +132,12 @@ export class CommitDialog extends LightElement {
                   ? html`<p>Too large to commit, left out: ${st.skipped.join(", ")}</p>`
                   : nothing}`
             : html`<p>Loading…</p>`}
+          ${s?.scanning && st?.changes.length ? html`<p>Checking the changes for secrets…</p>` : nothing}
+          ${this.secrets(s?.scan)}
           ${s?.committed ? html`<p role="status">Committed ${s.committed}.</p>` : nothing}
           ${s?.error ? html`<p class="pm-error" role="alert">${s.error}</p>` : nothing}
           <label>Commit message <textarea name="message" rows="3" required></textarea></label>
-          <div class="pm-dialog-actions">
-            <button type="submit" ?disabled=${s?.busy || !st?.changes.length}>Commit</button>
-            <button type="button" @click=${this.close}>Close</button>
-          </div>
+          ${this.actions()}
         </form>
       </dialog>
     `;

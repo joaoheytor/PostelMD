@@ -19,6 +19,7 @@ export class App {
   readonly workspace = new Workspace();
   readonly git = new Git({
     status: api.gitStatus,
+    readFile: api.readFileBytes,
     commit: api.commit,
     removeLocks: api.removeGitLocks,
     saveOpen: () => this.workspace.saveOpen(),

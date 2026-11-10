@@ -52,6 +52,16 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - An optional settings file, `.postelmd/config.yaml` in the data directory. Flags and
   `POSTELMD_*` environment variables still win over it. An unknown key stops the server with
   its name, so a typo is never silently ignored.
+- The commit dialog checks every added or changed file it lists for secrets, including notes
+  changed in another tab or on the host, and shows each finding by file, kind and line
+  (never the secret). With a finding, the only way to commit is "Commit anyway". Files that
+  aren't text are listed as not checked.
+
+### Changed
+- A commit takes exactly the changes the dialog listed. If anything changed after the dialog
+  listed it, nothing is committed and the dialog lists and checks the changes again.
+- Setup now says that an adopted folder's files are committed as they are, and asks you to
+  check them for secrets before you push the repository anywhere.
 
 ### Fixed
 - An idle server no longer keeps about 65 MB after a login: the memory the password hash

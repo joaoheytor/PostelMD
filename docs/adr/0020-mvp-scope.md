@@ -161,14 +161,17 @@ Authentication:
 
 Setup answers `{imported}`: an adopted folder's files become the "Initial import" commit,
 with the author entered at setup. If that commit fails, setup still succeeds and the files
-stay uncommitted changes.
+stay uncommitted changes. The import commits the user's existing files as they are, without
+a secret scan: the commit stays local (no push in v0.1), and setup's notice, shown with the
+file count before the import, asks the user to check them for secrets before pushing the
+repository anywhere. The server-side scan is ADR-0010's gate 3, in v0.2.
 
 Git (every request needs a session):
 
 | Request | Result |
 |---|---|
-| `GET /api/v1/git/status` | `{branch, changes: [{path, kind}], skipped, locks}` |
-| `POST /api/v1/git/commit` `{message}` | `201 {commit}`; `409` nothing to commit, branch moved or detached HEAD; `422` empty message; `423` a git lock blocks commits |
+| `GET /api/v1/git/status` | `{branch, changes: [{path, kind, blob, rev}], skipped, locks}`: `blob` is the git blob ID of the file's bytes and `rev` their ETag, from one read; both absent (`blob: null`) for a deletion |
+| `POST /api/v1/git/commit` `{message, changes: [{path, blob}]}` | `201 {commit}` if the changes are exactly the listed ones; `409 {code: "changes-differ"}` if any path or blob differs (nothing is committed); `409` nothing to commit, branch moved or detached HEAD; `422` empty message or no `changes`; `423` a git lock blocks commits |
 | `POST /api/v1/git/locks/remove` `{confirmNoOtherGit: true}` | removes the leftover locks; `422` without the confirmation |
 | `GET /api/v1/history/{path}?limit=` | `{versions: [{commit, message, author, when, deleted}]}`, newest first |
 | `GET /api/v1/versions/{commit}/{path}` | the note's bytes in that commit, without an `ETag` |
@@ -185,10 +188,28 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
   itself is never a repository. The editor shows the uncommitted changes, and the user
   commits them with a message. **There is no auto-commit in the MVP.** ADR-0010 allows it
   only behind the commit gate (the server scans the exact bytes it commits and skips a file
-  with a finding), and the MVP's secret warning runs in the editor only. A manual commit is
-  safe because the user has seen the warning first; an auto-commit would put a pasted secret
-  into the history unseen, and removing it means rewriting history. Auto-commit arrives in
-  v0.2, with the gate.
+  with a finding), and the MVP's secret warning runs in the browser only. An auto-commit
+  would put a pasted secret into the history unseen, and removing it means rewriting
+  history. Auto-commit arrives in v0.2, with the gate.
+- **A manual commit shows its secrets first, and takes only what it showed.** The editor's
+  warning isn't enough: a note can change in another tab, on the host, or long before the
+  commit. So the commit dialog:
+  - lists each change with the blob ID and ETag of its current bytes (one read on the
+    server), fetches each added or modified file, and treats one whose ETag differs, or that
+    is gone, as changed: it lists the changes again;
+  - runs the editor's scanner on exactly those bytes and shows each finding by file, rule,
+    line and a short hint, never the secret. A binary file (a NUL byte, or not UTF-8) is
+    listed as not checked. Deletions add nothing to the history and aren't scanned. Nothing
+    but the commit request leaves the browser;
+  - with a finding, offers only "Commit anyway", a plain button (Enter never triggers it),
+    with a line saying the history keeps the secret and removing it means rewriting history;
+  - sends the list it showed, `[{path, blob}]`. The server recomputes the changes under the
+    vault mutex and, in the same acquisition and from the same read, commits them only if
+    they are exactly that list; otherwise `409` and nothing is committed, never part of it.
+    The dialog then says the changes were updated and lists and checks them again.
+
+  The check is read-only and happens before the commit's first write, so the commit's crash
+  behaviour below is unchanged.
 - A commit, and the initial import, take what `git add -A` would: an untracked file that
   a `.gitignore` (each scoped to its directory) or `.git/info/exclude` ignores is neither a
   change nor committed, and an ignored directory isn't walked. A tracked file stays tracked

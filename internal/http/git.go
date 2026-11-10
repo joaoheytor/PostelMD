@@ -14,7 +14,7 @@ import (
 type Git interface {
 	Status(ctx context.Context) (*vault.Status, error)
 	GitLocks() ([]vault.LockInfo, error)
-	Commit(ctx context.Context, msg, name, email string) (vault.Hash, error)
+	Commit(ctx context.Context, msg, name, email string, listed []vault.Listed) (vault.Hash, error)
 	History(p string, limit int) ([]vault.Version, error)
 	Version(p, commit string) ([]byte, error)
 	Restore(ctx context.Context, p, commit string, base vault.Rev) (vault.Rev, error)
@@ -29,7 +29,8 @@ type Author interface {
 // GitAPI serves:
 //
 //	GET  /api/v1/git/status                  {branch, changes, skipped, locks}
-//	POST /api/v1/git/commit                  {message}: commit every change
+//	POST /api/v1/git/commit                  {message, changes: [{path, blob}]}: commit the
+//	                                         changes if they are still exactly those
 //	POST /api/v1/git/locks/remove            {confirmNoOtherGit: true}
 //	GET  /api/v1/history/{path}              the commits that changed the note
 //	GET  /api/v1/versions/{commit}/{path}    the note's bytes in that commit
@@ -67,15 +68,25 @@ func (a *GitAPI) status(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}{st, append([]vault.LockInfo{}, locks...)})
 }
 
+// maxCommitBody bounds a commit request, whose list grows with the number of changes.
+const maxCommitBody = 4 << 20
+
+// commit takes the changes the dialog listed (and scanned for secrets), and commits them
+// only if they are still exactly the changes. The web app is the only client (ADR-0020).
 func (a *GitAPI) commit(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var req struct {
-		Message string `json:"message"`
+		Message string          `json:"message"`
+		Changes *[]vault.Listed `json:"changes"`
 	}
-	if !decodeJSON(w, r, &req) {
+	if !decodeJSONMax(w, r, &req, maxCommitBody) {
+		return
+	}
+	if req.Changes == nil {
+		writeError(w, stdhttp.StatusUnprocessableEntity, "send the listed changes with the commit")
 		return
 	}
 	name, email := a.author.Author()
-	c, err := a.git.Commit(r.Context(), req.Message, name, email)
+	c, err := a.git.Commit(r.Context(), req.Message, name, email, *req.Changes)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -162,6 +173,9 @@ func (a *GitAPI) restore(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 
 func (a *GitAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
 	switch {
+	case errors.Is(err, vault.ErrChangesDiffer):
+		writeJSON(w, stdhttp.StatusConflict, map[string]string{"code": "changes-differ",
+			"error": "the changes were updated since they were listed; review them again"})
 	case errors.Is(err, vault.ErrNothingToCommit):
 		writeError(w, stdhttp.StatusConflict, "nothing to commit")
 	case errors.Is(err, vault.ErrBadMessage):

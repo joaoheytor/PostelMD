@@ -78,7 +78,8 @@ export class SetupForm extends LightElement {
         <p>
           ${this.files === 0
             ? "The notes folder is empty."
-            : `The notes folder has ${this.files} file${this.files === 1 ? "" : "s"}; they become the first git commit.`}
+            : `The notes folder has ${this.files} file${this.files === 1 ? "" : "s"}; they become the first git commit, as they are. ` +
+              "Check them for secrets before you push this repository anywhere."}
         </p>
         <label>Password <input name="password" type="password" autocomplete="new-password" minlength="12" required autofocus /></label>
         <label>Repeat the password <input name="confirm" type="password" autocomplete="new-password" required /></label>

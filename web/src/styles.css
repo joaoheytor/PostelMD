@@ -140,6 +140,8 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 .pm-commit-changes { margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow: auto; }
 .pm-commit-kind { display: inline-block; min-width: 5.5em; color: var(--muted); }
 .pm-commit-kind[data-kind="deleted"] { color: var(--danger); }
+.pm-commit-secrets ul { margin: 0 0 8px; padding-left: 1.2em; }
+.pm-danger { border-color: var(--danger); color: var(--danger); }
 .pm-dialog-wide { width: min(64rem, calc(100vw - 32px)); }
 .pm-history { display: grid; grid-template-columns: minmax(12rem, 1fr) 2fr; gap: 12px; min-height: 0; }
 .pm-history-list { margin: 0; padding: 0; list-style: none; max-height: 60vh; overflow: auto; }

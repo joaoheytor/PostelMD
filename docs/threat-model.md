@@ -2,7 +2,7 @@
 
 - **Status:** Draft v0.2 (revised after design review). Update this file whenever a trust
   boundary changes.
-- **Last updated:** 2026-11-09
+- **Last updated:** 2026-11-10
 
 **MVP (v0.1, [ADR-0020](adr/0020-mvp-scope.md)):** one user and no remote, so the
 multi-user rows (horizontal and vertical escalation, roles, invites, membership changes),
@@ -13,7 +13,14 @@ the remote and push rows, and the plugin rows don't apply yet. The MVP adds:
   current password, so a stolen cookie can't lock the owner out;
 - **`auth.json` and `secret.key`** in `/data/.postelmd/` (`0600`, reserved paths) are the
   whole credential: anyone who can read the volume can forge sessions, as with the key ring
-  in the full design.
+  in the full design;
+- **secrets in commits (I3, T9) are warned about, not blocked.** The commit gate's server
+  scan is v0.2. Until then the commit dialog scans, in the browser, exactly the bytes it
+  lists, and the server commits only that list (blob by blob, under the vault mutex, from
+  the same read), so a change made after the dialog listed it is never committed unseen.
+  With a finding the user must choose "Commit anyway". The setup's initial import commits
+  an adopted folder unscanned; it stays local (no push), and setup tells the user to check
+  it before pushing.
 
 ## Assets
 1. Note contents (possibly sensitive operational knowledge)

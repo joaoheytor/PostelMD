@@ -8,6 +8,8 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly retryAfterMs = 0,
+    /** A machine-readable reason, when the server gives one ("changes-differ"). */
+    readonly code = "",
   ) {
     super(message);
   }
@@ -37,14 +39,16 @@ function json(body: unknown): RequestInit {
 
 async function errorOf(resp: Response): Promise<ApiError> {
   let message = resp.statusText || `HTTP ${resp.status}`;
+  let code = "";
   try {
-    const body = (await resp.json()) as { error?: string };
+    const body = (await resp.json()) as { error?: string; code?: string };
     if (body.error) message = body.error;
+    if (typeof body.code === "string") code = body.code;
   } catch {
     // Not JSON: keep the status text.
   }
   const retry = Number(resp.headers.get("Retry-After"));
-  return new ApiError(resp.status, message, Number.isFinite(retry) ? retry * 1000 : 0);
+  return new ApiError(resp.status, message, Number.isFinite(retry) ? retry * 1000 : 0, code);
 }
 
 async function fail(resp: Response): Promise<never> {
@@ -179,9 +183,24 @@ export async function trash(path: string, kind: "file" | "folder"): Promise<void
 
 // Git (ADR-0020).
 
+export interface GitChange {
+  path: string;
+  kind: "added" | "modified" | "deleted";
+  /** The git blob ID of the file's bytes; null for a deletion. */
+  blob: string | null;
+  /** The same bytes' revision, the ETag a read of them answers (unquoted); none for a deletion. */
+  rev?: string;
+}
+
+/** A change as the commit dialog listed it: the commit takes exactly these. */
+export interface ListedChange {
+  path: string;
+  blob: string | null;
+}
+
 export interface GitStatus {
   branch: string;
-  changes: { path: string; kind: "added" | "modified" | "deleted" }[];
+  changes: GitChange[];
   /** Files over the commit size limit: never committed. */
   skipped?: string[];
   /** Lock files blocking commits (a crash's leftover, or git running on the host). */
@@ -192,10 +211,21 @@ export async function gitStatus(): Promise<GitStatus> {
   return (await (await ok(await request("GET", "/api/v1/git/status"))).json()) as GitStatus;
 }
 
-/** Commits every change; returns the commit's hash. */
-export async function commit(message: string): Promise<string> {
-  const resp = await ok(await request("POST", "/api/v1/git/commit", json({ message })));
+/**
+ * Commits the listed changes; returns the commit's hash. A 409 with code "changes-differ"
+ * means they are no longer the changes, and nothing was committed.
+ */
+export async function commit(message: string, changes: ListedChange[]): Promise<string> {
+  const resp = await ok(await request("POST", "/api/v1/git/commit", json({ message, changes })));
   return ((await resp.json()) as { commit: string }).commit;
+}
+
+/** A file's current bytes and ETag, for the commit's secret check; undefined if it's gone. */
+export async function readFileBytes(path: string): Promise<{ bytes: Uint8Array; etag: string } | undefined> {
+  const resp = await request("GET", `/api/v1/notes/${encodePath(path)}`);
+  if (resp.status === 404) return undefined;
+  await ok(resp);
+  return { bytes: new Uint8Array(await resp.arrayBuffer()), etag: resp.headers.get("ETag") ?? "" };
 }
 
 /** Removes the git locks; the user has confirmed that no other git command is running. */

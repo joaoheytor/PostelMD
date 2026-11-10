@@ -158,8 +158,8 @@ func TestCommitPowerLossEverywhere(t *testing.T) {
 		first bool     // the repository has no commit yet
 		edits []Change // the uncommitted changes the commit takes
 	}{
-		{"first commit", true, []Change{{"a.md", Added}, {"notes/new/b.md", Added}, {"notes/x.md", Added}}},
-		{"next commit", false, []Change{{"a.md", Modified}, {"c.md", Deleted}, {"notes/new/b.md", Added}}},
+		{"first commit", true, []Change{{Path: "a.md", Kind: Added}, {Path: "notes/new/b.md", Kind: Added}, {Path: "notes/x.md", Kind: Added}}},
+		{"next commit", false, []Change{{Path: "a.md", Kind: Modified}, {Path: "c.md", Kind: Deleted}, {Path: "notes/new/b.md", Kind: Added}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,14 +197,14 @@ func powerLossCommit(t *testing.T, crashAt int, first bool, edits []Change, want
 	must(t, err)
 	old := ""
 	if !first {
-		c, err := v.Commit(ctx, "first", "Ada", "a@b")
+		c, err := commitAll(v, "first", "Ada", "a@b")
 		must(t, err)
 		old = c.String()
 		writeFiles(t, dir, want)
 		must(t, os.Remove(filepath.Join(dir, "c.md")))
 	}
 	cut.arm(t, filepath.Join(dir, ".git"))
-	_, err = v.Commit(ctx, "second", "Ada", "a@b")
+	_, err = commitAll(v, "second", "Ada", "a@b")
 	_ = v.Close()
 	if err != nil && !errors.Is(err, faultfs.ErrCrashed) {
 		t.Fatalf("%v", err)
@@ -255,10 +255,10 @@ func powerLossCommit(t *testing.T, crashAt int, first bool, edits []Change, want
 		t.Fatalf("working tree = %v, want %v", worktree(f), want)
 	}
 	if !moved {
-		_, err = v.Commit(ctx, "retry", "Ada", "a@b")
+		_, err = commitAll(v, "retry", "Ada", "a@b")
 		if errors.Is(err, ErrGitLocked) { // the user confirms no other git is running
 			must(t, v.RemoveGitLocks(ctx))
-			_, err = v.Commit(ctx, "retry", "Ada", "a@b")
+			_, err = commitAll(v, "retry", "Ada", "a@b")
 		}
 		must(t, err)
 		gitCLI(t, after, "fsck", "--strict", "--no-dangling")
