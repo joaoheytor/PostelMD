@@ -107,6 +107,22 @@ side effect):
   reopened, and a save over it gets `412` because the hash moved. The uncoordinated race in
   ADR-0003 §1 is documented as before.
 
+### API
+Paths, not file IDs (ADR-0003 §3's IDs arrive with SQLite):
+
+| Request | Result |
+|---|---|
+| `GET /api/v1/notes/{path}` | the note's bytes and its `ETag` |
+| `PUT /api/v1/notes/{path}` with `If-Match` | save: `204`, or `412` with the current note and its `ETag`; `404` if the note is gone |
+| `PUT /api/v1/notes/{path}` with `If-None-Match: *` | create: `201`, or `409` |
+| `PUT` with neither or both | `428` |
+| `DELETE /api/v1/notes/{path}` or `/api/v1/folders/{path}` | move to the trash |
+| `GET` / `POST /api/v1/folders/{path}` | list (reserved entries hidden) / create a folder |
+| `POST /api/v1/move` (`application/json`) | move, `409` on an existing destination |
+
+A held vault mutex gives `503` with `Retry-After`; a note over 5 MB gives `413`. Reserved and
+malformed paths, and paths through a symlink, give `404`.
+
 ### Git
 - The vault is the git repository: the working tree is `/data/vaults/notes`, and its git
   metadata is `/data/vaults/notes/.git` (the repository setup adopts or creates). `/data`

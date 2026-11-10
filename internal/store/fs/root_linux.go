@@ -162,6 +162,8 @@ func mapErr(op, rel string, err error) error {
 		return &iofs.PathError{Op: op, Path: rel, Err: iofs.ErrExist}
 	case errors.Is(err, unix.ENOENT):
 		return &iofs.PathError{Op: op, Path: rel, Err: iofs.ErrNotExist}
+	case errors.Is(err, unix.ENOTDIR):
+		return fmt.Errorf("%w: %s %s", ErrNotDir, op, rel)
 	default:
 		return &iofs.PathError{Op: op, Path: rel, Err: err}
 	}

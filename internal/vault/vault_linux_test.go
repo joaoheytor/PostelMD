@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -278,5 +279,36 @@ func TestBusyAfterTheWait(t *testing.T) {
 	must(t, <-done)
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("Create while the vault is held = %v, want ErrBusy", err)
+	}
+}
+
+func TestList(t *testing.T) {
+	v, dir := newVault(t)
+	must(t, os.MkdirAll(filepath.Join(dir, ".git"), 0o700))
+	must(t, os.WriteFile(filepath.Join(dir, "b.md"), []byte("b"), 0o600))
+	must(t, os.Symlink("b.md", filepath.Join(dir, "link.md")))
+	must(t, os.WriteFile(filepath.Join(dir, "x.sync-conflict-1.md"), nil, 0o600))
+	_, err := v.Delete(ctx, "b.md")
+	must(t, err)
+	must(t, os.WriteFile(filepath.Join(dir, "b.md"), []byte("b"), 0o600))
+
+	got, err := v.List("")
+	must(t, err)
+	want := []Entry{{Name: "b.md", Kind: KindFile}, {Name: "link.md", Kind: KindOther}, {Name: "notes", Kind: KindFolder}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("List(root) = %v, want %v (reserved entries hidden)", got, want)
+	}
+	sub, err := v.List("notes")
+	must(t, err)
+	if !slices.Equal(sub, []Entry{{Name: "a.md", Kind: KindFile}}) {
+		t.Fatalf("List(notes) = %v", sub)
+	}
+	for _, p := range []string{"missing", "notes/a.md", ".git", "link.md"} {
+		if _, err := v.List(p); !errors.Is(err, ErrNotFound) {
+			t.Errorf("List(%q) = %v, want ErrNotFound", p, err)
+		}
+	}
+	if _, _, err := v.Read("link.md"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Read through a symlink = %v, want ErrNotFound (never followed)", err)
 	}
 }
