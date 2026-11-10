@@ -87,8 +87,8 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
 14. **Crash-safe mutations.** Any operation with more than one side effect (filesystem + DB,
     git, structural ops, backup, restore, migration) writes a **durable intent before its
     first side effect**. It also needs an operation-specific recovery table in its ADR and a
-    failure-scenario test for every crash point (Testing conventions). Never infer what happened from a single
-    signal (HEAD alone, a hash match alone, a timeout).
+    failure-scenario test for every crash point (Testing conventions). Never infer what
+    happened from a single signal (HEAD alone, a hash match alone, a timeout).
 15. **Secrets and logs:** never log note content, secret values, tokens or passwords. Secret
     scanning runs on the exact bytes and metadata being committed or pushed, and cached
     detections never stand in for authorization decisions (ADR-0010). Security-relevant

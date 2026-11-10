@@ -1,5 +1,5 @@
 import { type Disposable, DisposableStore, toDisposable } from "../core/disposable";
-import { Diagrams } from "./diagrams";
+import { type Diagram, diagramClass, Diagrams } from "./diagrams";
 import type { Block } from "./render";
 import { assetWorker, sanitized } from "./sanitize";
 import type { Reply, Request } from "./worker";
@@ -113,9 +113,13 @@ export class Preview implements Disposable {
    * code stays, with the error under it as text.
    */
   private async diagram(pre: HTMLElement, source: string): Promise<void> {
-    this.diagrams ??= new Diagrams((url) => [...this.el.querySelectorAll<HTMLImageElement>("img.pm-diagram")].some((img) => img.src === url));
-    const d = await this.diagrams.render(source);
-    if (this.disposed || !pre.isConnected) return;
+    const diagrams = (this.diagrams ??= new Diagrams((url) => [...this.el.querySelectorAll<HTMLImageElement>(`img.${diagramClass}`)].some((img) => img.src === url)));
+    const d = await diagrams.render(source);
+    if (!this.disposed && pre.isConnected) this.place(pre, d);
+    diagrams.sweep(); // the diagram this one replaced on screen, if any, can go now
+  }
+
+  private place(pre: HTMLElement, d: Diagram): void {
     if (!d.ok) {
       const p = document.createElement("p");
       p.className = "pm-diagram-error";
@@ -124,7 +128,7 @@ export class Preview implements Disposable {
       return;
     }
     const img = document.createElement("img");
-    img.className = "pm-diagram";
+    img.className = diagramClass;
     img.alt = d.label;
     if (d.width > 0 && d.height > 0) {
       img.width = d.width;

@@ -234,8 +234,11 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 - **2026-11-10, npm `overrides`.** An `overrides` entry in `web/package.json` is allowed only
   to lift a vulnerable transitive dependency when no release of its parents accepts the fixed
   version; it pins an exact version and is removed once the parents catch up. The first one is
-  `minimatch` 11.0.4, for GHSA-g3hv-75wg-m249 (fixed in 11.0.1): it reaches `web` only through
+  `minimatch` 11.0.1, for GHSA-g3hv-75wg-m249 (fixed in 11.0.1): it reaches `web` only through
   ESLint and `typescript-eslint` (dev tooling, never shipped), whose latest releases (eslint
   10.14.0, `@eslint/config-array` 0.23.5, `typescript-eslint` 8.72.2) still require `^10`.
-  `npm run lint` passes with it. `test/perf/app` and `test/perf/editor` don't depend on
-  `minimatch`.
+  11.0.1 is the first fixed release and the oldest 11.x apart from 11.0.0 (published
+  2026-10-27, two weeks old on 2026-11-10); every later 11.x is younger than the two-week
+  minimum release age. `npm run lint` passes with it. `test/perf/app` and `test/perf/editor`
+  don't depend on `minimatch`. The override goes when ESLint and `typescript-eslint` accept
+  minimatch 11 (#101).
