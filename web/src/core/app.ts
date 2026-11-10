@@ -1,4 +1,5 @@
 import * as api from "./api";
+import { Git } from "./git";
 import { Store } from "./store";
 import { message, Workspace } from "./workspace";
 
@@ -15,6 +16,12 @@ export interface AppState {
 export class App {
   readonly state = new Store<AppState>({ phase: "loading", reauth: false });
   readonly workspace = new Workspace();
+  readonly git = new Git({
+    status: api.gitStatus,
+    commit: api.commit,
+    removeLocks: api.removeGitLocks,
+    saveOpen: () => this.workspace.saveOpen(),
+  });
 
   constructor() {
     api.setUnauthorizedHandler(() => {

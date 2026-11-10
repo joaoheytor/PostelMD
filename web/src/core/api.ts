@@ -170,3 +170,29 @@ export async function trash(path: string, kind: "file" | "folder"): Promise<void
   const base = kind === "file" ? "notes" : "folders";
   await ok(await request("DELETE", `/api/v1/${base}/${encodePath(path)}`));
 }
+
+// Git (ADR-0020).
+
+export interface GitStatus {
+  branch: string;
+  changes: { path: string; kind: "added" | "modified" | "deleted" }[];
+  /** Files over the commit size limit: never committed. */
+  skipped?: string[];
+  /** Lock files blocking commits (a crash's leftover, or git running on the host). */
+  locks: { path: string; modified: string }[];
+}
+
+export async function gitStatus(): Promise<GitStatus> {
+  return (await (await ok(await request("GET", "/api/v1/git/status"))).json()) as GitStatus;
+}
+
+/** Commits every change; returns the commit's hash. */
+export async function commit(message: string): Promise<string> {
+  const resp = await ok(await request("POST", "/api/v1/git/commit", json({ message })));
+  return ((await resp.json()) as { commit: string }).commit;
+}
+
+/** Removes the git locks; the user has confirmed that no other git command is running. */
+export async function removeGitLocks(): Promise<void> {
+  await ok(await request("POST", "/api/v1/git/locks/remove", json({ confirmNoOtherGit: true })));
+}

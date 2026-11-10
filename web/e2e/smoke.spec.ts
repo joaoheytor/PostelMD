@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -138,4 +139,38 @@ test("move a folder; its open note follows it", async ({ page }) => {
   expect(existsSync(join(vault, "ops", "runbook.md"))).toBe(true);
   expect(existsSync(join(vault, "archive"))).toBe(false);
   await noSeriousA11yViolations(page);
+});
+
+test("commit the changes with a message", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "Commit…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Commit changes" });
+  await expect(dialog.getByRole("list", { name: "Changes to commit" })).toContainText("ops/runbook.md");
+  await noSeriousA11yViolations(page);
+
+  await dialog.getByLabel("Commit message").fill("Add the first runbooks");
+  await dialog.getByRole("button", { name: "Commit", exact: true }).click();
+  await expect(dialog.getByRole("status")).toHaveText(/^Committed [0-9a-f]{7}\.$/);
+  await expect(dialog).toContainText("No changes since the last commit.");
+  const subject = execFileSync("git", ["-C", env("PM_E2E_VAULT"), "log", "-1", "--format=%s"], { encoding: "utf8" });
+  expect(subject.trim()).toBe("Add the first runbooks");
+
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("a stale git lock is removed only after the user confirms", async ({ page }) => {
+  const lock = join(env("PM_E2E_VAULT"), ".git", "index.lock");
+  writeFileSync(lock, "");
+  await login(page);
+  await page.getByRole("button", { name: "Commit…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Commit changes" });
+  await expect(dialog.getByRole("heading", { name: "A git lock is blocking commits" })).toBeVisible();
+
+  const remove = dialog.getByRole("button", { name: "Remove the lock" });
+  await expect(remove).toBeDisabled();
+  await dialog.getByLabel("No other git command is running").check();
+  await remove.click();
+  await expect(dialog.getByRole("heading", { name: "A git lock is blocking commits" })).toBeHidden();
+  expect(existsSync(lock)).toBe(false);
 });
