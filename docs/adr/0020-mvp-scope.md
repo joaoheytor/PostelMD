@@ -142,6 +142,7 @@ Paths, not file IDs (ADR-0003 §3's IDs arrive with SQLite):
 | `DELETE /api/v1/notes/{path}` or `/api/v1/folders/{path}` | move to the trash |
 | `GET` / `POST /api/v1/folders/{path}` | list (reserved entries hidden) / create a folder |
 | `POST /api/v1/move` (`application/json`) | move, `409` on an existing destination |
+| `GET /api/v1/files` | every file's path, sorted, for the finder (reserved paths and symlinks never listed; at most 50,000, with `truncated`) |
 
 A held vault mutex gives `503` with `Retry-After`; a note over 5 MB gives `413`. Reserved and
 malformed paths, and paths through a symlink, give `404`.
@@ -213,7 +214,9 @@ refused with `403` (`net/http.CrossOriginProtection`), and the JSON endpoints ac
 
 ### In the editor
 CodeMirror 6, the sanitized live preview in a Worker (ADR-0007), Mermaid, copy buttons, the
-file tree, a fuzzy finder over the file list, and the runbook/postmortem/ADR templates. A
+file tree, a fuzzy finder over the file list, and the runbook/postmortem/ADR templates. The
+finder (`Ctrl+P`) ranks paths in the browser (`web/src/core/fuzzy.ts`), preferring matches
+in the file name, at word starts and in a row. A
 **secret warning** runs on save and paste (a regex scan with a small rule set, not stored).
 It only warns, because nothing leaves the machine in the MVP. It runs in the browser
 (`web/src/core/secrets.ts`): a paste rescans the note at once, and every save scans the exact

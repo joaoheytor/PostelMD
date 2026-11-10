@@ -1,8 +1,10 @@
 import { html, nothing } from "lit";
 import type { App } from "../core/app";
-import { LightElement, StoreController } from "./base";
+import { DisposableStore } from "../core/disposable";
+import { LightElement, listen, StoreController } from "./base";
 import "./commit";
 import "./drafts";
+import "./finder";
 import "./editor";
 import "./login";
 import "./setup";
@@ -10,12 +12,20 @@ import "./tree";
 
 /** The workspace: the file tree beside the open note. */
 export class WorkspaceView extends LightElement {
-  static override properties = { app: { attribute: false }, committing: { state: true }, listingDrafts: { state: true } };
+  static override properties = {
+    app: { attribute: false },
+    committing: { state: true },
+    listingDrafts: { state: true },
+    finding: { state: true },
+  };
   declare app: App;
   /** The commit dialog is open. */
   declare committing: boolean;
   /** The unsaved-drafts dialog is open. */
   declare listingDrafts: boolean;
+  /** The finder is open. */
+  declare finding: boolean;
+  private listeners: DisposableStore | undefined;
 
   private readonly ws = new StoreController(this, () => this.app?.workspace.state);
   private readonly offered = new StoreController(this, () => this.app?.workspace.offered);
@@ -24,6 +34,26 @@ export class WorkspaceView extends LightElement {
     super();
     this.committing = false;
     this.listingDrafts = false;
+    this.finding = false;
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.listeners = new DisposableStore();
+    // Ctrl+P (the browser's print) opens the finder, from the editor too.
+    this.listeners.add(
+      listen(window, "keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "p") {
+          e.preventDefault();
+          this.finding = true;
+        }
+      }),
+    );
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.listeners?.dispose();
   }
 
   protected override firstUpdated(): void {
@@ -48,6 +78,7 @@ export class WorkspaceView extends LightElement {
     return html`
       <header class="pm-top">
         <span class="pm-top-name">PostelMD</span>
+        <button type="button" aria-keyshortcuts="Control+P" @click=${() => (this.finding = true)}>Find a note</button>
         ${this.offered.value?.length
           ? html`<button type="button" @click=${() => (this.listingDrafts = true)}>Unsaved drafts (${this.offered.value.length})</button>`
           : nothing}
@@ -66,6 +97,7 @@ export class WorkspaceView extends LightElement {
       ${this.committing
         ? html`<pm-commit .git=${this.app.git} .onClose=${() => (this.committing = false)}></pm-commit>`
         : nothing}
+      ${this.finding ? html`<pm-finder .workspace=${w} .onClose=${() => (this.finding = false)}></pm-finder>` : nothing}
       ${this.listingDrafts ? html`<pm-drafts .workspace=${w} .onClose=${() => (this.listingDrafts = false)}></pm-drafts>` : nothing}
     `;
   }

@@ -26,9 +26,13 @@ type Notes interface {
 	Mkdir(ctx context.Context, p string) error
 	Move(ctx context.Context, from, to string) error
 	Delete(ctx context.Context, p string) (string, error)
+	Files(max int) ([]string, bool, error)
 }
 
-// NotesAPI serves /api/v1/notes, /api/v1/folders and /api/v1/move:
+// maxFiles bounds the finder's file list: a vault far past it needs search, not a list.
+const maxFiles = 50_000
+
+// NotesAPI serves /api/v1/notes, /api/v1/folders, /api/v1/move and /api/v1/files:
 //
 //	GET    /api/v1/notes/{path}    the note's bytes, with its ETag
 //	PUT    /api/v1/notes/{path}    If-Match: save; If-None-Match: * create
@@ -37,6 +41,7 @@ type Notes interface {
 //	POST   /api/v1/folders/{path}  create the folder
 //	DELETE /api/v1/folders/{path}  move to the trash
 //	POST   /api/v1/move            {"from": …, "to": …}; never replaces the destination
+//	GET    /api/v1/files           every file's path, for the finder (at most maxFiles)
 type NotesAPI struct {
 	notes Notes
 	log   *slog.Logger
@@ -53,6 +58,7 @@ func NewNotesAPI(notes Notes, log *slog.Logger) *stdhttp.ServeMux {
 	mux.HandleFunc("POST /api/v1/folders/{path...}", a.mkdir)
 	mux.HandleFunc("DELETE /api/v1/folders/{path...}", a.delete)
 	mux.HandleFunc("POST /api/v1/move", a.move)
+	mux.HandleFunc("GET /api/v1/files", a.files)
 	return mux
 }
 
@@ -156,6 +162,19 @@ func (a *NotesAPI) list(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, map[string][]vault.Entry{"entries": entries})
+}
+
+// files lists every file's path for the finder.
+func (a *NotesAPI) files(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	files, truncated, err := a.notes.Files(maxFiles)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if files == nil {
+		files = []string{}
+	}
+	writeJSON(w, stdhttp.StatusOK, map[string]any{"files": files, "truncated": truncated})
 }
 
 func (a *NotesAPI) mkdir(w stdhttp.ResponseWriter, r *stdhttp.Request) {
