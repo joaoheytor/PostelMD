@@ -13,10 +13,17 @@ IMAGE=ghcr.io/joaoheytor/postelmd:main      # candidate from main (signed, not f
 # IMAGE=docker.io/joaoheytor/postelmd:0.1        # after the v0.1.0 release
 ```
 
-`:main` moves with every merge. Note the digest you run, so you can go back to it:
-`docker inspect -f '{{.Image}}' postelmd` (the local image ID) and
-`docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE"` (the registry digest). How to
-verify an image's signature: [verify-images](verify-images.md).
+`:main` moves with every merge. Note the digest of the image the container runs, so you can
+go back to it:
+
+```sh
+docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Image}}' postelmd)"
+```
+
+This asks the running container, not `$IMAGE`: after a `docker pull`, or when `$IMAGE` names
+a tag you haven't pulled yet, `$IMAGE` is not what runs. (An image you built yourself has no
+registry digest, and the command fails.) How to verify an image's signature:
+[verify-images](verify-images.md).
 
 ## What to back up
 
@@ -41,18 +48,35 @@ everything you deleted, exists only in these files.
 The simplest consistent copy stops the server for a few seconds:
 
 ```sh
-docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . && docker start postelmd
+docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . \
+  || echo "BACKUP FAILED" >&2
+docker start postelmd                # always, even when the backup failed
+docker ps --filter name=postelmd     # STATUS must say "Up"
 ```
 
 With an adopted folder mounted at `/data/vaults/notes`, copy it in the same stop:
 
 ```sh
 docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . \
-  && tar -C ~/notes -cpf ~/notes-backup-$(date +%F).tar . && docker start postelmd
+  && tar -C ~/notes -cpf ~/notes-backup-$(date +%F).tar . || echo "BACKUP FAILED" >&2
+docker start postelmd                # always, even when the backup failed
+docker ps --filter name=postelmd     # STATUS must say "Up"
 ```
 
-`docker stop` waits for in-flight saves (up to the `--stop-timeout 60` you ran it with). The
-browser keeps unsaved edits as drafts and retries, so a short stop loses nothing.
+`docker start` is a separate command on purpose: chained after `tar` with `&&`, a failed
+backup would leave the server stopped, and `--restart unless-stopped` never restarts a
+container you stopped yourself. `docker stop` waits for in-flight saves (up to the
+`--stop-timeout 60` you ran it with). The browser keeps unsaved edits as drafts and retries,
+so a short stop loses nothing.
+
+**On WSL2, copy the backup off the WSL disk.** Your WSL home lives in one virtual disk file;
+a backup next to the data is lost with it. A tar file is safe on the Windows side (only the
+live data must stay on the Linux filesystem):
+
+```sh
+mkdir -p /mnt/c/postelmd-backups      # any Windows folder; better, one that is backed up
+cp ~/postelmd-backup-$(date +%F).tar /mnt/c/postelmd-backups/
+```
 
 For a nightly copy, point restic or borg at `~/postelmd`. The files belong to your user
 (because of `--user`), so the backup tool needs no root. A copy taken while the server runs
@@ -66,7 +90,8 @@ can tar from the host, and the image has no shell. Use a helper container:
 docker stop postelmd
 docker run --rm -v postelmd-data:/data:ro -v "$HOME:/backup" busybox:1.37 \
   tar -C /data -cpf "/backup/postelmd-backup-$(date +%F).tar" .
-docker start postelmd
+docker start postelmd                # always, even when the backup failed
+docker ps --filter name=postelmd     # STATUS must say "Up"
 sudo chown "$(id -u):$(id -g)" ~/postelmd-backup-$(date +%F).tar   # busybox ran as root
 ```
 
@@ -101,20 +126,53 @@ docker rm -f postelmd-drill && rm -rf ~/postelmd-drill ~/notes-drill
 ```
 
 A real restore keeps the current data aside instead of deleting it (`rm -rf ~/postelmd/*`
-would also miss `.postelmd`):
+would also miss `.postelmd`), and **recreates the container**. Never `docker start` the old
+container after moving its folder: Docker Desktop keeps the bind mount on the folder it
+first mounted, so the container would serve `~/postelmd.old`, and new saves would land
+there.
 
-```sh
-docker stop postelmd && mv ~/postelmd ~/postelmd.old && mkdir ~/postelmd \
-  && tar -C ~/postelmd -xpf ~/postelmd-backup-YYYY-MM-DD.tar && docker start postelmd
-```
+1. **Leave a marker.** In the web app, create a note named `restore-check`. It is newer than
+   the backup, so the restored instance must not have it.
+2. **Restore**, with exactly the `docker run` flags you started with (the README's, as in
+   [Upgrade and rollback](#upgrade-and-rollback)):
 
-For an adopted folder, do the same with `~/notes` and its backup before `docker start`.
-Delete `~/postelmd.old` once the restored instance looks right.
+   ```sh
+   docker stop postelmd
+   docker logs postelmd > ~/postelmd-logs-$(date +%F).jsonl 2>&1
+   docker rm postelmd
+   mv ~/postelmd ~/postelmd.old && mkdir ~/postelmd \
+     && tar -C ~/postelmd -xpf ~/postelmd-backup-YYYY-MM-DD.tar
+   docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+     --log-opt max-size=10m --log-opt max-file=3 \
+     -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data "$IMAGE"
+   ```
+
+   With an adopted folder, move it aside and restore it too, before the `docker run`, and add
+   its mount back:
+
+   ```sh
+   mv ~/notes ~/notes.old && mkdir ~/notes \
+     && tar -C ~/notes -xpf ~/notes-backup-YYYY-MM-DD.tar
+   docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+     --log-opt max-size=10m --log-opt max-file=3 \
+     -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" \
+     -v ~/postelmd:/data -v ~/notes:/data/vaults/notes "$IMAGE"
+   ```
+
+3. **Check** in the web app (log in again if asked, with the password you had when the
+   backup was taken): `restore-check` is gone, and the notes
+   you expect from the backup are there. If `restore-check` is still listed, the container
+   is serving the old folder: stop here, and don't delete anything.
+4. Only after that check, and only with the recreated container running, delete
+   `~/postelmd.old` (and `~/notes.old`).
 
 ## Logs
 
 The logs are JSON lines on the container's stdout. Docker deletes them with the container, so
-**export them before every `docker rm`**:
+**export them before every `docker rm`**. Docker's default `json-file` log driver never
+rotates, so the README's `docker run` caps them with `--log-opt max-size=10m --log-opt
+max-file=3`: Docker keeps the last 30 MB or so, and drops older lines. Export them more often
+than that fills up if you want the whole four weeks:
 
 ```sh
 docker logs postelmd > ~/postelmd-logs-$(date +%F).jsonl 2>&1
@@ -175,12 +233,14 @@ the backup you took before the upgrade, not only the older image; within the sam
 the digest swap below is enough. Never edit `format` to get past the check.
 
 ```sh
-docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE"   # note the current digest
+# note the digest the container runs now (not $IMAGE's: that is the new one)
+docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Image}}' postelmd)"
 docker pull "$IMAGE"
 docker stop postelmd                                          # waits up to 60 s for saves
 docker logs postelmd > ~/postelmd-logs-$(date +%F).jsonl 2>&1
 docker rm postelmd
 docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+  --log-opt max-size=10m --log-opt max-file=3 \
   -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data "$IMAGE"
 ```
 

@@ -104,6 +104,11 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - PostelMD now records its data format in `/data/.postelmd/format`, so a future release
   that changes the format can't be rolled back onto data an older build doesn't understand:
   the older build refuses to start and says which version to run.
+- The runbook's restore from a backup restarted the old container after moving its data
+  folder aside. On Docker Desktop that container kept serving the moved folder, so new saves
+  landed in the copy the runbook then said to delete. The restore now recreates the container,
+  checks that a note made after the backup is gone, and deletes the old folder only after
+  that check. Backups now restart the server even when the copy fails.
 - A note closed while its edits couldn't be saved, then opened again in the same tab, now
   offers those edits as a draft to restore or compare, as it does after a reload. Typing in
   the reopened note no longer writes over them, and "Unsaved drafts" lists them at once.
