@@ -35,6 +35,7 @@ function sessionStorageOrNone(): Storage | undefined {
  * conditional delete or a rekey is never half done.
  */
 export class IdbDraftBackend implements DraftBackend {
+  readonly persistent = true;
   private constructor(private readonly db: IDBDatabase) {}
 
   static async open(name = "postelmd-drafts"): Promise<IdbDraftBackend> {

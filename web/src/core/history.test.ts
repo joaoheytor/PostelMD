@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Version } from "./api";
+import type { Version } from "./history-api";
 import { History } from "./history";
 
 const v = (commit: string, deleted = false): Version => ({ commit, message: commit, author: "me", when: "2026-11-10T00:00:00Z", deleted });

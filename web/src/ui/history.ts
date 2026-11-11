@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import * as api from "../core/api";
+import * as api from "../core/history-api";
 import { type DiffLine, diffLines } from "../core/diff";
 import { History } from "../core/history";
 import type { Workspace } from "../core/workspace";
