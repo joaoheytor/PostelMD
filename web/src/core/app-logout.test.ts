@@ -84,6 +84,31 @@ describe("App.logout", () => {
     expect(navigated).toEqual(["/"]);
   });
 
+  it("an edit typed while the logout request runs is in the draft before the page reloads", async () => {
+    let answer: () => void = () => {};
+    vi.mocked(api.logout).mockImplementationOnce(() => new Promise<void>((r) => (answer = r)));
+    let atReload: string[] = [];
+    app = new App(() => void backend.all().then((rows) => (atReload = rows.map((d) => d.text))));
+    await app.boot(() => Drafts.open(backend, "me", () => "moved"));
+    await app.workspace.open("a.md");
+    const out = app.logout();
+    await vi.advanceTimersByTimeAsync(0);
+    edit("# typed during logout"); // the draft timer hasn't fired yet
+    answer();
+    await out;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(atReload).toEqual(["# typed during logout"]);
+  });
+
+  it("doesn't offer to keep a draft the browser is already refusing", async () => {
+    vi.mocked(api.saveNote).mockResolvedValue(failedSave);
+    backend.failing = true;
+    edit("# unsaved edit");
+    await vi.advanceTimersByTimeAsync(300); // the draft write fails
+    await app.logout();
+    expect(app.state.value.leaving?.draftFailed).toBe(true);
+  });
+
   it("when the server can't be reached, says so and stays, ready to try again", async () => {
     vi.mocked(api.logout).mockRejectedValueOnce(new api.NetworkError());
     await app.logout(); // never rejects: a click handler calls it

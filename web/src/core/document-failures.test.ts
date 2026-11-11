@@ -91,7 +91,7 @@ describe("DocumentSession failures", () => {
       expect(doc.dirty).toBe(true);
     });
 
-    it("typing while stalled keeps the backoff growing: each edit doesn't restart it at 1 s", async () => {
+    it("typing while stalled doesn't reset the failure count: the next stall backs off 2 s, not 1 s", async () => {
       type("v1");
       void doc.flush();
       saves[0]?.answer({ kind: "unknown" }); // backoff 1 s
@@ -134,6 +134,33 @@ describe("DocumentSession failures", () => {
         saves[2]?.answer({ kind: "saved", etag: '"e2"' });
         await vi.advanceTimersByTimeAsync(0);
         expect(doc.state.value.status).toBe("clean");
+      });
+
+      it("after two stalls in a row, a 412 with the first one's bytes is no conflict either", async () => {
+        await stallThenType(); // v1 stalled (it landed); the retry of v2 is in flight
+        saves[1]?.answer({ kind: "unknown" }); // v2 stalls too, and didn't land
+        await vi.advanceTimersByTimeAsync(0);
+        type("v3");
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(saves[2]).toMatchObject({ content: "v3", base: '"e0"' });
+        saves[2]?.answer({ kind: "conflict", etag: '"e1"', content: "v1" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value.status).not.toBe("conflict");
+        expect(saves[3]).toMatchObject({ content: "v3", base: '"e1"' });
+      });
+
+      it("a draft restored during a stall goes through the conflict view, even on the stalled bytes (ADR-0023)", async () => {
+        type("v1");
+        void doc.flush();
+        saves[0]?.answer({ kind: "unknown" }); // v1 landed, unknown to the tab
+        await vi.advanceTimersByTimeAsync(0);
+        doc.rebase('"e-draft"'); // the user restores a draft based on an older version
+        type("draft text");
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(saves[1]).toMatchObject({ content: "draft text", base: '"e-draft"' });
+        saves[1]?.answer({ kind: "conflict", etag: '"e1"', content: "v1" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value.status).toBe("conflict");
       });
 
       it("a 412 with other bytes is still a conflict", async () => {

@@ -17,6 +17,12 @@ export function toDisposable(fn: () => void): Disposable {
   };
 }
 
+/** setTimeout, as a Disposable that clears it. */
+export function timeout(fn: () => void, ms: number): Disposable {
+  const id = setTimeout(fn, ms);
+  return toDisposable(() => clearTimeout(id));
+}
+
 export class DisposableStore implements Disposable {
   private readonly items = new Set<Disposable>();
   private disposed = false;

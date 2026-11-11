@@ -107,7 +107,8 @@ export class App {
     const saved = await this.workspace.saveOpen();
     const doc = this.workspace.state.value.open?.doc;
     if (!saved && doc) {
-      const leaving = { path: doc.path, why: unsavedWhy(doc.state.value), draftFailed: false, persistent: !!this.workspace.drafts?.persistent };
+      const persistent = !!this.workspace.drafts?.persistent;
+      const leaving = { path: doc.path, why: unsavedWhy(doc.state.value), draftFailed: doc.draftFailed.value, persistent };
       this.state.update((s) => ({ ...s, loggingOut: false, leaving }));
       return;
     }
@@ -148,6 +149,7 @@ export class App {
     }
     this.workspace.close();
     this.state.set({ phase: "login", reauth: false });
+    await this.workspace.drafts?.idle(); // closing wrote the last edits' draft: the reload waits for it
     this.navigate("/");
   }
 }

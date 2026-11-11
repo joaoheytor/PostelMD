@@ -35,9 +35,12 @@ test("logging out while a save fails asks first, and keeps the edits as a draft"
     await typeAtEnd(page, "leaving.md", "cordon the node");
     await expect(saveStatus(page)).toHaveText("Not saved: the server is busy. Retrying; your edits are kept in this browser.");
 
-    // The save it tries first takes a while: the button says so at once.
+    // The save it tries first takes a while: the button says so at once, and keeps the focus so
+    // the new label is read out; clicking it again does nothing.
     await page.getByRole("button", { name: "Log out" }).click();
-    await expect(page.getByRole("button", { name: "Saving before you log out…" })).toBeDisabled();
+    const saving = page.getByRole("button", { name: "Saving before you log out…" });
+    await expect(saving).toBeDisabled();
+    await expect(saving).toBeFocused();
     const ask = page.getByRole("dialog", { name: "Your edits to leaving.md aren't saved" });
     await expect(ask).toBeVisible();
     await expect(ask).toContainText("The server is busy.");
@@ -150,10 +153,9 @@ test("when the browser refuses the draft, the editor says so and never claims th
     await expect(copy).toHaveText(/^Couldn't keep a local copy of your edits in this browser/);
     await expect(saveStatus(page)).toHaveText("Not saved: the server is busy. Retrying.");
 
-    // Logging out can't keep a draft either: the focus moves to Stay as the other choice goes.
+    // Logging out doesn't offer a draft the browser is already refusing: Stay is the only choice.
     await page.getByRole("button", { name: "Log out" }).click();
     const ask = page.getByRole("dialog", { name: "Your edits to no-room.md aren't saved" });
-    await ask.getByRole("button", { name: "Log out and keep a draft" }).click();
     await expect(ask.getByRole("alert")).toContainText("Couldn't keep a local copy of your edits in this browser either.");
     await expect(ask.getByRole("button", { name: "Log out and keep a draft" })).toHaveCount(0);
     await expect(ask.getByRole("button", { name: "Stay" })).toBeFocused();

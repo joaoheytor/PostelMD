@@ -95,7 +95,9 @@ export class WorkspaceView extends LightElement {
           : nothing}
         <button type="button" @click=${() => (this.inTrash = true)}>Trash</button>
         <button type="button" @click=${() => (this.committing = true)}>Commit…</button>
-        <button type="button" ?disabled=${!!this.appState.value?.loggingOut} @click=${() => this.app.logout()}>
+        <!-- aria-disabled, not disabled: the button keeps the focus, so its new label is read
+             out; logout() ignores clicks while it runs. -->
+        <button type="button" aria-disabled=${this.appState.value?.loggingOut ? "true" : "false"} @click=${() => this.app.logout()}>
           ${this.appState.value?.loggingOut ? "Saving before you log out…" : "Log out"}
         </button>
       </header>
