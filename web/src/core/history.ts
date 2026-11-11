@@ -1,4 +1,4 @@
-import type { Version } from "./api";
+import type { Version } from "./history-api";
 import { Store } from "./store";
 import { message } from "./workspace";
 

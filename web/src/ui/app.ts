@@ -7,6 +7,8 @@ import "./commit";
 import "./drafts";
 import "./finder";
 import "./editor";
+import type { NoteEditor } from "./editor";
+import "./leave";
 import "./login";
 import "./setup";
 import "./trash";
@@ -93,7 +95,11 @@ export class WorkspaceView extends LightElement {
           : nothing}
         <button type="button" @click=${() => (this.inTrash = true)}>Trash</button>
         <button type="button" @click=${() => (this.committing = true)}>Commit…</button>
-        <button type="button" @click=${() => this.app.logout()}>Log out</button>
+        <!-- aria-disabled, not disabled: the button keeps the focus, so its new label is read
+             out; logout() ignores clicks while it runs. -->
+        <button type="button" aria-disabled=${this.appState.value?.loggingOut ? "true" : "false"} @click=${() => this.app.logout()}>
+          ${this.appState.value?.loggingOut ? "Saving before you log out…" : "Log out"}
+        </button>
       </header>
       ${error
         ? html`<p class="pm-error pm-top-error" role="alert">
@@ -152,9 +158,15 @@ export class AppView extends LightElement {
       case "ready":
         return html`
           <pm-workspace .app=${this.app}></pm-workspace>
-          ${s.reauth
-            ? html`<dialog class="pm-reauth" @cancel=${(e: Event) => e.preventDefault()}><pm-login .app=${this.app}></pm-login></dialog>`
-            : nothing}
+          ${s.leaving
+            ? html`<pm-leave
+                .app=${this.app}
+                .leaving=${s.leaving}
+                .afterStay=${() => this.querySelector<NoteEditor>("pm-editor")?.focusText()}
+              ></pm-leave>`
+            : s.reauth
+              ? html`<dialog class="pm-reauth" @cancel=${(e: Event) => e.preventDefault()}><pm-login .app=${this.app}></pm-login></dialog>`
+              : nothing}
         `;
     }
   }

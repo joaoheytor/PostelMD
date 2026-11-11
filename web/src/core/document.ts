@@ -1,22 +1,28 @@
 import type { SaveResult } from "./api";
-import { type Disposable, toDisposable } from "./disposable";
+import { type Disposable, timeout } from "./disposable";
 import type { NoteDrafts } from "./drafts";
 import { Store } from "./store";
 
-export type DocStatus = "clean" | "dirty" | "saving" | "conflict" | "gone" | "error";
+/** "stalled": a save timed out, so it may or may not have landed; it is being retried. */
+export type DocStatus = "clean" | "dirty" | "saving" | "stalled" | "conflict" | "gone" | "error";
 
 export interface DocState {
   status: DocStatus;
   /** Why the last save failed (status "error"). */
   message?: string;
+  /** What happens next ("Retrying", "Log in again"), if anything. */
+  next?: string;
   /** The server's copy after a 412 (status "conflict"). */
   conflict?: { content: string; etag: string };
 }
 
 export interface DocOptions {
   save: (path: string, content: string, baseETag: string) => Promise<SaveResult>;
-  /** Reads the editor's current text. Called only when a save starts, never per keystroke. */
-  read: () => string;
+  /**
+   * Reads the editor's text, only when a save or a draft starts. Undefined when the editor is
+   * gone: then nothing is saved or drafted, since no other text holds the user's edits.
+   */
+  read: () => string | undefined;
   debounceMs?: number;
   /** Where unsaved edits are kept until a save lands (ADR-0003 §7). */
   draft?: NoteDrafts;
@@ -26,11 +32,8 @@ export interface DocOptions {
 
 const maxBackoffMs = 30_000;
 const maxDraftWaitMs = 2000;
-
-function timeout(fn: () => void, ms: number): Disposable {
-  const id = setTimeout(fn, ms);
-  return toDisposable(() => clearTimeout(id));
-}
+/** Timed-out saves remembered to recognise one that landed; one forgotten costs a conflict view. */
+const maxStalls = 8;
 
 /**
  * The autosave of one open note (ADR-0003 §7, ADR-0020):
@@ -47,6 +50,8 @@ function timeout(fn: () => void, ms: number): Disposable {
  */
 export class DocumentSession implements Disposable {
   readonly state = new Store<DocState>({ status: "clean" });
+  /** The last draft write failed (quota, private mode): no local copy holds the newest edits. */
+  readonly draftFailed = new Store<boolean>(false);
 
   private gen = 0;
   private savedGen = 0;
@@ -60,6 +65,8 @@ export class DocumentSession implements Disposable {
   private undraftedSince: number | undefined;
   /** The generation the last draft write holds. */
   private draftedGen = 0;
+  /** The saves that timed out since one last landed: a 412 with one's bytes means it landed. */
+  private stalls: { content: string; gen: number }[] = [];
 
   constructor(
     readonly path: string,
@@ -85,22 +92,36 @@ export class DocumentSession implements Disposable {
     this.scheduleDraft();
     const { status } = this.state.value;
     if (status === "conflict" || status === "gone") return; // waits for the user
+    if (status === "stalled") {
+      this.schedule(this.debounceMs); // the stall stays shown, and its failure count stays
+      return;
+    }
     if (status !== "saving") this.state.set({ status: "dirty" });
     this.failures = 0;
     this.schedule(this.debounceMs);
   }
 
   /**
-   * Writes the draft now, if some edit isn't in it yet (the tab is being hidden). Reads the
-   * text only here, never per keystroke.
+   * Writes the draft now, if some edit isn't in it (the tab is being hidden). True when every
+   * unsaved edit is in a draft; a write that fails counts for nothing, so the next one retries.
    */
-  async writeDraft(): Promise<void> {
+  async writeDraft(): Promise<boolean> {
     this.draftTimer?.dispose();
     this.draftTimer = undefined;
     this.undraftedSince = undefined;
-    if (!this.opts.draft || !this.dirty || this.draftedGen === this.gen) return;
-    this.draftedGen = this.gen;
-    await this.opts.draft.write(this.opts.read(), this.baseETag, this.gen);
+    if (!this.dirty || this.draftedGen === this.gen) return true;
+    const gen = this.gen;
+    const text = this.opts.read();
+    if (!this.opts.draft || text === undefined) return false;
+    try {
+      await this.opts.draft.write(text, this.baseETag, gen);
+    } catch {
+      this.draftFailed.set(true);
+      return false;
+    }
+    this.draftedGen = Math.max(this.draftedGen, gen);
+    this.draftFailed.set(false);
+    return !this.dirty || this.draftedGen === this.gen;
   }
 
   /** Saves now, and again for edits made meanwhile, until clean or stopped. */
@@ -142,6 +163,7 @@ export class DocumentSession implements Disposable {
    */
   rebase(etag: string): void {
     this.baseETag = etag;
+    this.stalls = []; // a 412 now is about the restored text: the user decides (ADR-0023)
   }
 
   /** Drops this session's draft: the user kept its text elsewhere (saved as a new note). */
@@ -201,15 +223,23 @@ export class DocumentSession implements Disposable {
 
   private async saveOnce(): Promise<void> {
     if (!this.dirty || !this.saveable()) return;
-    const snap = { content: this.opts.read(), gen: this.gen, base: this.baseETag };
-    this.state.set({ status: "saving" });
+    const content = this.opts.read();
+    if (content === undefined) return; // the editor is gone: nothing holds the edits to send
+    const snap = { content, gen: this.gen, base: this.baseETag };
+    // A retry leaves a failure or a stall shown until it lands: it isn't announced again.
+    const { status } = this.state.value;
+    if (status !== "error" && status !== "stalled") this.state.set({ status: "saving" });
     const r = await this.opts.save(this.path, snap.content, snap.base);
     // The server holds snap.gen now, even if the note was closed meanwhile: its draft (written
     // on close, under this session's key) is cleared up to that generation, never past it.
     if (r.kind === "saved") this.opts.draft?.saved(snap.gen);
+    const landed = r.kind === "conflict" ? this.landedStall(r.content) : undefined;
+    if (landed !== undefined) this.opts.draft?.saved(landed);
     if (this.disposed) return;
+    if (landed !== undefined && r.kind === "conflict") return this.stallLanded(landed, r.etag);
     switch (r.kind) {
       case "saved":
+        this.stalls = [];
         this.baseETag = r.etag;
         this.savedGen = snap.gen;
         this.failures = 0;
@@ -223,6 +253,7 @@ export class DocumentSession implements Disposable {
         }
         return;
       case "conflict":
+        this.stalls = [];
         this.cancelTimer();
         this.state.set({ status: "conflict", conflict: { content: r.content, etag: r.etag } });
         return;
@@ -230,14 +261,40 @@ export class DocumentSession implements Disposable {
         this.cancelTimer();
         this.state.set({ status: "gone" });
         return;
+      case "unknown":
+        // Timed out, maybe landed: the retry sends the newest text over the same base. Identical
+        // bytes get a 204 (ADR-0027); a 412 with these bytes means they landed (stallLanded).
+        this.stalls = [...this.stalls.slice(-(maxStalls - 1)), { content: snap.content, gen: snap.gen }];
+        this.state.set({ status: "stalled" });
+        this.retry(0);
+        return;
       case "error":
-        this.state.set({ status: "error", message: r.message });
-        if (r.retry) {
-          const backoff = Math.min(1000 * 2 ** this.failures, maxBackoffMs);
-          this.failures++;
-          this.schedule(Math.max(r.retryAfterMs, backoff));
-        }
+        this.state.set({ status: "error", message: r.message, ...(r.next && { next: r.next }) });
+        if (r.retry) this.retry(r.retryAfterMs);
         return;
     }
+  }
+
+  /** The newest generation among the stalled saves whose bytes are body, if any. */
+  private landedStall(body: string): number | undefined {
+    const gens = this.stalls.filter((s) => s.content === body).map((s) => s.gen);
+    return gens.length > 0 ? Math.max(...gens) : undefined;
+  }
+
+  /** A 412 with a stalled save's bytes: it landed as etag. No conflict: save the newest now. */
+  private stallLanded(gen: number, etag: string): void {
+    this.stalls = [];
+    this.baseETag = etag;
+    this.savedGen = Math.max(this.savedGen, gen);
+    this.failures = 0;
+    if (!this.dirty) return this.state.set({ status: "clean" });
+    this.state.set({ status: "dirty" });
+    this.schedule(0);
+  }
+
+  private retry(afterMs: number): void {
+    const backoff = Math.min(1000 * 2 ** this.failures, maxBackoffMs);
+    this.failures++;
+    this.schedule(Math.max(afterMs, backoff));
   }
 }

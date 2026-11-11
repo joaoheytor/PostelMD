@@ -21,6 +21,8 @@ export interface Draft {
 
 /** Where drafts are kept: IndexedDB in the browser (drafts-idb.ts), memory in tests. */
 export interface DraftBackend {
+  /** Its drafts outlive the page (IndexedDB), not only the note (memory). */
+  readonly persistent: boolean;
   put(d: Draft): Promise<void>;
   /** Deletes path's draft of esid if its generation is at most gen. */
   deleteUpTo(path: string, esid: string, gen: number): Promise<void>;
@@ -95,6 +97,11 @@ export class Drafts {
     return this.enqueue(() => this.backend.delete(d.path, d.esid));
   }
 
+  /** Drafts outlive the page (a reload, a logout): false when kept only in memory. */
+  get persistent(): boolean {
+    return this.backend.persistent;
+  }
+
   /** Resolves once every write and clear made so far is applied. */
   idle(): Promise<void> {
     return this.queue;
@@ -109,6 +116,7 @@ export class Drafts {
 
 /** Drafts kept in memory: for tests, and when the browser offers no IndexedDB. */
 export class MemoryDraftBackend implements DraftBackend {
+  readonly persistent: boolean = false;
   private readonly rows = new Map<string, Draft>();
 
   put(d: Draft): Promise<void> {
