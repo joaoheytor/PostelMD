@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { bomChar, decodeText, fromEditor, maxTextBytes, NotTextError, textFormat, toEditor } from "./textfile";
+import {
+  BinaryError,
+  bomChar,
+  decodeText,
+  fromEditor,
+  LineEndingsError,
+  maxTextBytes,
+  NotTextError,
+  textFormat,
+  toEditor,
+  toLF,
+  TooLargeError,
+} from "./textfile";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const bom = [0xef, 0xbb, 0xbf];
@@ -47,10 +59,23 @@ describe("textFormat: the line endings and byte order mark a save keeps", () => 
     expect(textFormat("one line")).toEqual({ bom: false, eol: "\n" });
   });
 
-  it("refuses mixed line endings and a lone CR: the editor would change them", () => {
-    expect(() => textFormat("a\r\nb\nc")).toThrow("it mixes CRLF and LF line endings");
-    expect(() => textFormat("a\rb")).toThrow("it has CR line endings");
-    expect(() => textFormat("a\r\r\nb")).toThrow("it has CR line endings");
+  it("refuses mixed line endings and a lone CR: the editor would change them, so only the user may", () => {
+    const mixed = () => textFormat("a\r\nb\nc");
+    expect(mixed).toThrow(new LineEndingsError("mixed"));
+    expect(mixed).toThrow("it mixes Windows (CRLF) and Unix (LF) line endings");
+    expect(() => textFormat("a\rb")).toThrow(new LineEndingsError("cr"));
+    expect(() => textFormat("a\r\r\nb")).toThrow("it has old Mac (CR) line endings");
+  });
+
+  it("toLF: what the user's 'convert' opens: LF lines, the byte order mark kept as it was", () => {
+    expect(toLF(`${bomChar}a\r\nb\nc\rd\r\n`)).toEqual({ text: "a\nb\nc\nd\n", format: { bom: true, eol: "\n" } });
+    expect(toLF("a\rb")).toEqual({ text: "a\nb", format: { bom: false, eol: "\n" } });
+  });
+
+  it("tells binary and too large apart from line endings: only line endings can be converted", () => {
+    expect(() => decodeText(new Uint8Array([0]))).toThrow(BinaryError);
+    expect(() => decodeText(new Uint8Array(maxTextBytes + 1))).toThrow(TooLargeError);
+    expect(new LineEndingsError("cr")).toBeInstanceOf(NotTextError);
   });
 
   it("leaves a U+FEFF further on as text: it isn't a byte order mark", () => {

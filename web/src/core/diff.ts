@@ -1,6 +1,18 @@
+import { toLF } from "./textfile";
+
 export interface DiffLine {
   kind: "same" | "added" | "removed";
   text: string;
+}
+
+/**
+ * The line diff of two file texts as the editor shows them (LF lines, no byte order mark), or
+ * "endings" when they differ only there: -/+ pairs that look the same would tell the user
+ * nothing.
+ */
+export function textDiff(a: string, b: string): DiffLine[] | "endings" {
+  const [x, y] = [toLF(a).text, toLF(b).text];
+  return a !== b && x === y ? "endings" : diffLines(x, y);
 }
 
 /**

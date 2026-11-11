@@ -162,7 +162,8 @@ export async function readNote(path: string): Promise<Note> {
  */
 export type SaveResult =
   | { kind: "saved"; etag: string }
-  | { kind: "conflict"; etag: string; content: string }
+  // binary: the other version isn't text (content is ""): nothing to compare or take.
+  | { kind: "conflict"; etag: string; content: string; binary?: true }
   | { kind: "gone" }
   | { kind: "unknown" }
   | { kind: "error"; message: string; next?: string; retryAfterMs: number; retry: boolean };
@@ -176,7 +177,7 @@ export async function saveNote(path: string, content: string, baseETag: string, 
   const signal = AbortSignal.timeout(timeoutMs);
   try {
     const resp = await request("PUT", `/api/v1/notes/${encodePath(path)}`, {
-      headers: { "If-Match": baseETag, "Content-Type": "text/markdown; charset=utf-8" },
+      headers: { "If-Match": baseETag, "Content-Type": contentType(path) },
       body: content,
       signal,
     });
@@ -195,8 +196,17 @@ export async function saveNote(path: string, content: string, baseETag: string, 
 }
 
 /**
- * A 412's other version, read like readNote reads a file. If it is no longer text the editor
- * can hold, there is nothing to compare or take: the save fails, and the edits stay.
+ * What a save sends its body as: Markdown for a note, as the server labels it on a read
+ * (notes.go), and plain bytes for any other file. The server stores the body whatever it is.
+ */
+function contentType(path: string): string {
+  return /\.md$/i.test(path) ? "text/markdown; charset=utf-8" : "application/octet-stream";
+}
+
+/**
+ * A 412's other version, read like readNote reads a file. If it is no longer text, it is a
+ * conflict with nothing to compare or take (binary): the user can only keep their text
+ * elsewhere, and the other version stays on disk.
  */
 async function conflictOf(resp: Response): Promise<SaveResult> {
   const etag = resp.headers.get("ETag") ?? "";
@@ -204,7 +214,7 @@ async function conflictOf(resp: Response): Promise<SaveResult> {
     return { kind: "conflict", etag, content: decodeText(new Uint8Array(await resp.arrayBuffer())) };
   } catch (err) {
     if (!(err instanceof NotTextError)) throw err;
-    return { kind: "error", message: `it changed outside this editor, and ${err.message}`, retryAfterMs: 0, retry: false };
+    return { kind: "conflict", etag, content: "", binary: true };
   }
 }
 
@@ -224,7 +234,7 @@ function saveError(e: ApiError): { message: string; next?: string } {
 export async function createNote(path: string, content: string): Promise<string> {
   const resp = await ok(
     await request("PUT", `/api/v1/notes/${encodePath(path)}`, {
-      headers: { "If-None-Match": "*", "Content-Type": "text/markdown; charset=utf-8" },
+      headers: { "If-None-Match": "*", "Content-Type": contentType(path) },
       body: content,
     }),
   );

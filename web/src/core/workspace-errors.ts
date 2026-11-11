@@ -1,16 +1,23 @@
 /** The workspace's failures in words, and the names it picks for a recovered copy. */
 import { ApiError } from "./api";
-import { NotTextError } from "./textfile";
+import { BinaryError, LineEndingsError, NotTextError } from "./textfile";
 import { parent } from "./tree";
 
 export function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Why path didn't open: a file the editor can't hold says so, as a reason, not a failure. */
-export function openError(path: string, err: unknown): string {
-  if (err instanceof NotTextError) return `PostelMD can't open ${path}: ${err.message}.`;
-  return `Couldn't open ${path}: ${message(err)}`;
+/**
+ * Why path didn't open, as the workspace shows it. A file the editor can't hold says so, as a
+ * reason, not a failure; one refused for its line endings offers to convert them (convert).
+ */
+export function openFailure(path: string, err: unknown): { error: string; convert?: string } {
+  if (err instanceof LineEndingsError) {
+    return { error: `PostelMD can't open ${path} as it is: ${err.message}. Convert them to LF to edit it here.`, convert: path };
+  }
+  if (err instanceof BinaryError) return { error: `PostelMD opens only UTF-8 text files, and ${path} isn't one.` };
+  if (err instanceof NotTextError) return { error: `PostelMD can't open ${path}: ${err.message}.` };
+  return { error: `Couldn't open ${path}: ${message(err)}` };
 }
 
 /** Why a move failed, in words: the server's 404 doesn't say which side is missing. */

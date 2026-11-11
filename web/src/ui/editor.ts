@@ -188,9 +188,8 @@ export class NoteEditor extends LightElement {
     }
   }
 
-  private takeTheirs(): void {
-    const theirs = this.workspace.takeTheirs();
-    if (theirs !== undefined) this.editor?.replace(theirs);
+  private takeTheirs(convert: boolean): void {
+    this.workspace.takeTheirs((t) => this.editor?.replace(t), convert);
   }
 
   private async trash(path: string): Promise<void> {
@@ -258,12 +257,12 @@ export class NoteEditor extends LightElement {
           ></pm-move>`
         : nothing}
       ${st.status === "conflict" && st.conflict
-        ? conflictBanner(
-            st.conflict,
-            () => this.workspace.currentText() ?? note.initial,
-            () => note.doc.keepMine(),
-            () => this.takeTheirs(),
-          )
+        ? conflictBanner(st.conflict, {
+            mine: () => this.workspace.currentText() ?? note.initial,
+            keep: () => note.doc.keepMine(),
+            take: (convert) => this.takeTheirs(convert),
+            saveAsNew: () => void this.workspace.saveAsNew(),
+          })
         : nothing}
       ${secretWarning(this.workspace)}
       <pm-draft-warning .doc=${note.doc}></pm-draft-warning>

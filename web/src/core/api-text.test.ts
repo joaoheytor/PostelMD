@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readNote, saveNote } from "./api";
+import { createNote, readNote, saveNote } from "./api";
 import { bomChar, NotTextError } from "./textfile";
 
 const answer = (status: number, body: Uint8Array<ArrayBuffer>) =>
@@ -26,13 +26,36 @@ describe("reading a file's text", () => {
     expect(await saveNote("a.ini", "x", '"e0"')).toEqual({ kind: "conflict", etag: '"e9"', content: `${bomChar}a\r\n` });
   });
 
-  it("a conflict whose other version is binary fails the save without offering to take it", async () => {
+  it("a conflict whose other version is binary is a conflict with nothing to take or compare", async () => {
     vi.stubGlobal("fetch", answer(412, png));
-    expect(await saveNote("a.ini", "x", '"e0"')).toEqual({
-      kind: "error",
-      message: "it changed outside this editor, and it isn't UTF-8 text",
-      retryAfterMs: 0,
-      retry: false,
-    });
+    expect(await saveNote("a.ini", "x", '"e0"')).toEqual({ kind: "conflict", etag: '"e9"', content: "", binary: true });
+  });
+});
+
+describe("the Content-Type a save sends", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** The Content-Type of each request fetch was called with. */
+  function sentTypes(): string[] {
+    const types: string[] = [];
+    vi.stubGlobal("fetch", ((_url: string, init?: RequestInit) => {
+      types.push(new Headers(init?.headers).get("Content-Type") ?? "");
+      return Promise.resolve(new Response(null, { status: 204, headers: { ETag: '"e1"' } }));
+    }) as typeof fetch);
+    return types;
+  }
+
+  it("is Markdown for a note and plain bytes for any other file", async () => {
+    const types = sentTypes();
+    await saveNote("a.md", "x", '"e0"');
+    await saveNote("deploy.yaml", "x", '"e0"');
+    await createNote("b.MD", "x");
+    await createNote("run.sh", "x");
+    expect(types).toEqual([
+      "text/markdown; charset=utf-8",
+      "application/octet-stream",
+      "text/markdown; charset=utf-8",
+      "application/octet-stream",
+    ]);
   });
 });

@@ -12,8 +12,8 @@ export interface DocState {
   message?: string;
   /** What happens next ("Retrying", "Log in again"), if anything. */
   next?: string;
-  /** The server's copy after a 412 (status "conflict"). */
-  conflict?: { content: string; etag: string };
+  /** The server's copy after a 412 (status "conflict"); binary: it isn't text, content is "". */
+  conflict?: { content: string; etag: string; binary?: true };
 }
 
 export interface DocOptions {
@@ -233,7 +233,7 @@ export class DocumentSession implements Disposable {
     // The server holds snap.gen now, even if the note was closed meanwhile: its draft (written
     // on close, under this session's key) is cleared up to that generation, never past it.
     if (r.kind === "saved") this.opts.draft?.saved(snap.gen);
-    const landed = r.kind === "conflict" ? this.landedStall(r.content) : undefined;
+    const landed = r.kind === "conflict" && !r.binary ? this.landedStall(r.content) : undefined; // binary "" is no text
     if (landed !== undefined) this.opts.draft?.saved(landed);
     if (this.disposed) return;
     if (landed !== undefined && r.kind === "conflict") return this.stallLanded(landed, r.etag);
@@ -255,7 +255,7 @@ export class DocumentSession implements Disposable {
       case "conflict":
         this.stalls = [];
         this.cancelTimer();
-        this.state.set({ status: "conflict", conflict: { content: r.content, etag: r.etag } });
+        this.state.set({ status: "conflict", conflict: { content: r.content, etag: r.etag, ...(r.binary && { binary: true }) } });
         return;
       case "gone":
         this.cancelTimer();

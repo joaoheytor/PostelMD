@@ -1,29 +1,51 @@
 /**
  * Which files the editor opens, and how their text goes in and out of it unchanged. A file
- * opens only when a save of it, unedited, writes back the very bytes it was read from: UTF-8
- * text, no NUL byte, one kind of line ending, at most the note size limit.
+ * opens as it is only when a save of it, unedited, writes back the very bytes it was read
+ * from: UTF-8 text, no NUL byte, one kind of line ending, at most the note size limit. A file
+ * whose line endings the editor can't keep opens only once the user asks to convert them.
  */
 
 /** The note size limit (vault.MaxNoteSize): the server refuses to save more. */
 export const maxTextBytes = 5 << 20;
 
-/** The file can't be opened as text; the message says why, in words for the user. */
+/** The file can't be opened as it is; the message says why, in words for the user. */
 export class NotTextError extends Error {}
+
+/** Bytes that aren't UTF-8 text (a NUL byte, an invalid sequence): nothing can open them. */
+export class BinaryError extends NotTextError {
+  constructor() {
+    super("it isn't UTF-8 text");
+  }
+}
+
+/** Over the note size limit: the server would refuse the save. */
+export class TooLargeError extends NotTextError {
+  constructor() {
+    super("it's larger than 5 MiB, the most PostelMD edits");
+  }
+}
+
+/** Text whose line endings the editor can't keep: only the user may convert them (toLF). */
+export class LineEndingsError extends NotTextError {
+  constructor(readonly kind: "mixed" | "cr") {
+    super(kind === "mixed" ? "it mixes Windows (CRLF) and Unix (LF) line endings" : "it has old Mac (CR) line endings");
+  }
+}
 
 /** U+FEFF, what a UTF-8 byte order mark decodes to (spelt out: the character is invisible). */
 export const bomChar = String.fromCharCode(0xfeff);
 
 /**
  * The file's text, exactly: a byte order mark stays as its first character, so a save writes
- * it back. Throws NotTextError for anything the editor would change on save.
+ * it back. Throws BinaryError or TooLargeError.
  */
 export function decodeText(bytes: Uint8Array): string {
-  if (bytes.length > maxTextBytes) throw new NotTextError("it's larger than 5 MiB, the most PostelMD edits");
-  if (bytes.includes(0)) throw new NotTextError("it isn't UTF-8 text");
+  if (bytes.length > maxTextBytes) throw new TooLargeError();
+  if (bytes.includes(0)) throw new BinaryError();
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    throw new NotTextError("it isn't UTF-8 text");
+    throw new BinaryError();
   }
 }
 
@@ -36,16 +58,27 @@ export interface TextFormat {
 }
 
 /**
- * The file's format; throws NotTextError when the editor's LF lines can't give the same text
- * back (mixed line endings, a lone CR): such a file never opens, so no save converts it.
+ * The file's format; throws LineEndingsError when the editor's LF lines can't give the same
+ * text back (mixed line endings, a lone CR): such a file never opens as it is, so no save
+ * converts it unasked.
  */
 export function textFormat(text: string): TextFormat {
   const bom = text.startsWith(bomChar);
   const crlf = text.includes("\r\n");
   const lf = /(^|[^\r])\n/.test(text);
-  if (/\r(?!\n)/.test(text)) throw new NotTextError("it has CR line endings, which the editor would change");
-  if (crlf && lf) throw new NotTextError("it mixes CRLF and LF line endings, which the editor would change");
+  if (/\r(?!\n)/.test(text)) throw new LineEndingsError("cr");
+  if (crlf && lf) throw new LineEndingsError("mixed");
   return { bom, eol: crlf ? "\r\n" : "\n" };
+}
+
+/**
+ * What a file opens as when the user converts its line endings: the editor's text, every
+ * CRLF and CR made LF, and a format that saves LF. A byte order mark is no line ending: it
+ * stays as it was.
+ */
+export function toLF(text: string): { text: string; format: TextFormat } {
+  const bom = text.startsWith(bomChar);
+  return { text: (bom ? text.slice(1) : text).replace(/\r\n?/g, "\n"), format: { bom, eol: "\n" } };
 }
 
 /** The text the editor shows: no byte order mark, LF lines. */

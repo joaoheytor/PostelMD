@@ -104,7 +104,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The editor's cursor is visible in dark mode.
 - Saving a file keeps its CRLF line endings and its UTF-8 byte order mark; saves used to
   turn CRLF into LF and drop the byte order mark. A file that mixes CRLF and LF line
-  endings, or has a lone CR, doesn't open, since the editor can't save it back unchanged.
+  endings, or has a lone CR, is no longer converted silently: opening it offers "Convert
+  line endings and open", which makes them LF and saves that as your edit. Diffs that
+  differ only in line endings or a byte order mark now say so.
 - A save retried after its response was lost (a dropped connection, a timeout) no longer
   shows a conflict between two identical texts: if the note already holds what was sent,
   the retry succeeds.

@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import { diffLines } from "../core/diff";
+import { textDiff } from "../core/diff";
 import type { Disposable } from "../core/disposable";
 import type { DocumentSession } from "../core/document";
 import type { Draft } from "../core/drafts";
@@ -77,7 +77,7 @@ export class DraftBanner extends LightElement {
         )}
       </ul>
       ${this.comparing
-        ? diffView(diffLines(this.workspace.currentText() ?? open.initial, this.comparing.text), "Changes from the current text to the draft")
+        ? diffView(textDiff(this.workspace.currentText() ?? open.initial, this.comparing.text), "Changes from the current text to the draft")
         : nothing}
     </section>`;
   }

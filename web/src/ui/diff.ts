@@ -7,7 +7,8 @@ const mark: Record<DiffLine["kind"], string> = { same: "  ", added: "+ ", remove
  * A line diff as a labelled <pre>, with added and removed lines marked for every reader. It
  * scrolls, so it takes the focus for keyboard scrolling.
  */
-export function diffView(lines: DiffLine[], label: string) {
+export function diffView(lines: DiffLine[] | "endings", label: string) {
+  if (lines === "endings") return html`<p class="pm-diff-note">Only the line endings or the byte order mark differ.</p>`;
   return html`<pre class="pm-diff" tabindex="0" aria-label=${label}>${lines.map((l) =>
     l.kind === "same"
       ? html`<span>${mark.same}${l.text}\n</span>`

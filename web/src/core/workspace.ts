@@ -1,14 +1,14 @@
 import * as api from "./api";
-import { DocumentSession } from "./document";
 import type { Draft, Drafts } from "./drafts";
 import { nameProblem, noteFile, noteTitle } from "./names";
 import { Store } from "./store";
 import { SecretWatch } from "./secretwatch";
 import { join, parent, rebase, Tree } from "./tree";
 import { fill, localDate, type Template } from "./templates";
-import { fileText, type OpenNote, openFile, takeTheirs } from "./open-file";
-import { normalize, textFormat } from "./textfile";
-import { message, moveError, openError, recoveredPath } from "./workspace-errors";
+import { fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
+import { restoreVersion } from "./restore";
+import { normalize } from "./textfile";
+import { message, moveError, openFailure, recoveredPath } from "./workspace-errors";
 
 export type { OpenNote } from "./open-file";
 export { message } from "./workspace-errors";
@@ -17,6 +17,8 @@ export interface WorkspaceState {
   open?: OpenNote | undefined;
   /** A failed action the user should see (opening, creating or deleting). */
   error?: string | undefined;
+  /** The file the error refused for its line endings: the user may convert them (open(…, true)). */
+  convert?: string | undefined;
 }
 
 /** The workspace: the file tree and the open note. */
@@ -72,38 +74,34 @@ export class Workspace {
   }
 
   /**
-   * Closes the open note, whatever it holds (call saveOpen first), and opens path. When opens
-   * overlap, the last one wins: an earlier one that finishes later changes nothing.
+   * Closes the open note, whatever it holds (call saveOpen first), and opens path; convert
+   * (the user's click only) makes its line endings LF (open-file.ts). When opens overlap, the
+   * last one wins: an earlier one that finishes later changes nothing.
    */
-  async open(path: string): Promise<void> {
+  async open(path: string, convert = false): Promise<void> {
     this.close();
     const seq = this.opens;
     try {
       const note = await api.readNote(path);
       if (seq !== this.opens) return;
-      const format = textFormat(note.content); // refuses a file a save would change
       const offered = (await this.drafts?.offered(path)) ?? [];
       if (seq !== this.opens) return;
-      // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
-      // Saves and drafts hold the file's text: its byte order mark and line endings put back.
-      const read = () => {
-        const text = this.reader?.();
-        return text === undefined ? undefined : fileText(opened, text);
-      };
-      const draft = this.drafts?.forNote(path);
-      // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
-      const save = (p: string, content: string, base: string) => {
-        this.secrets.check(content);
-        return api.saveNote(p, content, base);
-      };
-      const doc = new DocumentSession(path, note.etag, { save, read, ...(draft && { draft }) });
-      const opened = openFile(doc, note.content, format);
+      const opened = openSession(path, note, convert, {
+        // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
+        reader: () => this.reader?.(),
+        // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
+        save: (p, content, base) => {
+          this.secrets.check(content);
+          return api.saveNote(p, content, base);
+        },
+        draft: this.drafts?.forNote(path),
+      });
       this.noteDrafts.set(offered);
       this.state.set({ open: opened });
       await this.refreshOffered(); // the note closed to open this one may have left a draft
       await this.tree.reveal(path); // the tree shows it, however it was opened
     } catch (err) {
-      if (seq === this.opens) this.state.set({ error: openError(path, err) });
+      if (seq === this.opens) this.state.set(openFailure(path, err));
     }
   }
 
@@ -115,7 +113,7 @@ export class Workspace {
     const path = join(folder, noteFile(name));
     const problem = nameProblem(path);
     if (problem) {
-      this.state.update((s) => ({ ...s, error: problem }));
+      this.fail(problem);
       return false;
     }
     const title = noteTitle(name);
@@ -124,7 +122,7 @@ export class Workspace {
       await api.createNote(path, content);
     } catch (err) {
       const why = err instanceof api.ApiError && err.status === 409 ? "it already exists" : message(err);
-      this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${why}` }));
+      this.fail(`Couldn't create ${path}: ${why}`);
       return false;
     }
     await this.tree.changed(path);
@@ -149,7 +147,7 @@ export class Workspace {
     try {
       await api.createFolder(path);
     } catch (err) {
-      this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${message(err)}` }));
+      this.fail(`Couldn't create ${path}: ${message(err)}`);
       return;
     }
     await this.tree.changed(path);
@@ -164,14 +162,14 @@ export class Workspace {
     // Never creates folders on the way: a move has no contract for that (CLAUDE.md rule 4).
     const into = parent(to);
     if (await this.tree.missing(into)) {
-      this.state.update((s) => ({ ...s, error: `Folder ${into} doesn't exist. Create it first with New folder.` }));
+      this.fail(`Folder ${into} doesn't exist. Create it first with New folder.`);
       return false;
     }
     const open = this.state.value.open;
     const reopen = open && rebase(open.doc.path, from, to);
     if (open && reopen) {
       if (!(await this.saveOpen())) {
-        this.state.update((s) => ({ ...s, error: `Save or resolve ${open.doc.path} before moving it.` }));
+        this.fail(`Save or resolve ${open.doc.path} before moving it.`);
         return false;
       }
       // Closed before the move, so no autosave can target the old path.
@@ -183,7 +181,7 @@ export class Workspace {
     } catch (err) {
       const why = moveError(err, from, to);
       if (open && reopen) await this.open(open.doc.path); // reopening clears the error
-      this.state.update((s) => ({ ...s, error: `Couldn't move ${from}: ${why}` }));
+      this.fail(`Couldn't move ${from}: ${why}`);
       return false;
     }
     await this.tree.moved(from, to);
@@ -191,38 +189,11 @@ export class Workspace {
     return true;
   }
 
-  /**
-   * Replaces the open note's text with its version from commit, through the save path
-   * (ADR-0020): the open note is saved first, and the server replaces it only if it is still
-   * that saved version (If-Match). The note is then reopened with what the server holds.
-   */
+  /** Replaces the open note's text with its version from commit, through the save path (restore.ts). */
   async restore(commit: string): Promise<boolean> {
-    const open = this.state.value.open;
-    if (!open) return false;
-    const path = open.doc.path;
-    if (!(await this.saveOpen())) {
-      this.state.update((s) => ({ ...s, error: `Save or resolve ${path} before restoring a version.` }));
-      return false;
-    }
-    // Closed first, so no autosave races the restore.
-    open.doc.dispose();
-    this.state.set({});
-    let failed: unknown;
-    try {
-      await api.restore(path, commit, open.doc.etag);
-    } catch (err) {
-      failed = err;
-    }
-    await this.open(path); // reopening clears the error
-    if (failed !== undefined) {
-      const why =
-        failed instanceof api.ApiError && failed.status === 412
-          ? "it changed in the meantime, so nothing was replaced"
-          : message(failed);
-      this.state.update((s) => ({ ...s, error: `Couldn't restore ${path}: ${why}` }));
-      return false;
-    }
-    return true;
+    const r = await restoreVersion(this, commit);
+    if (typeof r === "string") this.fail(r);
+    return r === true;
   }
 
   /** Moves a note or folder to the trash; true when it went. An open note inside it is closed unsaved. */
@@ -237,7 +208,7 @@ export class Workspace {
       await api.trash(path, kind);
     } catch (err) {
       ok = false;
-      this.state.update((s) => ({ ...s, error: `Couldn't delete ${path}: ${message(err)}` }));
+      this.fail(`Couldn't delete ${path}: ${message(err)}`);
     }
     await this.tree.changed(path);
     return ok;
@@ -254,7 +225,7 @@ export class Workspace {
     try {
       await api.createNote(path, this.currentText() ?? open.initial);
     } catch (err) {
-      this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${message(err)}` }));
+      this.fail(`Couldn't create ${path}: ${message(err)}`);
       return;
     }
     await this.tree.changed(path);
@@ -302,7 +273,7 @@ export class Workspace {
       await api.createNote(path, d.text);
     } catch (err) {
       const why = err instanceof api.ApiError && err.status === 409 ? `${path} already exists` : message(err);
-      this.state.update((s) => ({ ...s, error: `Couldn't save the draft as ${path}: ${why}` }));
+      this.fail(`Couldn't save the draft as ${path}: ${why}`);
       return;
     }
     await this.drafts?.discard(d);
@@ -318,17 +289,23 @@ export class Workspace {
     return open && text !== undefined ? fileText(open, text) : undefined;
   }
 
-  /** The conflict's other version for the editor (open-file.ts); undefined, with why, if it can't be. */
-  takeTheirs(): string | undefined {
+  /**
+   * Puts the conflict's other version in the editor (open-file.ts). Converted (the user
+   * confirmed), its LF lines are an edit saved over its ETag. False when it can't be taken
+   * (not text; or not convert and line endings a save would change): the conflict stays.
+   */
+  takeTheirs(put: (text: string) => void, convert = false): boolean {
     const open = this.state.value.open;
-    const theirs = open?.doc.state.value.conflict?.content;
-    if (!open || theirs === undefined) return undefined;
+    const c = open?.doc.state.value.conflict;
+    if (!open || !c || c.binary) return false;
     try {
-      return takeTheirs(open, theirs);
+      put(takeTheirs(open, c.content, convert));
     } catch (err) {
-      this.state.update((s) => ({ ...s, error: `Couldn't use the other version: ${message(err)}.` }));
-      return undefined;
+      this.fail(`Couldn't use the other version: ${message(err)}.`);
+      return false;
     }
+    if (convert) open.doc.edit();
+    return true;
   }
 
   /** Something was pasted into the open note: scan it now, not at the next save. */
@@ -337,6 +314,11 @@ export class Workspace {
   }
 
   dismissError(): void {
-    this.state.update((s) => ({ ...s, error: undefined }));
+    this.fail(undefined);
+  }
+
+  /** Shows error (or none), and drops a stale offer to convert a file's line endings. */
+  private fail(error: string | undefined): void {
+    this.state.update((s) => ({ ...s, error, convert: undefined }));
   }
 }

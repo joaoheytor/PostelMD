@@ -85,6 +85,7 @@ export class WorkspaceView extends LightElement {
   protected override render() {
     const w = this.app.workspace;
     const error = this.ws.value?.error;
+    const convert = this.ws.value?.convert; // a file refused for its line endings
     const notice = this.appState.value?.notice;
     return html`
       <header class="pm-top">
@@ -103,7 +104,9 @@ export class WorkspaceView extends LightElement {
       </header>
       ${error
         ? html`<p class="pm-error pm-top-error" role="alert">
-            ${error} <button type="button" @click=${() => w.dismissError()}>Dismiss</button>
+            ${error}
+            ${convert ? html`<button type="button" @click=${() => void w.open(convert, true)}>Convert line endings and open</button>` : nothing}
+            <button type="button" @click=${() => w.dismissError()}>Dismiss</button>
           </p>`
         : nothing}
       ${notice

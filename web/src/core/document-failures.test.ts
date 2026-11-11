@@ -136,6 +136,19 @@ describe("DocumentSession failures", () => {
         expect(doc.state.value.status).toBe("clean");
       });
 
+      it("a 412 whose other version isn't text is a conflict, even when a stalled save sent the same (empty) text", async () => {
+        type("");
+        void doc.flush();
+        saves[0]?.answer({ kind: "unknown" });
+        await vi.advanceTimersByTimeAsync(0);
+        type("");
+        await vi.advanceTimersByTimeAsync(1000);
+        // A binary body has no text to compare: content "" must not match the stalled "".
+        saves[1]?.answer({ kind: "conflict", etag: '"e1"', content: "", binary: true });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value).toMatchObject({ status: "conflict", conflict: { etag: '"e1"', binary: true } });
+      });
+
       it("after two stalls in a row, a 412 with the first one's bytes is no conflict either", async () => {
         await stallThenType(); // v1 stalled (it landed); the retry of v2 is in flight
         saves[1]?.answer({ kind: "unknown" }); // v2 stalls too, and didn't land
