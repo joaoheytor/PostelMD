@@ -166,7 +166,13 @@ see v0.2's trusted-proxy setting.
 
 ## Upgrade and rollback
 
-v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`.
+v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`. The data's format
+is recorded in `~/postelmd/.postelmd/format` (v0.1 writes `1` at its first start; ADR-0025).
+A later release that changes the format raises that number, and an older build then refuses
+to start with `this data was written by a newer PostelMD (format N); run that version or
+newer`, before it changes anything. So a **rollback across a format change** means restoring
+the backup you took before the upgrade, not only the older image; within the same format,
+the digest swap below is enough. Never edit `format` to get past the check.
 
 ```sh
 docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE"   # note the current digest

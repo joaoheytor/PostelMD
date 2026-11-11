@@ -13,9 +13,11 @@ import (
 
 // Save replaces the note at p with content if its current revision is base (If-Match).
 // It never creates a note: a missing one is ErrNotFound, so an autosave can't recreate a
-// deleted note. A different revision is a *ConflictError carrying the current note.
-// Saving identical content writes nothing. The vault mutex is held from the check until
-// the replacement is durable.
+// deleted note. A different revision is a *ConflictError carrying the current note, unless
+// the note already holds exactly content: then it answers the current revision whatever the
+// base, so a retry whose first response was lost succeeds (ADR-0003 §3, §5). Saving
+// identical content writes nothing. The new note keeps the old one's permission bits. The
+// vault mutex is held from the check until the replacement is durable.
 func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (Rev, error) {
 	if err := checkPath(p); err != nil {
 		return "", err
@@ -33,13 +35,17 @@ func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (R
 	if err != nil {
 		return "", notFound(err)
 	}
+	if bytes.Equal(cur, content) {
+		return RevOf(cur), nil
+	}
 	if RevOf(cur) != base {
 		return "", &ConflictError{Current: cur, Rev: RevOf(cur)}
 	}
-	if bytes.Equal(cur, content) {
-		return base, nil
+	perm, err := v.root.Perm(p)
+	if err != nil {
+		return "", notFound(err)
 	}
-	tmp, err := v.writeTemp(content)
+	tmp, err := v.writeTemp(content, perm)
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +73,7 @@ func (v *Vault) Create(ctx context.Context, p string, content []byte) (Rev, erro
 	}
 	defer unlock()
 
-	tmp, err := v.writeTemp(content)
+	tmp, err := v.writeTemp(content, newFilePerm)
 	if err != nil {
 		return "", err
 	}

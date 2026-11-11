@@ -272,3 +272,7 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
     published since the RC blocks the release.
   - **No caches in release builds**, and harden-runner **blocks** egress in both workflows,
     with per-job allow-lists (`docs/ci-cd.md` §3).
+- **2026-11-10, the MVP's data format.** The MVP has no database, so "an older binary refuses
+  to start against a newer schema" is applied to `/data` as a whole by a format number in
+  `/data/.postelmd/format`, checked under the instance lock at every start: see
+  [ADR-0025](0025-data-format-version.md).

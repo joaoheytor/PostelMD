@@ -90,6 +90,20 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   for secrets before you push the repository anywhere.
 
 ### Fixed
+- A save retried after its response was lost (a dropped connection, a timeout) no longer
+  shows a conflict between two identical texts: if the note already holds what was sent,
+  the retry succeeds.
+- Saving a note keeps its file permissions; every save used to make it readable by its
+  owner only (`0600`), and took the executable bit off scripts.
+- Clones and submodules inside the notes folder are left out of commits and the initial
+  import, and listed as such, instead of having their files committed as notes. Commits no
+  longer fail with a "file/directory conflict" when the repository already records one.
+- Adopting a notes folder that already has a `.postelmd-tmp` or `.postelmd-trash` folder of
+  its own now stops at the first start with the folder to rename, instead of deleting the
+  files in `.postelmd-tmp`.
+- PostelMD now records its data format in `/data/.postelmd/format`, so a future release
+  that changes the format can't be rolled back onto data an older build doesn't understand:
+  the older build refuses to start and says which version to run.
 - A note closed while its edits couldn't be saved, then opened again in the same tab, now
   offers those edits as a draft to restore or compare, as it does after a reload. Typing in
   the reopened note no longer writes over them, and "Unsaved drafts" lists them at once.

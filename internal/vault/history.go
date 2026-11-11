@@ -60,6 +60,9 @@ type Status struct {
 	Branch  string   `json:"branch"`
 	Changes []Change `json:"changes"`
 	Skipped []string `json:"skipped,omitempty"` // over MaxCommitFile: never committed
+	// Repositories are folders with a .git of their own (a clone or a submodule): never
+	// descended into, as git add -A records a gitlink there; an existing gitlink is kept.
+	Repositories []string `json:"repositories,omitempty"`
 }
 
 // EnableGit opens the vault's repository, creating an empty one first if there is none
@@ -144,7 +147,7 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 			content[p] = b
 		}
 		return nil
-	})
+	}, func(p string) { st.Repositories = append(st.Repositories, p) })
 	if err != nil {
 		return nil, head, nil, err
 	}
@@ -210,8 +213,9 @@ func (v *Vault) PendingImport(ctx context.Context) (int, error) {
 // Import is what the initial import committed: how many files, and the ones left out for
 // being over MaxCommitFile.
 type Import struct {
-	Files   int
-	Skipped []string
+	Files        int
+	Skipped      []string
+	Repositories []string // nested repositories, left out (Status.Repositories)
 }
 
 var errHasCommits = errors.New("vault: the repository has commits")
@@ -228,14 +232,14 @@ func (v *Vault) ImportInitial(ctx context.Context, name, email string) (Import, 
 		if !head.IsZero() {
 			return errHasCommits
 		}
-		imp = Import{Files: len(st.Changes), Skipped: st.Skipped}
+		imp = Import{Files: len(st.Changes), Skipped: st.Skipped, Repositories: st.Repositories}
 		return nil
 	})
 	switch {
 	case errors.Is(err, errHasCommits):
 		return Import{}, nil
 	case errors.Is(err, ErrNothingToCommit):
-		return Import{Skipped: imp.Skipped}, nil
+		return Import{Skipped: imp.Skipped, Repositories: imp.Repositories}, nil
 	case err != nil:
 		return Import{}, err
 	}
