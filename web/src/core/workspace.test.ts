@@ -162,4 +162,32 @@ describe("Workspace.createNote", () => {
     await new Workspace().createNote("", "db.md", { template, values: { owner: "sre", service: "", title: "ignored" } });
     expect(api.createNote).toHaveBeenCalledWith("db.md", `# db\n${localDate(new Date())} sre {{service}}\n`);
   });
+
+  it("adds .md to a name with a dot in it, and keeps the dot in the title", async () => {
+    expect(await new Workspace().createNote("ops", "nginx.conf")).toBe(true);
+    expect(api.createNote).toHaveBeenCalledWith("ops/nginx.conf.md", "# nginx.conf\n\n");
+  });
+
+  it("refuses a name starting with a dot, before any request", async () => {
+    const ws = new Workspace();
+    expect(await ws.createNote("", ".hidden")).toBe(false);
+    expect(api.createNote).not.toHaveBeenCalled();
+    expect(ws.state.value.error).toMatch(/can't start with a dot/);
+  });
+
+  it("returns false when the note exists, and opens nothing", async () => {
+    vi.mocked(api.createNote).mockRejectedValueOnce(new api.ApiError(409, "exists"));
+    const ws = new Workspace();
+    expect(await ws.createNote("ops", "db")).toBe(false);
+    expect(ws.state.value.error).toBe("Couldn't create ops/db.md: it already exists");
+    expect(ws.state.value.open).toBeUndefined();
+  });
+
+  it("marks the note it opens as just created, once", async () => {
+    const ws = new Workspace();
+    await ws.createNote("ops", "db");
+    expect(ws.state.value.open?.doc.path).toBe("ops/db.md");
+    expect(ws.takeCreated("ops/db.md")).toBe(true);
+    expect(ws.takeCreated("ops/db.md")).toBe(false); // reopened from the tree later: not new
+  });
 });

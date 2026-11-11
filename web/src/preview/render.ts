@@ -69,11 +69,35 @@ export function renderBlocks(text: string): Block[] {
   const env = {};
   const tokens = md.parse(text, env);
   let start = 0;
-  tokens.forEach((t, i) => {
-    if (t.level !== 0 || t.nesting === 1) return;
+  let open = 0; // containers opened by raw HTML blocks and not closed yet
+  const push = (end: number) => {
     const line = (tokens[start]?.map?.[0] ?? 0) + offset;
-    blocks.push({ line, html: md.renderer.render(tokens.slice(start, i + 1), md.options, env) });
-    start = i + 1;
+    blocks.push({ line, html: md.renderer.render(tokens.slice(start, end), md.options, env) });
+    start = end;
+  };
+  tokens.forEach((t, i) => {
+    if (t.type === "html_block" && t.level === 0) open = Math.max(0, open + containerDepth(t.content));
+    if (t.level !== 0 || t.nesting === 1 || open > 0) return;
+    push(i + 1);
   });
+  if (start < tokens.length) push(tokens.length); // a container never closed runs to the end
   return blocks;
+}
+
+/**
+ * Raw HTML containers whose content can be Markdown blocks: "<details>", blank line, a
+ * paragraph, "</details>" are three HTML and Markdown blocks to markdown-it, but one element.
+ * Rendered apart, the preview would put the paragraph outside it.
+ */
+const containers = new Set(["details", "div", "section", "article", "aside", "figure", "blockquote", "header", "footer", "nav", "main"]);
+
+/** How many containers an HTML block opens (positive) or closes (negative). */
+function containerDepth(html: string): number {
+  let depth = 0;
+  const tags = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
+  for (const m of html.replace(/<!--[\s\S]*?(?:-->|$)/g, "").matchAll(tags)) {
+    if (!containers.has((m[2] ?? "").toLowerCase()) || m[3]) continue;
+    depth += m[1] ? -1 : 1;
+  }
+  return depth;
 }

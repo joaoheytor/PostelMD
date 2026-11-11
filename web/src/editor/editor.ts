@@ -14,7 +14,8 @@ export interface Editor extends Disposable {
   text(): string;
   /** Replaces the text without reporting an edit. */
   replace(text: string): void;
-  focus(): void;
+  /** Focuses the text; at its end puts the cursor after the last character first. */
+  focus(at?: "end"): void;
   /** The line (0-based) at the top of the visible area. */
   topLine(): number;
   /** Scrolls so line (0-based) is at the top. */
@@ -94,7 +95,10 @@ export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange, on
     replace(text) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, annotations: external.of(true) });
     },
-    focus: () => view.focus(),
+    focus(at) {
+      if (at === "end") view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+      view.focus();
+    },
     topLine() {
       const block = view.lineBlockAtHeight(view.scrollDOM.scrollTop);
       return view.state.doc.lineAt(block.from).number - 1;

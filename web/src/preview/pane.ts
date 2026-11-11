@@ -1,4 +1,5 @@
 import { type Disposable, DisposableStore, toDisposable } from "../core/disposable";
+import { batchHTML, intact, keyAttr, newKey } from "./blocks";
 import { type Diagram, diagramClass, Diagrams } from "./diagrams";
 import type { Block } from "./render";
 import { assetWorker, sanitized } from "./sanitize";
@@ -41,6 +42,8 @@ export class Preview implements Disposable {
   private diagrams: Diagrams | undefined;
   /** The copy buttons' "Copied" timers. */
   private readonly flashes = new DisposableStore();
+  /** Numbers this preview's block wrappers, so a note can't forge one (blocks.ts). */
+  private readonly key = newKey();
 
   /** onRender runs after each render, which can move the blocks (scroll sync follows). */
   constructor(
@@ -172,7 +175,7 @@ export class Preview implements Disposable {
    * added after sanitizing, with DOM calls: the sanitizer allows no buttons in a note.
    */
   private render(blocks: Block[]): DocumentFragment {
-    const frag = sanitized(blocks.map((b) => `<div class="pm-block" data-line="${b.line}">${b.html}</div>`).join(""));
+    const frag = this.wrapped(blocks);
     [...frag.children].forEach((el, i) => this.source.set(el, blocks[i]?.html ?? ""));
     for (const code of frag.querySelectorAll("pre > code.language-mermaid")) {
       if (code.parentElement) void this.diagram(code.parentElement, code.textContent ?? "");
@@ -185,5 +188,27 @@ export class Preview implements Disposable {
       pre.append(button);
     }
     return frag;
+  }
+
+  /**
+   * Sanitizes blocks into one wrapper each. One call for the whole batch (ADR-0007), unless
+   * a block's HTML broke the wrappers (blocks.ts): then each block alone, in a wrapper made
+   * with DOM calls, where no tag in it can reach outside its own.
+   */
+  private wrapped(blocks: Block[]): DocumentFragment {
+    const frag = sanitized(batchHTML(blocks, this.key));
+    if (intact(frag.childNodes, blocks, this.key)) {
+      for (const el of frag.children) el.removeAttribute(keyAttr);
+      return frag;
+    }
+    const out = document.createDocumentFragment();
+    for (const b of blocks) {
+      const div = document.createElement("div");
+      div.className = "pm-block";
+      div.dataset["line"] = String(b.line);
+      div.append(sanitized(b.html));
+      out.append(div);
+    }
+    return out;
   }
 }

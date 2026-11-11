@@ -41,6 +41,31 @@ describe("renderBlocks", () => {
     expect(renderBlocks('<img src=x onerror="alert(1)">')[0]?.html).toContain("onerror");
   });
 
+  it("keeps a <details> and the Markdown inside it as one block", () => {
+    const blocks = renderBlocks("# T\n\n<details><summary>Logs</summary>\n\nRun **this**.\n\n- a\n\n</details>\n\nAfter.\n");
+    expect(blocks.map((b) => b.line)).toEqual([0, 2, 10]);
+    expect(blocks[1]?.html).toMatch(/^<details><summary>Logs<\/summary>\n<p>Run <strong>this<\/strong>.<\/p>\n<ul>[\s\S]*<\/ul>\n<\/details>\n$/);
+    expect(blocks[2]?.html).toBe("<p>After.</p>\n");
+  });
+
+  it("counts nested containers, and ignores tags in comments and void or self-closed ones", () => {
+    const text = "<div>\n<!-- </div> -->\n\n<details>\n\nA<br>\n\n</details>\n<div />\n\n</div>\n\nB\n";
+    const blocks = renderBlocks(text);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.html).toContain("<p>A<br></p>");
+    expect(blocks[1]).toEqual({ line: 12, html: "<p>B</p>\n" });
+  });
+
+  it("runs an unclosed <div> to the end of the note, as the browser would", () => {
+    const blocks = renderBlocks("Before.\n\n<div>\n\nOne.\n\nTwo.\n");
+    expect(blocks.map((b) => b.line)).toEqual([0, 2]);
+    expect(blocks[1]?.html).toBe("<div>\n<p>One.</p>\n<p>Two.</p>\n");
+  });
+
+  it("splits HTML blocks that close what they open as before", () => {
+    expect(renderBlocks("<div>a</div>\n\n<p>b</p>\n\nc\n").map((b) => b.line)).toEqual([0, 2, 4]);
+  });
+
   it("renders an empty note as no blocks", () => {
     expect(renderBlocks("")).toEqual([]);
   });

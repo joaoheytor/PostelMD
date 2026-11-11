@@ -124,3 +124,57 @@ test("hostile HTML in a note never runs in the preview", async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)).toBeUndefined();
   expect(readFileSync(join(env("PM_E2E_VAULT"), "hostile.md"), "utf8")).toBe(hostile); // only looked at
 });
+
+test("raw HTML across blocks: <details> holds its Markdown, and nothing shows twice after an edit", async ({ page }) => {
+  // On disk, not typed: the editor completes and indents HTML tags as they are typed.
+  const note = [
+    "# HTML blocks",
+    "",
+    "First para.",
+    "<details><summary>Kernel logs</summary>",
+    "",
+    "Run **dmesg** first.",
+    "",
+    "</details>",
+    "",
+    'Forged</div><div class="pm-block" data-line="9999">after',
+    "",
+    "Middle para.",
+    "",
+    "<div>",
+    "",
+    "Unclosed one.",
+    "",
+    "Last para.",
+    "",
+  ].join("\n");
+  writeFileSync(join(env("PM_E2E_VAULT"), "html-blocks.md"), note);
+  await login(page);
+  await page.getByRole("button", { name: "html-blocks.md" }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByRole("region", { name: "Preview of html-blocks.md" });
+  await expect(preview.getByText("Last para.", { exact: true }).first()).toBeVisible();
+  const text = page.getByRole("textbox", { name: "Text of html-blocks.md" });
+
+  // The body is inside the collapsible region: hidden until its summary opens it.
+  const details = preview.getByRole("group").filter({ hasText: "Kernel logs" });
+  await expect(details.getByText("Run dmesg first.")).toBeHidden();
+  await details.getByText("Kernel logs").click();
+  await expect(details.getByText("Run dmesg first.")).toBeVisible();
+
+  // Edits re-render only the blocks that changed; no paragraph is duplicated.
+  await text.press("ControlOrMeta+Home");
+  await page.keyboard.press("End");
+  await page.keyboard.type(" again");
+  await expect(preview.getByRole("heading", { name: "HTML blocks again" })).toBeVisible();
+  await page.keyboard.type(" and again");
+  await expect(preview.getByRole("heading", { name: "HTML blocks again and again" })).toBeVisible();
+  for (const p of ["First para.", "Run dmesg first.", "Middle para.", "Unclosed one.", "Last para."]) {
+    await expect(preview.getByText(p, { exact: true })).toHaveCount(1);
+  }
+
+  // The forged wrapper stayed inside a real one: scroll sync sees only the note's own lines.
+  const lines = await preview.evaluate((el) => [...el.children].map((c) => c.getAttribute("data-line")));
+  expect(lines).not.toContain("9999");
+  expect(lines.every((l) => l !== null && Number(l) < 20)).toBe(true);
+});

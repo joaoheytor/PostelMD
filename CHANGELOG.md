@@ -72,8 +72,13 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   each was deleted, and restores one to the folder and name you choose (the vault root by
   default). A restore never overwrites: if the name is taken, it says so and you type
   another. Emptying the trash comes in v0.2.
+- A "Delete folder" button in the file tree: after you confirm, the folder and everything in
+  it go to the trash, from where they can be restored. An open note inside it is saved first.
 
 ### Changed
+- A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note
+  (`nginx.conf.md`): only a trailing `.md` counts as the extension, for New note and for
+  Rename or move. A note name starting with a dot is refused with a message in the form.
 - The conflict banner shows a line diff between your text and the other version, and says
   what "Keep my version" and "Use the other version" each do.
 - The file tree shows the open note however it was opened (Ctrl+P, a link, "Save it as a new
@@ -127,6 +132,15 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   message instead of an internal error.
 - The notice after setup counts exactly the files the first commit holds, and says how many
   files over 50 MB were left out of git instead of implying the whole folder was imported.
+- A new note opens with the cursor after its title, so typing no longer goes in front of the
+  `# title` line; notes opened from the tree still start at the top.
+- A New note that fails (the name is taken) keeps its form open, with the template and the
+  values typed, and puts the focus back on the name.
+- The finder keeps the highlighted note in sight when the arrow keys move it through a long
+  list.
+- The preview renders raw HTML that spans Markdown blocks correctly: a `<details>` keeps the
+  Markdown inside it collapsible, and an unclosed `<div>` or a stray `</div>` no longer makes
+  paragraphs show twice or vanish after an edit.
 
 ### Security
 - PostelMD answers only to `localhost`, IP addresses and the host names in the new

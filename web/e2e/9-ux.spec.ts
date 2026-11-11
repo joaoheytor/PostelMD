@@ -16,6 +16,9 @@ test("New note takes the focus: type a name, Enter, and the new note is open to 
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Text of typed-name.md" })).toBeFocused();
   expect(existsSync(vault("typed-name.md"))).toBe(true);
+  // The cursor starts after the title, not before it.
+  await page.keyboard.type("hello");
+  await expect.poll(() => readFileSync(vault("typed-name.md"), "utf8")).toBe("# typed-name\n\nhello");
 
   // Escape closes the form, and the focus goes back to the button that opened it.
   await page.getByRole("button", { name: "New folder" }).click();
@@ -141,6 +144,70 @@ test("the tree shows the open note, however it was opened", async ({ page }) => 
   await expect(page.getByRole("textbox", { name: "Text of deep/er/found.md" })).toBeVisible();
   await expect(tree.getByRole("button", { name: "found.md" })).toHaveAttribute("aria-current", "page");
   await expect(tree.getByRole("button", { name: "linked.md" })).toHaveAttribute("aria-current", "false");
+});
+
+test("a note name with a dot still makes a note; a name starting with a dot is refused", async ({ page }) => {
+  writeFileSync(vault("from-tree.md"), "# From tree\n");
+  await login(page);
+  await page.getByRole("button", { name: "Vault" }).click();
+  await page.getByRole("button", { name: "New note" }).click();
+  const name = page.getByLabel("Note name in the vault");
+  await name.fill(".hidden");
+  await name.press("Enter");
+  await expect(page.getByRole("alert")).toHaveText(/^A note name can't start with a dot/);
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue(".hidden");
+  expect(existsSync(vault(".hidden.md")) || existsSync(vault(".hidden"))).toBe(false);
+
+  await name.fill("nginx.conf");
+  await expect(page.getByRole("alert")).toHaveCount(0); // typing clears the complaint
+  await name.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Text of nginx.conf.md" })).toBeFocused();
+  await expect.poll(() => existsSync(vault("nginx.conf.md"))).toBe(true);
+  expect(readFileSync(vault("nginx.conf.md"), "utf8")).toBe("# nginx.conf\n\n");
+  await expect(page.getByRole("button", { name: "nginx.conf.md" })).toHaveAttribute("aria-current", "page");
+
+  // Renaming follows the same rule.
+  await page.getByRole("button", { name: "Rename or move" }).click();
+  const to = page.getByLabel("New path for nginx.conf.md");
+  await to.fill(".nginx");
+  await to.press("Enter");
+  await expect(page.getByRole("alert")).toHaveText(/^A note name can't start with a dot/);
+  await expect(to).toBeFocused();
+  await to.fill("haproxy.cfg");
+  await to.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Text of haproxy.cfg.md" })).toBeFocused();
+  await expect.poll(() => existsSync(vault("haproxy.cfg.md"))).toBe(true);
+
+  // A note opened from the tree keeps the cursor at the start: only a new note starts at the end.
+  await page.getByRole("button", { name: "from-tree.md" }).click();
+  await expect(page.getByRole("textbox", { name: "Text of from-tree.md" })).toBeFocused();
+  await page.keyboard.type("x");
+  await expect.poll(() => readFileSync(vault("from-tree.md"), "utf8")).toBe("x# From tree\n");
+});
+
+test("a New note that fails keeps its form, template and values, with the focus on the name", async ({ page }) => {
+  writeFileSync(vault("taken.md"), "# Taken\n");
+  await login(page);
+  await page.getByRole("button", { name: "Vault" }).click();
+  await page.getByRole("button", { name: "New note" }).click();
+  const name = page.getByLabel("Note name in the vault");
+  await name.fill("taken");
+  await page.getByLabel("Template").selectOption("Postmortem");
+  await page.getByRole("group", { name: "Fill in (optional)" }).getByLabel("Severity").fill("SEV3");
+  await name.press("Enter");
+
+  await expect(page.getByRole("alert")).toContainText("Couldn't create taken.md: it already exists");
+  await expect(name).toBeFocused();
+  await expect(name).toHaveValue("taken");
+  await expect(page.getByLabel("Template")).toHaveValue(/.+/);
+  await expect(page.getByLabel("Severity")).toHaveValue("SEV3");
+  expect(readFileSync(vault("taken.md"), "utf8")).toBe("# Taken\n");
+
+  await name.fill("taken-2");
+  await name.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Text of taken-2.md" })).toBeFocused();
+  await expect.poll(() => (existsSync(vault("taken-2.md")) ? readFileSync(vault("taken-2.md"), "utf8") : "")).toContain("SEV3");
 });
 
 test("after several wrong passwords, the login says how long to wait", async ({ page }) => {

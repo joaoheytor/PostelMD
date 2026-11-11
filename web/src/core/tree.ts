@@ -38,14 +38,15 @@ export function rebase(path: string, from: string, to: string): string | undefin
 
 /**
  * The vault path a typed move target means: trimmed, without leading or trailing slashes. A
- * note keeps its extension when the new name has none ("a/b.md", "c" → "c.md"). Empty means
- * nothing usable was typed.
+ * note keeps its extension unless the new name already ends in it or in a note's ("a/b.md",
+ * "c" → "c.md"; "nginx.conf" → "nginx.conf.md": a dot alone isn't an extension, as for a new
+ * note). Empty means nothing usable was typed.
  */
 export function moveTarget(from: string, typed: string, kind: "file" | "folder"): string {
   const to = typed.trim().replace(/^\/+|\/+$/g, "");
   if (to === "" || kind === "folder") return to;
   const ext = /\.[a-z]+$/i.exec(from)?.[0] ?? "";
-  return /\.[a-z]+$/i.test(to) ? to : to + ext;
+  return isNote(to) || to.toLowerCase().endsWith(ext.toLowerCase()) ? to : to + ext;
 }
 
 /** The file tree: folders load when first expanded and reload after a change in them. */

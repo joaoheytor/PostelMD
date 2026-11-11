@@ -1,4 +1,5 @@
-import { html, type PropertyValues } from "lit";
+import { html, nothing, type PropertyValues } from "lit";
+import { nameProblem } from "../core/names";
 import { moveTarget } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 import { fields, LightElement } from "./base";
@@ -19,6 +20,7 @@ export class MoveForm extends LightElement {
     onDone: { attribute: false },
     onFailed: { attribute: false },
     busy: { state: true },
+    problem: { state: true },
   };
   declare workspace: Workspace;
   declare path: string;
@@ -28,6 +30,8 @@ export class MoveForm extends LightElement {
   declare onDone: (to?: string) => void;
   declare onFailed: ((typed: string) => void) | undefined;
   declare busy: boolean;
+  /** Why the typed name can't be used, shown under the field. */
+  declare problem: string | undefined;
 
   constructor() {
     super();
@@ -53,6 +57,9 @@ export class MoveForm extends LightElement {
     const typed = fields(e.target as HTMLFormElement)["to"] ?? "";
     const to = moveTarget(this.path, typed, this.kind);
     if (to === "" || to === this.path) return this.onDone();
+    // A note's new name follows the new-note rule; it may still go into a folder like .github.
+    this.problem = this.kind === "file" ? nameProblem(to.slice(to.lastIndexOf("/") + 1)) : undefined;
+    if (this.problem) return this.input()?.focus();
     this.busy = true;
     try {
       if (await this.workspace.move(this.path, to)) return this.onDone(to);
@@ -73,9 +80,13 @@ export class MoveForm extends LightElement {
             .value=${this.value ?? this.path}
             required
             spellcheck="false"
+            aria-invalid=${this.problem ? "true" : "false"}
+            aria-describedby=${this.problem ? "pm-move-problem" : nothing}
+            @input=${() => (this.problem = undefined)}
             @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.onDone()}
           />
         </label>
+        ${this.problem ? html`<p id="pm-move-problem" class="pm-error" role="alert">${this.problem}</p>` : nothing}
         <button type="submit" ?disabled=${this.busy}>Move</button>
         <button type="button" @click=${() => this.onDone()}>Cancel</button>
       </form>

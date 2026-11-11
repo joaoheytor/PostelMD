@@ -61,6 +61,11 @@ export class Finder extends LightElement {
     void this.load();
   }
 
+  /** The highlighted option stays in sight as the arrows move it through a long list. */
+  protected override updated(): void {
+    this.querySelector('#pm-finder-list [aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }
+
   private async load(): Promise<void> {
     try {
       const { files, truncated } = await api.listFiles();
