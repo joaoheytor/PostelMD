@@ -7,25 +7,35 @@
 pending. It works today: one user with a password, one vault of `.md` files, an editor with
 preview, conflict-aware autosave with drafts kept in the browser, create, move and delete
 (into a trash folder), manual git commits, history and restoring a version, and adopting an
-existing notes folder. Multi-user, push, secret detection and plugins come later: see the
-[roadmap](docs/roadmap.md).
+existing notes folder. Multi-user, auto-commit, push with secret gates and plugins come
+later: see the [roadmap](docs/roadmap.md).
 
 ## What it is
 
+In v0.1:
+
 - **Plain files.** Your notes are `.md` files on disk and stay usable by git, vim and Syncthing.
-- **Git-native.** Each vault is a git repository, with batched commits, push and history.
+- **Git-native.** The vault is a git repository: you commit from the app, and browse and
+  restore each note's history.
 - **Safe by default.** Saves are conflict-aware: PostelMD clients never overwrite each other's
-  work. External tools are safe when coordinated through maintenance mode. Secret
-  detection runs on save and paste. Authentication is on from the first run.
-- **Runs anywhere.** One `docker run` with one volume, Docker Compose or a Helm chart all use
-  the same image.
-- **Extensible.** A framework-agnostic plugin API with two trust tiers.
+  work, and a change made outside PostelMD since the note was loaded opens the conflict view
+  too (except in a narrow race with an external writer:
+  [ADR-0003](docs/adr/0003-save-protocol.md)). A note that looks like it holds a secret gets a warning on save and paste, and
+  the commit dialog checks the changes before they enter the history. Authentication is on
+  from the first run.
+- **One `docker run`** with one volume, from one multi-arch image (amd64 and arm64).
+
+Later ([roadmap](docs/roadmap.md)): auto-commit, and push and pull with secret gates (v0.2);
+several users and shared vaults, maintenance mode for coordinating external tools, and
+Docker Compose and a Helm chart for the same image (v0.3); a plugin API with two trust tiers
+(v0.4).
 
 ## Run it
 
 ```sh
 mkdir -p ~/postelmd
 docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+  --log-opt max-size=10m --log-opt max-file=3 \
   -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data \
   ghcr.io/joaoheytor/postelmd:main
 docker logs postelmd   # prints a one-time setup token
