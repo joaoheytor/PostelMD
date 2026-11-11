@@ -1,6 +1,6 @@
 # ADR-0020: MVP scope: one user, one vault, no database
 
-- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md) and its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md), and its "what `git add -A` would" commit bullet, for nested repositories, by [ADR-0026](0026-nested-repositories-in-the-vault.md)
+- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md), its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md), its "what `git add -A` would" commit bullet, for nested repositories, by [ADR-0026](0026-nested-repositories-in-the-vault.md), and its save-mismatch and startup-sweep statements by [ADR-0027](0027-landed-retries-and-the-adoption-marker.md)
 - **Date:** 2026-11-09
 
 ## Context
@@ -334,20 +334,3 @@ design.
 | No auth for a single user | Auth stays on (ADR-0005, FrankMD lesson); one password costs little. |
 | A few trusted accounts with equal access | Not needed yet: the maintainer is the only user. Accounts come with roles in v0.3. |
 | Push in the MVP, without the secret gate | Pushing a secret to a remote is the one MVP-sized mistake we can't undo; push waits for the gate. |
-
-## Clarifications
-- **2026-11-10, how adoption knows which reserved entries it created** ("Adoption refuses a
-  folder that contains `.postelmd-tmp` or `.postelmd-trash` entries it didn't create").
-  Once PostelMD owns the reserved folders, it keeps an empty marker file,
-  `.postelmd-tmp/.created-by-postelmd`, which the startup sweep never removes. At every
-  start, before the sweep and the rename probe touch the temp folder:
-  - with the marker, everything in both folders is PostelMD's;
-  - without it (a first start, or a vault from a build without the marker), each of the two
-    folders must be missing or empty; otherwise startup stops with an error that names the
-    folder to rename (the fix for a vault an older build made: create the marker by hand),
-    and nothing in the folder is touched. Then the marker is written, `fsync`ed, and the
-    temp folder synced.
-  Writing it is one create: a crash before the directory sync leaves an empty temp folder at
-  most, which the next start adopts again, so it needs no intent. The marker lives in the
-  vault, not in `/data/.postelmd`, because the vault is a separate mount that can be swapped
-  under the same state directory; `.postelmd-tmp/` is already in `.git/info/exclude`.

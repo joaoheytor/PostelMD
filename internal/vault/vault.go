@@ -111,26 +111,6 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 // EnableGit.
 func (v *Vault) SetLogger(l *slog.Logger) { v.log = l }
 
-// probeNoReplace renames a temp file to an absent name with RENAME_NOREPLACE. The target
-// must be absent: the VFS answers EEXIST for an existing one before asking the filesystem,
-// which would prove nothing (ADR-0014 §1).
-func (v *Vault) probeNoReplace() error {
-	tmp, err := v.writeTemp(nil, newFilePerm)
-	if err != nil {
-		return err
-	}
-	probe := tmp + ".probe"
-	err = v.root.RenameNoReplace(tmp, probe)
-	if errors.Is(err, fs.ErrNoReplaceUnsupported) {
-		return errors.Join(fmt.Errorf("vault: this filesystem can't rename without replacing, "+
-			"so moves could overwrite notes; use a named volume or a WSL-side folder (ADR-0020): %w", err), v.root.Remove(tmp))
-	}
-	if err != nil {
-		return errors.Join(err, v.root.Remove(tmp))
-	}
-	return v.root.Remove(probe)
-}
-
 // Close releases the vault's directory handles.
 func (v *Vault) Close() error {
 	var err error
@@ -138,46 +118,6 @@ func (v *Vault) Close() error {
 		err = v.git.Close()
 	}
 	return errors.Join(err, v.root.Close())
-}
-
-func (v *Vault) sweepTemps() error {
-	if err := v.ensureDir(TmpDir); err != nil {
-		return err
-	}
-	entries, err := v.root.ReadDir(TmpDir)
-	if err != nil {
-		return err
-	}
-	swept := 0
-	for _, e := range entries {
-		if e.Name() == ownerMarker {
-			continue
-		}
-		swept++
-		rm := v.root.Remove
-		if e.IsDir() { // a repository Init didn't finish
-			rm = v.removeTree
-		}
-		if err := rm(TmpDir + "/" + e.Name()); err != nil {
-			return fmt.Errorf("vault: sweep %s: %w", e.Name(), err)
-		}
-	}
-	if swept > 0 {
-		return v.root.SyncDir(TmpDir)
-	}
-	return nil
-}
-
-// ensureDir creates a reserved directory at the root, durably, if it's missing.
-func (v *Vault) ensureDir(name string) error {
-	err := v.root.Mkdir(name)
-	if errors.Is(err, iofs.ErrExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return v.root.SyncDir(".")
 }
 
 // lock takes the vault mutex, waiting at most v.wait.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -121,6 +122,7 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 	st := &Status{Branch: branch, Changes: []Change{}}
 	content := map[string][]byte{}
 	seen := map[string]bool{}
+	var repos []string // nested repositories, with a trailing slash
 	err = v.walkForCommit(committed, func(p string, size int64, ignored bool) error {
 		old, tracked := committed[p]
 		if ignored && !tracked {
@@ -147,103 +149,26 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 			content[p] = b
 		}
 		return nil
-	}, func(p string) { st.Repositories = append(st.Repositories, p) })
+	}, func(p string, ignored bool) {
+		repos = append(repos, p+"/")
+		if !ignored {
+			st.Repositories = append(st.Repositories, p)
+		}
+	})
 	if err != nil {
 		return nil, head, nil, err
 	}
 	for p := range committed {
-		if !seen[p] && !fs.IsReserved(p) {
+		// Committed notes in a folder that has since become a repository are left as they
+		// are, never listed as deleted: a commit would drop them from the history (ADR-0026).
+		inRepo := slices.ContainsFunc(repos, func(r string) bool { return strings.HasPrefix(p, r) })
+		if !seen[p] && !inRepo && !fs.IsReserved(p) {
 			st.Changes = append(st.Changes, Change{Path: p, Kind: Deleted})
 			content[p] = nil
 		}
 	}
 	sort.Slice(st.Changes, func(i, j int) bool { return st.Changes[i].Path < st.Changes[j].Path })
 	return st, head, content, nil
-}
-
-// walk calls fn for every regular file under dir that isn't reserved. Symlinks and other
-// special files are skipped, never followed.
-func (v *Vault) walk(dir string, fn func(p string, size int64) error) error {
-	entries, err := v.root.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		p := e.Name()
-		if dir != "." {
-			p = dir + "/" + p
-		}
-		if fs.IsReserved(p) {
-			continue
-		}
-		switch {
-		case e.IsDir():
-			if err := v.walk(p, fn); err != nil {
-				return err
-			}
-		case e.Type().IsRegular():
-			info, err := e.Info()
-			if err != nil {
-				return err
-			}
-			if err := fn(p, info.Size()); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// PendingImport returns how many files the initial import would commit: the uncommitted
-// files of a repository without commits, or 0 once it has one (ADR-0020: setup shows the
-// count before it commits them).
-func (v *Vault) PendingImport(ctx context.Context) (int, error) {
-	unlock, err := v.lock(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer unlock()
-	st, head, _, err := v.status(false)
-	if err != nil || !head.IsZero() {
-		return 0, err
-	}
-	return len(st.Changes), nil
-}
-
-// Import is what the initial import committed: how many files, and the ones left out for
-// being over MaxCommitFile.
-type Import struct {
-	Files        int
-	Skipped      []string
-	Repositories []string // nested repositories, left out (Status.Repositories)
-}
-
-var errHasCommits = errors.New("vault: the repository has commits")
-
-// ImportInitial commits every file of a repository without commits as "Initial import"
-// and reports what it committed; a repository with commits is left alone (zero Import).
-// The count and the "no commits" check come from the status the commit itself uses, under
-// the same acquisition of the vault mutex, so the count is exactly the commit's files.
-func (v *Vault) ImportInitial(ctx context.Context, name, email string) (Import, error) {
-	var imp Import
-	// Unchecked for secrets: the user saw the count at setup, and the notice asks them to
-	// check the files before pushing (ADR-0020).
-	_, err := v.commit(ctx, InitialImportMessage, name, email, func(st *Status, head git.Hash) error {
-		if !head.IsZero() {
-			return errHasCommits
-		}
-		imp = Import{Files: len(st.Changes), Skipped: st.Skipped, Repositories: st.Repositories}
-		return nil
-	})
-	switch {
-	case errors.Is(err, errHasCommits):
-		return Import{}, nil
-	case errors.Is(err, ErrNothingToCommit):
-		return Import{Skipped: imp.Skipped, Repositories: imp.Repositories}, nil
-	case err != nil:
-		return Import{}, err
-	}
-	return imp, nil
 }
 
 // ParseCommit parses a full hex commit ID; anything else is ErrNotFound.

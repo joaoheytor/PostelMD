@@ -54,12 +54,17 @@ func TestEnsureFormat(t *testing.T) {
 		{"equal, no newline", "1", "", nil},
 		{"newer", "2\n", "this data was written by a newer PostelMD (format 2); run that version or newer", ErrNewerFormat},
 		{"much newer", "40\n", "(format 40)", ErrNewerFormat},
-		{"empty", "", "damaged", ErrBadFormat},
+		{"empty", "", "Back up the data directory first. If only PostelMD 0.1 ever used it, delete that file", ErrBadFormat},
 		{"text", "one\n", "damaged", ErrBadFormat},
 		{"zero", "0\n", "damaged", ErrBadFormat},
 		{"negative", "-1\n", "damaged", ErrBadFormat},
 		{"signed", "+1\n", "damaged", ErrBadFormat},
 		{"two lines", "1\n2\n", "damaged", ErrBadFormat},
+		{"only whitespace", " \n", "damaged", ErrBadFormat},
+		{"CRLF", "1\r\n", "damaged", ErrBadFormat},
+		{"leading space", " 1\n", "damaged", ErrBadFormat},
+		{"trailing space", "1 \n", "damaged", ErrBadFormat},
+		{"two newlines", "1\n\n", "damaged", ErrBadFormat},
 		{"huge", strings.Repeat("9", 40) + "\n", "damaged", ErrBadFormat},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,13 +81,27 @@ func TestEnsureFormat(t *testing.T) {
 			}
 		})
 	}
-	t.Run("not a regular file", func(t *testing.T) {
+	t.Run("a symlink to a valid format", func(t *testing.T) {
+		// The target holds a valid format, so only the refusal to follow the link can fail it.
 		state := t.TempDir()
-		if err := os.Symlink("/etc/hostname", filepath.Join(state, formatFile)); err != nil {
+		target := filepath.Join(t.TempDir(), "format")
+		if err := os.WriteFile(target, []byte("1\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := EnsureFormat(state); err == nil {
-			t.Fatal("a symlinked format file was accepted")
+		if err := os.Symlink(target, filepath.Join(state, formatFile)); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureFormat(state); !errors.Is(err, fs.ErrSymlink) {
+			t.Fatalf("EnsureFormat through a symlink = %v, want fs.ErrSymlink", err)
+		}
+	})
+	t.Run("a directory", func(t *testing.T) {
+		state := t.TempDir()
+		if err := os.Mkdir(filepath.Join(state, formatFile), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureFormat(state); !errors.Is(err, fs.ErrNotRegular) {
+			t.Fatalf("EnsureFormat on a directory = %v, want fs.ErrNotRegular", err)
 		}
 	})
 }

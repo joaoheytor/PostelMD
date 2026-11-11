@@ -100,7 +100,11 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   longer fail with a "file/directory conflict" when the repository already records one.
 - Adopting a notes folder that already has a `.postelmd-tmp` or `.postelmd-trash` folder of
   its own now stops at the first start with the folder to rename, instead of deleting the
-  files in `.postelmd-tmp`.
+  files in `.postelmd-tmp`. PostelMD marks the folders it makes with
+  `.postelmd-tmp/.created-by-postelmd`. **If you ran a `:main` build** and have deleted
+  notes in the trash, the first start of this version stops once: run
+  `mkdir -p .postelmd-tmp && touch .postelmd-tmp/.created-by-postelmd` in your notes folder,
+  then start again. Don't rename the trash.
 - PostelMD now records its data format in `/data/.postelmd/format`, so a future release
   that changes the format can't be rolled back onto data an older build doesn't understand:
   the older build refuses to start and says which version to run.

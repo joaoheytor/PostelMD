@@ -232,6 +232,25 @@ newer`, before it changes anything. So a **rollback across a format change** mea
 the backup you took before the upgrade, not only the older image; within the same format,
 the digest swap below is enough. Never edit `format` to get past the check.
 
+If PostelMD says `format` is **damaged** (anything but a number on one line), back up
+`~/postelmd` first. If only v0.1 ever used it, delete `~/postelmd/.postelmd/format` and start
+again: the next start writes `1`. Otherwise restore the backup you took before the last
+upgrade.
+
+If PostelMD stops with **`.postelmd-trash` (or `.postelmd-tmp`) in your notes folder isn't
+empty**, it found its own folders without its marker file. That happens after upgrading
+from a build before 0.1.0-rc.1, after deleting `.postelmd-tmp` by hand, or after
+`git clean -X` in the notes folder. If PostelMD made those folders, run this in the notes
+folder (`~/postelmd/vaults/notes`, or your own notes folder if you mounted one) and start
+again:
+
+```sh
+mkdir -p .postelmd-tmp && touch .postelmd-tmp/.created-by-postelmd
+```
+
+Don't rename PostelMD's own `.postelmd-trash`: the deleted notes in it would become ordinary
+notes, shown and committed. Rename a folder only if it's really yours (ADR-0027).
+
 ```sh
 # note the digest the container runs now (not $IMAGE's: that is the new one)
 docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Image}}' postelmd)"

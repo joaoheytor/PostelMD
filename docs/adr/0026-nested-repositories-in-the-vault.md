@@ -26,13 +26,18 @@ no way to show it yet.
 ## Decision
 - A commit, and the initial import, take what `git add -A` would, **except for nested
   repositories**: a folder, at any depth below the vault root, that holds an entry named
-  `.git` (a folder, a file or anything else, in any letter case) is never descended into.
-  - It is not listed as a change. Status and the initial import name it under
-    **`repositories`** (next to `skipped`, the files over the size limit), so the user
-    can see what was left out; an ignored one isn't named.
+  exactly `.git` (a folder, a file or anything else; the name is case-sensitive, as git on
+  Linux reads it, so `.GIT` doesn't make a repository) is never descended into.
+  - Nothing in it is listed as a change. Status and the initial import name it under
+    **`repositories`** (next to `skipped`, the files over the size limit), so the user can
+    see what was left out; an ignored one isn't named.
+  - Files the branch already has under it (a committed folder in which someone later ran
+    `git init`) are carried through unchanged: never listed as modified or deleted, so a
+    commit never drops them from the history.
   - A gitlink the branch already has is kept exactly as it is: PostelMD never adds,
     moves or removes a gitlink. The user updates it with their own git on the host.
 - The API never reaches any `.git` path component, at any depth and in any letter case
+  (reserving more than git recognizes costs nothing)
   ([ADR-0006](0006-authorization-and-confinement.md), `store.IsReserved`): a nested
   repository's `.git/config` or `.git/hooks/*` can't be listed, read, written, moved or
   deleted through PostelMD, so the web app can't plant a hook that runs when the user next
@@ -43,10 +48,11 @@ no way to show it yet.
   copy of another repository, and the host's `git status` is unchanged by a PostelMD
   commit.
 - Negative / costs: a new nested repository isn't recorded in the vault's repository until
-  the user adds it on the host. Files the branch already tracks inside a folder that later
-  became a repository are listed as deleted (they are still on disk).
-- Follow-ups: the commit dialog and the setup notice show `repositories` (web app); recording
-  gitlinks may come with v0.2's commit gate.
+  the user adds it on the host. Edits to notes the branch already has inside a folder that
+  later became a repository aren't committed by PostelMD; the user commits or removes them
+  on the host.
+- Follow-ups: the commit dialog and the setup notice show `repositories` (#118); recording
+  gitlinks may come with v0.2's commit gate; git's look-alike names for `.git` (#119).
 
 ## Alternatives considered
 | Option | Why not |

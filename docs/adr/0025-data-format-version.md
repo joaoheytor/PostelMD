@@ -20,15 +20,17 @@ unchanged, and a binary that doesn't check can't be taught to later.
   newline. This build's format is **1**. A later release raises it only when it changes what
   it stores in a way the earlier one can't read, and then migrates the data forward itself.
 - Every command that opens `/data` (`serve`, `reset-password`, and each later offline
-  subcommand) checks it **under the instance lock, before anything else reads or changes
-  `/data`** (in `serve`: before the auth state and before the vault opens or sweeps):
+  subcommand) checks it right after taking the instance lock, **before the app state is read
+  and before the vault is opened or swept**. Only the layout checks come first: creating the
+  state and vault folders if they're missing, and the lock file itself. Neither changes
+  anything an older build would misread.
 
   | `format` | Action |
   |---|---|
   | Missing | A new data directory, or one from before this ADR: write `1` durably, go on |
   | Equal to this build's | Go on |
   | Higher | Refuse: "this data was written by a newer PostelMD (format N); run that version or newer". Nothing is changed |
-  | Not a plain positive decimal | Refuse as damaged, with the fix (restore from a backup; or write `1` if only 0.1 used it). Nothing is changed |
+  | Not exactly a positive decimal and one optional newline (spaces, `\r`, a sign or a second line are damage) | Refuse as damaged, with the fix: back up the data directory, then delete `format` if only 0.1 ever used it (the next start writes `1`), else restore the backup taken before the last upgrade. Nothing is changed |
   | A symlink (never followed) or not a regular file | Refuse. Nothing is changed |
 
 - **Writing it** is the atomic write path of ADR-0020's credential: remove a leftover
@@ -51,7 +53,8 @@ unchanged, and a binary that doesn't check can't be taught to later.
   the data stays as the newer release left it.
 - Negative / costs: one more file to keep in backups (it is in `/data/.postelmd/`, which the
   backup already copies whole). A damaged or deleted `format` on a newer release's data
-  can't be told apart from a pre-format directory: deleting it is the operator's override.
+  can't be told apart from a pre-format directory, so deleting it is only safe on data that
+  only 0.1 used; the runbook and the error say so. Never edit it to get past a newer format.
 - Follow-ups: when SQLite arrives (v0.2), its schema version is checked as ADR-0015 says;
   this file stays the format of everything else in `/data`, and a release that changes it
   documents the migration in its upgrade notes.

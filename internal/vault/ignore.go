@@ -25,17 +25,17 @@ var ErrUnsafeExclude = errors.New("vault: .git/info/exclude is a symlink or not 
 //
 // A folder with a .git of its own (a folder in a clone, a file in a submodule) is a nested
 // repository: git add -A records a gitlink there, never the files inside, so the walk doesn't
-// descend into it; it reports it to nested unless it is ignored. An existing gitlink is never
-// listed by git.Files, so commits leave it as it is.
+// descend into it; it reports it to nested, flagged ignored or not (ADR-0026). An existing
+// gitlink is never listed by git.Files, so commits leave it as it is.
 type commitWalk struct {
 	v       *Vault
 	tracked map[string]bool // directories holding committed files
 	fn      func(p string, size int64, ignored bool) error
-	nested  func(p string)
+	nested  func(p string, ignored bool)
 }
 
 func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error,
-	nested func(p string)) error {
+	nested func(p string, ignored bool)) error {
 	exclude, err := v.git.Exclude()
 	if errors.Is(err, git.ErrExcludeNotRegular) {
 		// Git would follow it and apply its patterns; reading past it could commit what
@@ -63,10 +63,12 @@ func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, s
 	return w.walk(".", entries, git.NewIgnore(fold).With(exclude, "."), false)
 }
 
-// hasGit reports whether a folder's entries include a .git, of any kind and letter case.
+// hasGit reports whether a folder's entries include a .git of any kind (a folder in a clone,
+// a file in a submodule). The name is matched exactly, as git on Linux does: ".GIT" doesn't
+// make a repository.
 func hasGit(entries []iofs.DirEntry) bool {
 	for _, e := range entries {
-		if strings.EqualFold(e.Name(), ".git") {
+		if e.Name() == ".git" {
 			return true
 		}
 	}
@@ -101,9 +103,7 @@ func (w *commitWalk) walk(dir string, entries []iofs.DirEntry, ign *git.Ignore, 
 				return err
 			}
 			if hasGit(sub) {
-				if !isIgnored {
-					w.nested(p)
-				}
+				w.nested(p, isIgnored)
 				continue
 			}
 			if err := w.walk(p, sub, ign, isIgnored); err != nil {
@@ -115,6 +115,37 @@ func (w *commitWalk) walk(dir string, entries []iofs.DirEntry, ign *git.Ignore, 
 				return err
 			}
 			if err := w.fn(p, info.Size(), isIgnored); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// walk calls fn for every regular file under dir that isn't reserved. Symlinks and other
+// special files are skipped, never followed. Unlike commitWalk, it applies no ignore rules
+// and descends into nested repositories: the finder lists every note.
+func (v *Vault) walk(dir string, fn func(p string, size int64) error) error {
+	entries, err := v.root.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		p := subPath(dir, e.Name())
+		if fs.IsReserved(p) {
+			continue
+		}
+		switch {
+		case e.IsDir():
+			if err := v.walk(p, fn); err != nil {
+				return err
+			}
+		case e.Type().IsRegular():
+			info, err := e.Info()
+			if err != nil {
+				return err
+			}
+			if err := fn(p, info.Size()); err != nil {
 				return err
 			}
 		}

@@ -32,8 +32,9 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         missing `fsync` is caught. Git refs and objects are crash-tested the same way (#54, #56);
       - **for the MVP (ADR-0020):** a move, a delete to the trash and a restore from it
         (ADR-0024, both trash layouts) crashed at every step, the
-        startup temp sweep, a lost save response retried with the old `If-Match` (`200` with
-        the current ETag when the note already holds those bytes), saves racing each other and
+        startup temp sweep and the adoption marker (ADR-0027), a lost save response retried
+        with the old `If-Match` (`204` with the current ETag when the note already holds those
+        bytes), saves racing each other and
         a delete under the vault mutex (these are done, in `internal/vault`), the data format
         file written at every crash point (ADR-0025, `internal/store/layout`), a commit crash followed by a restart and the next
         commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
@@ -136,9 +137,10 @@ PostelMD is worth using before building the rest of the design.
   without `RENAME_NOREPLACE`, refuses to start.
 - Two tabs edit the same note → the second save gets 412 and the conflict view; nothing is
   lost. An edit made outside PostelMD is caught the same way. Concurrent saves with the same
-  `If-Match` → exactly one `200`, the rest `412` (scenario test against the vault mutex). A
-  save whose response was lost, retried with the old `If-Match`, → `200` with the current
-  ETag; other content with that `If-Match` → `412`. A save keeps the note's permissions.
+  `If-Match` and different bytes → exactly one succeeds (`204`), the rest `412` (scenario
+  test against the vault mutex). A save whose response was lost, retried with the old
+  `If-Match`, → `204` with the current ETag; other content with that `If-Match` → `412`
+  (ADR-0027). A save keeps the note's permissions.
 - An existing notes folder mounted at `/data/vaults/notes` is adopted (initialized as a git
   repository if it isn't one); a Windows-path bind mount is refused with the named-volume fix.
   A folder whose `.postelmd-tmp` or `.postelmd-trash` holds the user's own files is refused

@@ -15,7 +15,7 @@ import (
 // It never creates a note: a missing one is ErrNotFound, so an autosave can't recreate a
 // deleted note. A different revision is a *ConflictError carrying the current note, unless
 // the note already holds exactly content: then it answers the current revision whatever the
-// base, so a retry whose first response was lost succeeds (ADR-0003 §3, §5). Saving
+// base, so a retry whose first response was lost succeeds (ADR-0027). Saving
 // identical content writes nothing. The new note keeps the old one's permission bits. The
 // vault mutex is held from the check until the replacement is durable.
 func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (Rev, error) {

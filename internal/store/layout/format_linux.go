@@ -29,8 +29,8 @@ var (
 	ErrBadFormat = errors.New("layout: damaged data format file")
 )
 
-// EnsureFormat checks the data format in the state directory, under the instance lock and
-// before anything else reads or changes /data (ADR-0025):
+// EnsureFormat checks the data format in the state directory, under the instance lock, before
+// the app state is read and before the vault is opened or swept (ADR-0025):
 //   - missing: a new or a pre-format data directory; it writes FormatVersion;
 //   - equal: nothing to do;
 //   - newer: refused, so an older binary never touches data it doesn't understand;
@@ -72,8 +72,9 @@ func checkFormat(state string, b []byte) error {
 	s := string(bytes.TrimSuffix(b, []byte("\n")))
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 1 || s != strconv.Itoa(n) {
-		return fmt.Errorf("%w: %s/%s is damaged: it must hold a data format number. Restore the data "+
-			"directory from a backup; if only PostelMD 0.1 ever used it, write 1 in that file", ErrBadFormat, state, formatFile)
+		return fmt.Errorf("%w: %s/%s is damaged: it must hold a data format number. Back up the data "+
+			"directory first. If only PostelMD 0.1 ever used it, delete that file and start again (it is written "+
+			"anew); otherwise restore the backup you took before the last upgrade (ADR-0025)", ErrBadFormat, state, formatFile)
 	}
 	if n > FormatVersion {
 		return fmt.Errorf("%w: this data was written by a newer PostelMD (format %d); run that version or newer",
