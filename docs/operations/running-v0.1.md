@@ -180,9 +180,11 @@ that served the previous folder. This is a manual procedure until
    Then it extracts into `~/postelmd-restored-<time>` (and `~/notes-restored-<time>`): a
    failed or interrupted `tar` leaves the server untouched; delete the partial folder and
    retry. Last, it logs the switch, then stops, removes and recreates the container on the
-   new folders with the README's flags and your `-p` (use the other flags you started with).
-   **Never `docker start` the old container after changing folders**: it would serve the old
-   folder again.
+   new folders with the README's flags and your `-p` (if you started it with other flags,
+   edit the `docker run` line in the block). **Never `docker start` the old container after
+   changing folders**: it would serve the old folder again. If its `docker run` fails with
+   "port is already allocated" (Docker Desktop can hold a host port for a few seconds after
+   the old container is removed), wait a few seconds and run the rollback below.
 
    ```sh
    b=~/postelmd-backup-YYYY-MM-DD-HHMMSS.tar
@@ -226,7 +228,9 @@ that served the previous folder. This is a manual procedure until
 on it again, with the build that served it. The block takes the log's last line and shows it.
 It refuses unless the server serves that line's new folder, or there is no container because
 that switch never finished (step 2 failed after `docker rm`). It logs itself, so running it
-again undoes it, and it works in a new terminal:
+again undoes it, and it works in a new terminal. That includes a rollback whose own
+`docker run` failed: running it again starts the server on the restored folder instead of
+retrying, and a third run gets back to the previous one. No data moves either way.
 
 ```sh
 read -r t port img prev prev_notes x new new_notes <<< "$(tail -n 1 ~/postelmd-restores.log)"
@@ -260,9 +264,21 @@ planned restore command will handle it, ADR-0017, v0.3). Before you delete one b
 - take a backup of the current data;
 - check that it isn't a folder `docker inspect` reports (see
   [Where your data is](#where-your-data-is));
-- check for anything you wrote there after the switch (a note, a git commit from the host);
-- for its git history, `git -C <new vault> fetch <old vault>` first brings over commits made
-  after the backup, which the restored vault doesn't have.
+- check for anything written there after the switch: `find <old folder> -newer
+  ~/postelmd-switched-<time> | head` prints nothing when it's untouched. `<time>` is the
+  first field of the log line that switched away from that folder (the last line, after a
+  single restore);
+- bring over commits made after the backup, which the restored vault lacks. Fetch the old
+  vault's branches, list what the new one is missing, and merge what you want before you
+  delete anything:
+
+```sh
+git -C <new vault> fetch <old vault> 'refs/heads/*:refs/remotes/before-restore/*'
+git -C <new vault> log --oneline --remotes=before-restore --not HEAD
+```
+
+Without the refspec, `fetch` keeps only the old HEAD in `FETCH_HEAD`, on no branch, where
+git can garbage-collect it. Then `git -C <new vault> merge before-restore/<branch>`.
 
 ### Paths after a restore
 
