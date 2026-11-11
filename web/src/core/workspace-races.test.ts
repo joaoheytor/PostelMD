@@ -48,7 +48,7 @@ describe("Workspace: a session that isn't the open note never saves", () => {
     vi.useRealTimers();
   });
 
-  it("a converted open whose draft listing fails leaves no session saving behind (#blocker)", async () => {
+  it("a converted open whose draft listing fails leaves no session saving behind", async () => {
     // open() reads path's drafts (one getAll), then refreshes the whole list (a second): it fails.
     const all = backend.all.bind(backend);
     vi.spyOn(backend, "all")
@@ -61,6 +61,11 @@ describe("Workspace: a session that isn't the open note never saves", () => {
     const first = sessions[0];
     if (!first) throw new Error("a.txt's session was never published");
     expect(first.doc.dirty).toBe(true);
+    // The note stays open and owned; the error names no IndexedDB detail.
+    expect(ws.state.value.open).toBe(first);
+    expect(ws.state.value.error).toBe(
+      "Couldn't check this browser for unsaved drafts of your notes. This note is open and saves as usual; reload the page to check again.",
+    );
     const dispose = vi.spyOn(first.doc, "dispose");
 
     await ws.open("b.md");
@@ -110,16 +115,22 @@ describe("Workspace: a note opened during a move or a restore stays open", () =>
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     ws = new Workspace();
     await ws.open("a.md");
     ws.reader = () => "edited";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("a move that finishes after another note opened doesn't reopen the moved one", async () => {
     const slow = deferred();
     vi.mocked(api.move).mockImplementationOnce(() => slow.promise);
     const moving = ws.move("a.md", "c.md");
-    await vi.waitFor(() => expect(api.move).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.move).toHaveBeenCalled();
 
     await ws.open("b.md");
     const b = ws.state.value.open;
@@ -136,7 +147,8 @@ describe("Workspace: a note opened during a move or a restore stays open", () =>
     const slow = deferred();
     vi.mocked(api.move).mockImplementationOnce(() => slow.promise.then(() => Promise.reject(new Error("boom"))));
     const moving = ws.move("a.md", "c.md");
-    await vi.waitFor(() => expect(api.move).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.move).toHaveBeenCalled();
 
     await ws.open("b.md");
     const b = ws.state.value.open;
@@ -151,7 +163,8 @@ describe("Workspace: a note opened during a move or a restore stays open", () =>
     let finish = () => {};
     vi.mocked(api.restore).mockImplementationOnce(() => new Promise((r) => (finish = () => r('"e3"'))));
     const restoring = ws.restore("abc123");
-    await vi.waitFor(() => expect(api.restore).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.restore).toHaveBeenCalled();
 
     await ws.open("b.md");
     const b = ws.state.value.open;

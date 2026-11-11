@@ -9,7 +9,7 @@ import { moveItem } from "./move";
 import { fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
 import { restoreVersion } from "./restore";
 import { normalize } from "./textfile";
-import { message, openFailure, recoveredPath } from "./workspace-errors";
+import { draftsUnchecked, message, openFailure, recoveredPath } from "./workspace-errors";
 
 export type { OpenNote } from "./open-file";
 export { message } from "./workspace-errors";
@@ -69,6 +69,8 @@ export class Workspace {
    */
   close(): () => boolean {
     const seq = ++this.opens;
+    // dispose() first, while state.open is still this session: its closing draft reads the
+    // editor only while the session is current. Swapping these two lines drops that draft.
     this.state.value.open?.doc.dispose();
     this.state.set({});
     this.noteDrafts.set([]);
@@ -110,7 +112,7 @@ export class Workspace {
     }
     // The session is published and closes with the note: nothing from here may replace it.
     // The note closed to open this one may have left a draft; the tree shows this one.
-    await this.refreshOffered().catch((err: unknown) => current() && this.fail(`Couldn't list unsaved drafts: ${message(err)}`));
+    await this.refreshOffered().catch(() => current() && this.fail(draftsUnchecked));
     await this.tree.reveal(path);
   }
 
@@ -179,6 +181,7 @@ export class Workspace {
   /** Moves a note or folder to the trash; true when it went. An open note inside it is closed unsaved. */
   async trash(path: string, kind: "file" | "folder"): Promise<boolean> {
     const open = this.state.value.open;
+    // close()'s "still current" check is unused on purpose: a trashed note is never reopened.
     if (open && (open.doc.path === path || open.doc.path.startsWith(`${path}/`))) this.close();
     let ok = true;
     try {
