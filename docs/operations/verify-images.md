@@ -99,7 +99,8 @@ steps 1 and 2 with the `prerelease.yaml` identity. For one RC, pin it exactly:
 
 ```sh
 RC=v0.1.0-rc.1
-IMG=ghcr.io/joaoheytor/postelmd@sha256:<index digest>   # the digest its pre-release records
+# the index digest its pre-release records (its postelmd-image-digest: line)
+IMG=ghcr.io/joaoheytor/postelmd@sha256:<index digest>
 cosign verify "$IMG" --certificate-oidc-issuer "$ISSUER" \
   --certificate-identity "https://github.com/joaoheytor/PostelMD/.github/workflows/prerelease.yaml@refs/tags/$RC"
 cosign verify-attestation "$IMG" --type slsaprovenance1 --certificate-oidc-issuer "$ISSUER" \
