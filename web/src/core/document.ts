@@ -23,6 +23,8 @@ export interface DocOptions {
    * gone: then nothing is saved or drafted, since no other text holds the user's edits.
    */
   read: () => string | undefined;
+  /** False once the session isn't the open file any more: it then disposes itself. */
+  current?: () => boolean;
   debounceMs?: number;
   /** Where unsaved edits are kept until a save lands (ADR-0003 §7). */
   draft?: NoteDrafts;
@@ -224,7 +226,8 @@ export class DocumentSession implements Disposable {
   private async saveOnce(): Promise<void> {
     if (!this.dirty || !this.saveable()) return;
     const content = this.opts.read();
-    if (content === undefined) return this.schedule(this.debounceMs); // no editor yet: try again, until disposed
+    // No editor yet: try again, until disposed. A session no longer open has none to wait for.
+    if (content === undefined) return this.opts.current?.() === false ? this.dispose() : this.schedule(this.debounceMs);
     const snap = { content, gen: this.gen, base: this.baseETag };
     // A retry leaves a failure or a stall shown until it lands: it isn't announced again.
     const { status } = this.state.value;

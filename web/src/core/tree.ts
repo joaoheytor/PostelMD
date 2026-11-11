@@ -8,7 +8,10 @@ export interface TreeState {
   error?: string | undefined;
 }
 
-/** Note files the editor opens; anything else is listed but not opened as text. */
+/**
+ * Note files, by name (.md, .markdown, .txt): they open in the Markdown mode, with the
+ * preview. Any other UTF-8 text file opens too, in its own mode (filetype.ts).
+ */
 export function isNote(name: string): boolean {
   return /\.(md|markdown|txt)$/i.test(name);
 }

@@ -17,6 +17,11 @@ export interface OpenNote {
 export interface SessionDeps {
   /** The editor's text; undefined with no editor, and then nothing is saved or drafted. */
   reader: () => string | undefined;
+  /**
+   * Whether open is the file the workspace shows. The editor is the workspace's, so a session
+   * that isn't never reads it (it would read another file's text), and stops saving.
+   */
+  current: (open: OpenNote) => boolean;
   save: DocOptions["save"];
   draft?: NoteDrafts | undefined;
 }
@@ -32,11 +37,13 @@ export function openSession(path: string, note: Note, convert: boolean, deps: Se
   // Saves and drafts hold the file's text, its byte order mark and line endings put back. The
   // format is read through the holder, which a taken other version updates (takeTheirs).
   const holder: { open?: OpenNote } = {};
+  const current = () => holder.open !== undefined && deps.current(holder.open);
   const read = () => {
+    if (!current() || !holder.open) return undefined;
     const text = deps.reader();
-    return text === undefined || !holder.open ? undefined : fromEditor(text, holder.open.format);
+    return text === undefined ? undefined : fromEditor(text, holder.open.format);
   };
-  const doc = new DocumentSession(path, note.etag, { save: deps.save, read, ...(deps.draft && { draft: deps.draft }) });
+  const doc = new DocumentSession(path, note.etag, { save: deps.save, read, current, ...(deps.draft && { draft: deps.draft }) });
   holder.open = { doc, initial: note.content, shown, format };
   if (convert) doc.edit(); // the conversion is the user's edit: saved and drafted like one
   return holder.open;
