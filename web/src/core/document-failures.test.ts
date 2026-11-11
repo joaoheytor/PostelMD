@@ -222,6 +222,16 @@ describe("DocumentSession failures", () => {
       expect(writes).toEqual([]);
       expect(doc.dirty).toBe(true);
     });
+
+    it("tries again later, so an editor that mounts after the edit (a converted open) still saves", async () => {
+      type("v1");
+      text = undefined; // the edit came before the editor
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(saves).toEqual([]);
+      text = "v1"; // the editor mounted
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(saves).toMatchObject([{ content: "v1", base: '"e0"' }]);
+    });
   });
 
   describe("a draft write that fails (quota, private mode)", () => {

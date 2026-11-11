@@ -51,11 +51,16 @@ describe("the Content-Type a save sends", () => {
     await saveNote("deploy.yaml", "x", '"e0"');
     await createNote("b.MD", "x");
     await createNote("run.sh", "x");
+    // A note is what the editor treats as Markdown (modeOf): .markdown and .txt too.
+    await saveNote("docs/guide.markdown", "x", '"e0"');
+    await saveNote("todo.TXT", "x", '"e0"');
     expect(types).toEqual([
       "text/markdown; charset=utf-8",
       "application/octet-stream",
       "text/markdown; charset=utf-8",
       "application/octet-stream",
+      "text/markdown; charset=utf-8",
+      "text/markdown; charset=utf-8",
     ]);
   });
 });

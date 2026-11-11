@@ -224,7 +224,7 @@ export class DocumentSession implements Disposable {
   private async saveOnce(): Promise<void> {
     if (!this.dirty || !this.saveable()) return;
     const content = this.opts.read();
-    if (content === undefined) return; // the editor is gone: nothing holds the edits to send
+    if (content === undefined) return this.schedule(this.debounceMs); // no editor yet: try again, until disposed
     const snap = { content, gen: this.gen, base: this.baseETag };
     // A retry leaves a failure or a stall shown until it lands: it isn't announced again.
     const { status } = this.state.value;

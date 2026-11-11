@@ -63,7 +63,7 @@ export function takeTheirs(open: OpenNote, theirs: string, convert: boolean): st
   // Mutated, not replaced: a new OpenNote would remount the editor and lose its undo history,
   // which brings the user's text back (Ctrl+Z). Nothing renders from format; only saves and
   // drafts read it, when they start.
+  open.doc.takeTheirs(); // first: if it throws, the format stays the one of the text kept
   open.format = format;
-  open.doc.takeTheirs();
   return text;
 }

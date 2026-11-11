@@ -2,6 +2,7 @@
  * The HTTP API (ADR-0020), as plain functions over fetch. Nothing here keeps state, except
  * the hook that tells the app when the session has expired.
  */
+import { modeOf } from "./filetype";
 import { decodeText, NotTextError } from "./textfile";
 
 export class ApiError extends Error {
@@ -196,11 +197,11 @@ export async function saveNote(path: string, content: string, baseETag: string, 
 }
 
 /**
- * What a save sends its body as: Markdown for a note, as the server labels it on a read
- * (notes.go), and plain bytes for any other file. The server stores the body whatever it is.
+ * What a save sends its body as: Markdown for a note (the editor's rule, modeOf), and plain
+ * bytes for any other file. The server stores the body whatever it is (notes.go).
  */
 function contentType(path: string): string {
-  return /\.md$/i.test(path) ? "text/markdown; charset=utf-8" : "application/octet-stream";
+  return modeOf(path) === "markdown" ? "text/markdown; charset=utf-8" : "application/octet-stream";
 }
 
 /**

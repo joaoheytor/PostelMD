@@ -41,7 +41,7 @@ export function conflictBanner(conflict: Conflict, act: ConflictActions) {
   if (!lines) diffs.set(conflict, (lines = textDiff(act.mine(), conflict.content)));
   const convert = needsConvert(conflict.content);
   const takeConverted = () => {
-    const ask = "The other version mixes line endings. Put it in the editor with LF line endings, and save it that way?";
+    const ask = "The other version has line endings the editor can't keep. Put it in the editor with LF line endings and save it that way?";
     if (confirm(ask)) act.take(true);
   };
   return html`<section class="pm-banner" role="alert" aria-labelledby="pm-conflict-title">

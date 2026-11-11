@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { env, expect, login, noSeriousA11yViolations, test } from "./helpers";
@@ -66,7 +66,7 @@ test("a binary file stays listed, and clicking it says why it doesn't open", asy
     await page.getByRole("button", { name: "logo.png" }).click();
     const alert = page.getByRole("alert").filter({ hasText: "PostelMD opens only UTF-8 text files, and logo.png isn't one." });
     await expect(alert).toBeVisible();
-    await expect(alert.getByRole("button", { name: "Convert line endings and open" })).toHaveCount(0);
+    await expect(alert.getByRole("button", { name: "Convert to LF and open" })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Text of logo.png" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "logo.png" })).toBeVisible();
   });
@@ -79,12 +79,12 @@ test("a file with mixed line endings opens only when the user converts them, and
     await page.getByRole("button", { name: "mixed.conf" }).click();
     const alert = page.getByRole("alert").filter({
       hasText:
-        "PostelMD can't open mixed.conf as it is: it mixes Windows (CRLF) and Unix (LF) line endings. Convert them to LF to edit it here.",
+        "PostelMD can't open mixed.conf as it is: it mixes Windows (CRLF) and Unix (LF) line endings. Convert them to LF to edit it here. This saves the file with LF line endings.",
     });
     await expect(alert).toBeVisible();
     expect(readFileSync(vault("mixed.conf"), "utf8")).toBe("worker_processes 2;\r\nevents {}\n"); // not converted unasked
 
-    await alert.getByRole("button", { name: "Convert line endings and open" }).click();
+    await alert.getByRole("button", { name: "Convert to LF and open" }).click();
     await expect(page.getByRole("textbox", { name: "Text of mixed.conf" })).toContainText("events {}");
     await expect.poll(() => readFileSync(vault("mixed.conf"), "utf8")).toBe("worker_processes 2;\nevents {}\n");
   });
@@ -121,10 +121,68 @@ test("another version with mixed line endings can be taken converted to LF, afte
     await expect(conflict).toBeVisible();
     // Taken as it is, it would be converted on its next save: that way out isn't offered.
     await expect(conflict.getByRole("button", { name: "Use the other version", exact: true })).toHaveCount(0);
-    page.once("dialog", (d) => void d.accept());
+    let asked = "";
+    page.once("dialog", (d) => {
+      asked = d.message();
+      void d.accept();
+    });
     await conflict.getByRole("button", { name: "Use the other version, converted to LF" }).click();
+    expect(asked).toBe(
+      "The other version has line endings the editor can't keep. Put it in the editor with LF line endings and save it that way?",
+    );
     await expect.poll(() => readFileSync(vault("values.yaml"), "utf8")).toBe("replicas: 3\nimage: web\n");
     await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
+    await expect(page.getByRole("textbox", { name: "Text of values.yaml" })).toBeFocused();
+  });
+});
+
+test("after either way out of a conflict, the focus is back in the text", async ({ page }) => {
+  await withFiles(["focus.yaml"], async () => {
+    writeFileSync(vault("focus.yaml"), "a: 1\n");
+    await login(page);
+    await page.getByRole("button", { name: "focus.yaml" }).click();
+    const text = page.getByRole("textbox", { name: "Text of focus.yaml" });
+    await expect(text).toContainText("a: 1");
+    const conflict = page
+      .getByRole("alert")
+      .filter({ has: page.getByRole("heading", { name: "This note changed in another tab or outside this editor" }) });
+
+    writeFileSync(vault("focus.yaml"), "a: 2\n");
+    await typeAtEnd(page, "focus.yaml", "mine: 1");
+    await conflict.getByRole("button", { name: "Keep my version" }).click();
+    await expect(text).toBeFocused();
+    await expect.poll(() => readFileSync(vault("focus.yaml"), "utf8")).toBe("a: 1\nmine: 1");
+
+    writeFileSync(vault("focus.yaml"), "a: 3\n");
+    await typeAtEnd(page, "focus.yaml", "x");
+    await conflict.getByRole("button", { name: "Use the other version", exact: true }).click();
+    await expect(text).toBeFocused();
+    await expect(text).toContainText("a: 3");
+  });
+});
+
+test("another version that isn't text leaves one way out: my text as a new file, the other untouched", async ({ page }) => {
+  await withFiles(["turns.json", "turns-recovered.json"], async () => {
+    writeFileSync(vault("turns.json"), '{"turn": 1}\n');
+    await login(page);
+    await page.getByRole("button", { name: "turns.json" }).click();
+    await expect(page.getByRole("textbox", { name: "Text of turns.json" })).toContainText('{"turn": 1}');
+
+    // PNG bytes, built here, written by something outside PostelMD.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
+    writeFileSync(vault("turns.json"), png);
+    await typeAtEnd(page, "turns.json", "mine");
+    const banner = page
+      .getByRole("alert")
+      .filter({ has: page.getByRole("heading", { name: "This file changed outside this editor into something PostelMD can't open" }) });
+    await expect(banner).toBeVisible();
+    await expect(page.getByRole("button", { name: "Keep my version" })).toHaveCount(0);
+
+    await banner.getByRole("button", { name: "Save my version as a new file" }).click();
+    await expect.poll(() => (existsSync(vault("turns-recovered.json")) ? readFileSync(vault("turns-recovered.json"), "utf8") : "")).toBe(
+      '{"turn": 1}\nmine',
+    );
+    expect(readFileSync(vault("turns.json")).equals(png)).toBe(true);
   });
 });
 

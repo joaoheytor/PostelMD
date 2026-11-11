@@ -69,7 +69,7 @@ describe("Workspace: files that aren't Markdown", () => {
     await ws.open("mixed.conf");
     expect(ws.state.value.open).toBeUndefined();
     expect(ws.state.value.error).toBe(
-      "PostelMD can't open mixed.conf as it is: it mixes Windows (CRLF) and Unix (LF) line endings. Convert them to LF to edit it here.",
+      "PostelMD can't open mixed.conf as it is: it mixes Windows (CRLF) and Unix (LF) line endings. Convert them to LF to edit it here. This saves the file with LF line endings.",
     );
     expect(ws.state.value.convert).toBe("mixed.conf");
     expect(api.saveNote).not.toHaveBeenCalled(); // never converted without the user's click
@@ -79,7 +79,7 @@ describe("Workspace: files that aren't Markdown", () => {
     vi.mocked(api.readNote).mockResolvedValueOnce({ content: "a\rb", etag: '"e1"' });
     await ws.open("old.txt");
     expect(ws.state.value.error).toBe(
-      "PostelMD can't open old.txt as it is: it has old Mac (CR) line endings. Convert them to LF to edit it here.",
+      "PostelMD can't open old.txt as it is: it has old Mac (CR) line endings. Convert them to LF to edit it here. This saves the file with LF line endings.",
     );
     expect(ws.state.value.convert).toBe("old.txt");
   });
@@ -106,6 +106,21 @@ describe("Workspace: files that aren't Markdown", () => {
       expect(await ws.saveOpen()).toBe(true);
       // The byte order mark is no line ending: it stays as it was.
       expect(api.saveNote).toHaveBeenCalledWith("mixed.conf", `${bomChar}a\nb\nc\nd`, '"e1"');
+    });
+
+    it("saves on its own even when the editor mounts after the first save's tick", async () => {
+      vi.useFakeTimers();
+      try {
+        ws.reader = undefined; // no editor yet
+        await ws.open("mixed.conf", true);
+        await vi.advanceTimersByTimeAsync(1500); // the debounced save finds no text
+        expect(api.saveNote).not.toHaveBeenCalled();
+        ws.reader = () => ws.state.value.open?.shown ?? ""; // the editor mounted
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(api.saveNote).toHaveBeenCalledWith("mixed.conf", `${bomChar}a\nb\nc\nd`, '"e1"');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("a file changed since it was read gets the conflict view, not an overwrite", async () => {

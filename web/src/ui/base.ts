@@ -84,8 +84,11 @@ export function followLink(workspace: Workspace, e: MouseEvent, from: string): v
   if (url.host === "vault.invalid" && path !== "" && !path.endsWith("/")) void openNote(workspace, path);
 }
 
-/** Opens a note, after saving the open one; asks first if some of its edits can't be saved. */
-export async function openNote(workspace: Workspace, path: string): Promise<void> {
+/**
+ * Opens a note, after saving the open one; asks first if some of its edits can't be saved.
+ * convert: the user asked to convert its line endings to LF (Workspace.open).
+ */
+export async function openNote(workspace: Workspace, path: string, convert = false): Promise<void> {
   if (!(await workspace.saveOpen()) && !confirm("Some edits to the open note aren't saved. Leave them?")) return;
-  await workspace.open(path);
+  await workspace.open(path, convert);
 }

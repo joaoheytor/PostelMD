@@ -13,7 +13,8 @@ export function message(err: unknown): string {
  */
 export function openFailure(path: string, err: unknown): { error: string; convert?: string } {
   if (err instanceof LineEndingsError) {
-    return { error: `PostelMD can't open ${path} as it is: ${err.message}. Convert them to LF to edit it here.`, convert: path };
+    const why = `${err.message}. Convert them to LF to edit it here. This saves the file with LF line endings.`;
+    return { error: `PostelMD can't open ${path} as it is: ${why}`, convert: path };
   }
   if (err instanceof BinaryError) return { error: `PostelMD opens only UTF-8 text files, and ${path} isn't one.` };
   if (err instanceof NotTextError) return { error: `PostelMD can't open ${path}: ${err.message}.` };

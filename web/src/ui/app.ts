@@ -2,7 +2,7 @@ import { html, nothing } from "lit";
 import type { App } from "../core/app";
 import { DisposableStore } from "../core/disposable";
 import { parent } from "../core/tree";
-import { LightElement, listen, StoreController } from "./base";
+import { LightElement, listen, openNote, StoreController } from "./base";
 import "./commit";
 import "./drafts";
 import "./finder";
@@ -105,7 +105,7 @@ export class WorkspaceView extends LightElement {
       ${error
         ? html`<p class="pm-error pm-top-error" role="alert">
             ${error}
-            ${convert ? html`<button type="button" @click=${() => void w.open(convert, true)}>Convert line endings and open</button>` : nothing}
+            ${convert ? html`<button type="button" @click=${() => void openNote(w, convert, true)}>Convert to LF and open</button>` : nothing}
             <button type="button" @click=${() => w.dismissError()}>Dismiss</button>
           </p>`
         : nothing}

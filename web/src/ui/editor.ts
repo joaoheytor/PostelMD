@@ -188,8 +188,14 @@ export class NoteEditor extends LightElement {
     }
   }
 
+  /** A way out of a conflict was taken: its banner goes, and the focus goes to the text. */
   private takeTheirs(convert: boolean): void {
-    this.workspace.takeTheirs((t) => this.editor?.replace(t), convert);
+    if (this.workspace.takeTheirs((t) => this.editor?.replace(t), convert)) this.focusText();
+  }
+
+  private keepMine(doc: DocumentSession): void {
+    doc.keepMine();
+    this.focusText();
   }
 
   private async trash(path: string): Promise<void> {
@@ -259,7 +265,7 @@ export class NoteEditor extends LightElement {
       ${st.status === "conflict" && st.conflict
         ? conflictBanner(st.conflict, {
             mine: () => this.workspace.currentText() ?? note.initial,
-            keep: () => note.doc.keepMine(),
+            keep: () => this.keepMine(note.doc),
             take: (convert) => this.takeTheirs(convert),
             saveAsNew: () => void this.workspace.saveAsNew(),
           })
