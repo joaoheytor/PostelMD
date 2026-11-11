@@ -68,40 +68,29 @@ everything you deleted, exists only in these files.
 
 ## Backup
 
-The simplest consistent copy stops the server for a few seconds. It backs up the folder the
+The simplest consistent copy stops the server for a few seconds. It backs up the folders the
 container mounts (after a restore, that is no longer `~/postelmd`; see
-[Paths after a restore](#paths-after-a-restore)), checks that the archive reads back, and
-prints its size:
+[Paths after a restore](#paths-after-a-restore)): the data folder to
+`~/postelmd-backup-<time>.tar` and, with an adopted notes folder, that folder to
+`~/notes-backup-<time>.tar`, with the same time. It checks that each archive reads back, and
+prints the sizes:
 
 ```sh
 data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
-f=~/postelmd-backup-$(date +%F-%H%M%S).tar
-echo "backing up $data to $f"
-[ -n "$data" ] && docker stop postelmd && tar -C "$data" -cpf "$f" . \
-  && tar -tf "$f" >/dev/null && du -h "$f" || echo "BACKUP FAILED" >&2
+notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)
+s=$(date +%F-%H%M%S)
+f=~/postelmd-backup-$s.tar
+g=~/notes-backup-$s.tar
+echo "backing up $data to $f${notes:+, and $notes to $g}"
+[ -n "$data" ] && docker stop postelmd && tar -C "$data" -cpf "$f" . && tar -tf "$f" >/dev/null \
+  && { [ -z "$notes" ] || { tar -C "$notes" -cpf "$g" . && tar -tf "$g" >/dev/null; }; } \
+  && du -h ~/*-backup-$s.tar || echo "BACKUP FAILED" >&2
 docker start postelmd
 docker ps --filter name=postelmd
 ```
 
 Run the `docker start` always, even when the backup failed, and check that `docker ps` says
-"Up" under STATUS. With an adopted folder mounted at `/data/vaults/notes`, copy it in the same stop:
-
-```sh
-data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
-notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)
-stamp=$(date +%F-%H%M%S)
-f=~/postelmd-backup-$stamp.tar
-g=~/notes-backup-$stamp.tar
-echo "backing up $data to $f, and $notes to $g"
-[ -n "$data" ] && [ -n "$notes" ] && docker stop postelmd \
-  && tar -C "$data" -cpf "$f" . && tar -C "$notes" -cpf "$g" . \
-  && tar -tf "$f" >/dev/null && tar -tf "$g" >/dev/null && du -h "$f" "$g" \
-  || echo "BACKUP FAILED" >&2
-docker start postelmd
-docker ps --filter name=postelmd
-```
-
-`docker start` is a separate command on purpose: chained after `tar` with `&&`, a failed
+"Up" under STATUS. `docker start` is a separate command on purpose: chained after `tar` with `&&`, a failed
 backup would leave the server stopped, and `--restart unless-stopped` never restarts a
 container you stopped yourself. `docker stop` waits for in-flight saves (up to the
 `--stop-timeout 60` you ran it with). The browser keeps unsaved edits as drafts and retries,
@@ -115,12 +104,11 @@ data format, and an older build refuses data a newer one wrote
 **On WSL2, copy the backup off the WSL disk.** Your WSL home lives in one virtual disk file;
 a backup next to the data is lost with it. A tar file is safe on the Windows side (only the
 live data must stay on the Linux filesystem). Any Windows folder works; better, one that is
-itself backed up. In the same terminal as the backup (with an adopted folder, copy `"$g"`
-too):
+itself backed up. In the same terminal as the backup:
 
 ```sh
 mkdir -p /mnt/c/postelmd-backups
-cp "$f" /mnt/c/postelmd-backups/
+cp ~/*-backup-$s.tar /mnt/c/postelmd-backups/
 ```
 
 For a nightly copy, point restic or borg at the folder the container mounts. The files belong to your user
@@ -145,37 +133,21 @@ sudo chown "$(id -u):$(id -g)" ~/"$f" && tar -tf ~/"$f" >/dev/null && du -h ~/"$
 ## Restore drill
 
 Do this once at the start of the four weeks, and after any change to how you back up. It
-proves the backup is complete without touching the running instance:
+proves the backup is complete without touching the running instance. It extracts the backup
+into `~/postelmd-drill` (and its notes archive, if there is one, into `~/notes-drill`), and
+starts a second container on it, on port 8081, with the image the server runs unless you set
+`IMAGE`. `ls -t ~/*-backup-*.tar | head` lists the newest backups:
 
 ```sh
-check=~/postelmd-drill
-mkdir "$check" && tar -C "$check" -xpf ~/postelmd-backup-YYYY-MM-DD-HHMMSS.tar
-```
-
-With an adopted folder, extract it too, instead of the block above:
-
-```sh
-check=~/postelmd-drill
-check_notes=~/notes-drill
-mkdir "$check" "$check_notes" && tar -C "$check" -xpf ~/postelmd-backup-YYYY-MM-DD-HHMMSS.tar \
-  && tar -C "$check_notes" -xpf ~/notes-backup-YYYY-MM-DD-HHMMSS.tar
-```
-
-Start a second container on it, on port 8081, with the image the server runs unless you set
-`IMAGE`:
-
-```sh
+b=~/postelmd-backup-YYYY-MM-DD-HHMMSS.tar
+n=${b/postelmd-backup/notes-backup}
 IMAGE=${IMAGE:-$(docker inspect -f '{{.Config.Image}}' postelmd)}
-docker run -d --name postelmd-drill -p 127.0.0.1:8081:8080 \
-  --user "$(id -u):$(id -g)" -v "$check":/data "$IMAGE"
-```
-
-With an adopted folder, mount it as the drill's vault, instead:
-
-```sh
-IMAGE=${IMAGE:-$(docker inspect -f '{{.Config.Image}}' postelmd)}
-docker run -d --name postelmd-drill -p 127.0.0.1:8081:8080 --user "$(id -u):$(id -g)" \
-  -v "$check":/data -v "$check_notes":/data/vaults/notes "$IMAGE"
+v=(-v ~/postelmd-drill:/data)
+[ ! -e "$n" ] || v+=(-v ~/notes-drill:/data/vaults/notes)
+mkdir ~/postelmd-drill && tar -C ~/postelmd-drill -xpf "$b" \
+  && { [ ! -e "$n" ] || { mkdir ~/notes-drill && tar -C ~/notes-drill -xpf "$n"; }; } \
+  && docker run -d --name postelmd-drill -p 127.0.0.1:8081:8080 --user "$(id -u):$(id -g)" \
+    "${v[@]}" "$IMAGE"
 ```
 
 Open http://127.0.0.1:8081 **in a private window** (both instances are on `127.0.0.1`, and
@@ -193,210 +165,104 @@ docker rm -f postelmd-drill && rm -rf ~/postelmd-drill ~/notes-drill
 point the container at it.**
 
 The live folder is whatever the running container mounts ([Where your data is](#where-your-data-is)).
-Every switch and rollback is recorded in `~/postelmd-restores.log`, one line each:
-`<time> <port> <image> <previous data> <previous notes> -> <new data> <new notes>`, where the
-image is the one that served the previous folder (`-` when there is no separate notes
-folder). The rollback and the cleanup read it, so you never type a folder by hand. Folder
-paths with spaces aren't supported.
+Each restore and rollback appends one line to `~/postelmd-restores.log`:
+`<time> <port> <image ID> <previous data> <previous notes> -> <new data> <new notes>` (`-` for
+no notes folder; folder paths with spaces aren't supported). The image ID is the exact build
+that served the previous folder. This is a manual procedure until
+[the planned restore command](../adr/0017-backup-and-restore.md) (v0.3).
 
-This is a manual procedure until
-[the planned restore command](../adr/0017-backup-and-restore.md) (v0.3). Run steps 1 to 3 in
-one terminal: later blocks use the variables earlier ones set.
-
-1. **Extract** the backup into a new folder. The server keeps running on its folder. To pick
-   the backup, `ls -t ~/*-backup-*.tar | head` lists the newest. **README setup:**
-
-   ```sh
-   b=~/postelmd-backup-YYYY-MM-DD-HHMMSS.tar
-   stamp=$(date +%F-%H%M%S)
-   mkdir ~/postelmd-restored-$stamp \
-     && tar -C ~/postelmd-restored-$stamp -xpf "$b" \
-     && echo "extracted into ~/postelmd-restored-$stamp" \
-     || echo "RESTORE STOPPED: the server is untouched; delete ~/postelmd-restored-$stamp and retry" >&2
-   ```
-
-   **Adopted notes folder**, instead of the block above (the notes archive has the same
-   time in its name):
+1. **Check the backup first** (optional, recommended): run the [Restore drill](#restore-drill)
+   on it, and remove its container before step 2.
+2. **Restore.** Set `b` to the backup (`ls -t ~/*-backup-*.tar | head`) and run the block.
+   With an adopted notes folder it also restores `~/notes-backup-<same time>.tar`. Before it
+   changes anything, it reads the served folders, the `-p` address and the image from the
+   running container, and refuses if one is missing or the drill's container still runs.
+   Then it extracts into `~/postelmd-restored-<time>` (and `~/notes-restored-<time>`): a
+   failed or interrupted `tar` leaves the server untouched; delete the partial folder and
+   retry. Last, it logs the switch, then stops, removes and recreates the container on the
+   new folders with the README's flags and your `-p` (use the other flags you started with).
+   **Never `docker start` the old container after changing folders**: it would serve the old
+   folder again.
 
    ```sh
    b=~/postelmd-backup-YYYY-MM-DD-HHMMSS.tar
    n=${b/postelmd-backup/notes-backup}
-   stamp=$(date +%F-%H%M%S)
-   mkdir ~/postelmd-restored-$stamp ~/notes-restored-$stamp \
-     && tar -C ~/postelmd-restored-$stamp -xpf "$b" \
-     && tar -C ~/notes-restored-$stamp -xpf "$n" \
-     && echo "extracted into ~/postelmd-restored-$stamp and ~/notes-restored-$stamp" \
-     || echo "RESTORE STOPPED: the server is untouched; delete the *-restored-$stamp folders and retry" >&2
-   ```
-
-   A failed or interrupted `tar` (a wrong backup name gives `tar: …: Cannot open`) leaves a
-   partial folder and nothing else: delete it (`rm -rf ~/postelmd-restored-$stamp`, and
-   `~/notes-restored-$stamp`) and run the block again.
-2. **Check it first** (optional, recommended): run the [Restore drill](#restore-drill) on the
-   new folder, from its `docker run` on, after `check=~/postelmd-restored-$stamp` (and
-   `check_notes=~/notes-restored-$stamp`). Skip the drill's last cleanup block; remove only
-   its container, `docker rm -f postelmd-drill`, which must be gone before step 3.
-3. **Switch** the container to the new folder. The block reads the folder it served until
-   now, its `-p` host address and its image from the running container, records the switch
-   in `~/postelmd-restores.log` before it stops anything, and recreates the container with
-   the README's flags (use the ones you started with; the block keeps your `-p`). It refuses
-   before stopping anything if a value is missing, step 1's folder isn't there (in a new
-   terminal `$stamp` is empty: set it again to the time step 1 printed), or the drill's
-   container still runs (two servers on one folder would fight over its lock). **Never
-   `docker start` the old container after changing folders**: it would serve the old folder
-   again. **README setup:**
-
-   ```sh
-   prev=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
-   new=~/postelmd-restored-$stamp
-   port=$(docker port postelmd 8080/tcp | head -n 1)
-   img=$(docker inspect -f '{{.Config.Image}}' postelmd)
-   IMAGE=${IMAGE:-$img}
-   echo "prev=$prev new=$new port=$port IMAGE=$IMAGE"
-   if docker inspect postelmd-drill >/dev/null 2>&1; then
-     echo "RESTORE STOPPED: remove the drill first: docker rm -f postelmd-drill" >&2
-   elif [ -n "$prev" ] && [ -n "$stamp" ] && [ "$new" != "$prev" ] && [ -d "$new/.postelmd" ] \
-     && [ -n "$port" ] && [ -n "$IMAGE" ]; then
-     echo "$stamp $port $img $prev - -> $new -" >> ~/postelmd-restores.log \
-       && docker stop postelmd \
-       && docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1 \
-       && docker rm postelmd \
-       && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
-         --log-opt max-size=10m --log-opt max-file=3 \
-         -p "$port":8080 --user "$(id -u):$(id -g)" -v "$new":/data "$IMAGE" \
-       && touch ~/postelmd-switched-$stamp \
-       && echo "$prev is no longer served: point git, your IDE and backup jobs at $new" \
-       || echo "RESTORE STOPPED: if the server is down, roll back (below)" >&2
-   else
-     echo "RESTORE STOPPED: nothing changed; a value above is empty or $new is missing" >&2
-   fi
-   ```
-
-   **Adopted notes folder**, instead of the block above:
-
-   ```sh
+   t=$(date +%F-%H%M%S)
    prev=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
    prev_notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)
-   new=~/postelmd-restored-$stamp
-   new_notes=~/notes-restored-$stamp
    port=$(docker port postelmd 8080/tcp | head -n 1)
-   img=$(docker inspect -f '{{.Config.Image}}' postelmd)
+   img=$(docker inspect -f '{{.Image}}' postelmd)
    IMAGE=${IMAGE:-$img}
-   echo "prev=$prev prev_notes=$prev_notes new=$new new_notes=$new_notes port=$port IMAGE=$IMAGE"
+   new=~/postelmd-restored-$t new_notes=-
+   [ -z "$prev_notes" ] || new_notes=~/notes-restored-$t
+   v=(-v "$new":/data)
+   [ "$new_notes" = - ] || v+=(-v "$new_notes":/data/vaults/notes)
+   echo "prev=$prev ${prev_notes:+prev_notes=$prev_notes }port=$port IMAGE=$IMAGE"
    if docker inspect postelmd-drill >/dev/null 2>&1; then
      echo "RESTORE STOPPED: remove the drill first: docker rm -f postelmd-drill" >&2
-   elif [ -n "$prev" ] && [ -n "$prev_notes" ] && [ -n "$stamp" ] && [ "$new" != "$prev" ] && [ -d "$new/.postelmd" ] \
-     && [ -d "$new_notes" ] && [ -n "$port" ] && [ -n "$IMAGE" ]; then
-     echo "$stamp $port $img $prev $prev_notes -> $new $new_notes" >> ~/postelmd-restores.log \
+   elif [ -z "$prev" ] || [ -z "$port" ] || [ -z "$IMAGE" ]; then
+     echo "RESTORE STOPPED: nothing changed; is the container running?" >&2
+   elif ! { mkdir "$new" && tar -C "$new" -xpf "$b" \
+       && { [ "$new_notes" = - ] || { mkdir "$new_notes" && tar -C "$new_notes" -xpf "$n"; }; }; }; then
+     echo "RESTORE STOPPED: the server is untouched; delete ~/*-restored-$t and retry" >&2
+   else
+     echo "$t $port $img $prev ${prev_notes:--} -> $new $new_notes" >> ~/postelmd-restores.log \
        && docker stop postelmd \
-       && docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1 \
+       && docker logs postelmd > ~/postelmd-logs-$t.jsonl 2>&1 \
        && docker rm postelmd \
        && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
          --log-opt max-size=10m --log-opt max-file=3 \
-         -p "$port":8080 --user "$(id -u):$(id -g)" \
-         -v "$new":/data -v "$new_notes":/data/vaults/notes "$IMAGE" \
-       && touch ~/postelmd-switched-$stamp \
-       && echo "$prev and $prev_notes are no longer served: point git, your IDE and backup jobs at $new and $new_notes" \
+         -p "$port":8080 --user "$(id -u):$(id -g)" "${v[@]}" "$IMAGE" \
+       && touch ~/postelmd-switched-$t \
+       && echo "now serving $new; point git, your IDE and backup jobs at it" \
        || echo "RESTORE STOPPED: if the server is down, roll back (below)" >&2
-   else
-     echo "RESTORE STOPPED: nothing changed; a value above is empty or a new folder is missing" >&2
    fi
    ```
-4. **Check** in the web app (log in again if asked, with the password you had when the
+3. **Check** in the web app (log in again if asked, with the password you had when the
    backup was taken): a note you saved after the backup is missing, and the notes you know
    the backup has are there.
 
 **Rollback.** The previous folder was never touched, so going back is starting the container
-on it again. The block takes the last switch from `~/postelmd-restores.log`, shows it, and
-refuses unless the container serves that switch's new folder (or there is no container,
-after a failed step 3). It records the rollback as a switch of its own, so running it again
-undoes the rollback. It works in a new terminal. **README setup:**
-
-```sh
-read -r t port img prev prev_notes x new new_notes <<< "$(tail -n 1 ~/postelmd-restores.log)"
-live=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd 2>/dev/null)
-echo "last switch $t: $prev -> $new; served now: ${live:-no container}"
-if [ -z "$prev" ] || [ ! -d "$prev" ] || [ -z "$img" ] || { [ -n "$live" ] && [ "$live" != "$new" ]; }; then
-  echo "ROLLBACK STOPPED: the server doesn't serve $new, the last switch's new folder" >&2
-else
-  s=$(date +%F-%H%M%S)
-  cur=$(docker inspect -f '{{.Config.Image}}' postelmd 2>/dev/null)
-  echo "$s $port ${cur:-$img} $new - -> $prev -" >> ~/postelmd-restores.log \
-    && { [ -z "$live" ] || { docker stop postelmd \
-      && docker logs postelmd > ~/postelmd-logs-$s.jsonl 2>&1 && docker rm postelmd; }; } \
-    && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
-      --log-opt max-size=10m --log-opt max-file=3 \
-      -p "$port":8080 --user "$(id -u):$(id -g)" -v "$prev":/data "$img" \
-    && touch ~/postelmd-switched-$s \
-    || echo "ROLLBACK FAILED: see the error above" >&2
-fi
-```
-
-**Adopted notes folder**, instead of the block above:
+on it again, with the build that served it. The block takes the log's last line and shows it.
+It refuses unless the server serves that line's new folder, or there is no container because
+that switch never finished (step 2 failed after `docker rm`). It logs itself, so running it
+again undoes it, and it works in a new terminal:
 
 ```sh
 read -r t port img prev prev_notes x new new_notes <<< "$(tail -n 1 ~/postelmd-restores.log)"
 live=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd 2>/dev/null)
 echo "last switch $t: $prev $prev_notes -> $new $new_notes; served now: ${live:-no container}"
-if [ -z "$prev" ] || [ ! -d "$prev" ] || [ ! -d "$prev_notes" ] || [ -z "$img" ] \
-  || { [ -n "$live" ] && [ "$live" != "$new" ]; }; then
+v=(-v "$prev":/data)
+[ "$prev_notes" = - ] || v+=(-v "$prev_notes":/data/vaults/notes)
+if [ -z "$live" ] && [ -e ~/postelmd-switched-$t ]; then
+  echo "ROLLBACK STOPPED: the last restore finished; start the server with the README's docker run on $new ${new_notes#-}" >&2
+elif [ -n "$live" ] && [ "$live" != "$new" ]; then
   echo "ROLLBACK STOPPED: the server doesn't serve $new, the last switch's new folder" >&2
+elif [ ! -d "$prev" ] || { [ "$prev_notes" != - ] && [ ! -d "$prev_notes" ]; }; then
+  echo "ROLLBACK STOPPED: $prev or $prev_notes is missing" >&2
 else
   s=$(date +%F-%H%M%S)
-  cur=$(docker inspect -f '{{.Config.Image}}' postelmd 2>/dev/null)
+  cur=$(docker inspect -f '{{.Image}}' postelmd 2>/dev/null)
   echo "$s $port ${cur:-$img} $new $new_notes -> $prev $prev_notes" >> ~/postelmd-restores.log \
     && { [ -z "$live" ] || { docker stop postelmd \
       && docker logs postelmd > ~/postelmd-logs-$s.jsonl 2>&1 && docker rm postelmd; }; } \
     && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
       --log-opt max-size=10m --log-opt max-file=3 \
-      -p "$port":8080 --user "$(id -u):$(id -g)" \
-      -v "$prev":/data -v "$prev_notes":/data/vaults/notes "$img" \
+      -p "$port":8080 --user "$(id -u):$(id -g)" "${v[@]}" "$img" \
     && touch ~/postelmd-switched-$s \
     || echo "ROLLBACK FAILED: see the error above" >&2
 fi
 ```
 
-The restored folder stays as it was; the cleanup below deletes it later.
+**Previous folders.** Keep them: they cost only disk, and v0.1 has no cleanup command (the
+planned restore command will handle it, ADR-0017, v0.3). Before you delete one by hand:
 
-**Cleanup.** After a week of normal use on the restored data, delete the previous folder(s)
-of the last switch. The block refuses if the container serves the folder or one inside it,
-if anything in it changed after the switch, or if its git repository has uncommitted changes
-or commits the new folder's repository doesn't have (commits made after the backup). It
-lists what it found: bring over what you want (see
-[Paths after a restore](#paths-after-a-restore)), or, if you decide it can go, delete the
-folder by hand. To clean up an earlier switch, set `line` to that line of the log instead:
-
-```sh
-line=$(tail -n 1 ~/postelmd-restores.log)
-read -r t port img prev prev_notes x new new_notes <<< "$line"
-live=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
-live_notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)
-echo "switch $t: $prev $prev_notes -> $new $new_notes; served now: $live $live_notes"
-ok=1
-[ -n "$live" ] && [ -e ~/postelmd-switched-$t ] || { echo "CLEANUP REFUSED: no running container, or no stamp for $t" >&2; ok=0; }
-for pair in "$prev $new" "$prev_notes $new_notes"; do
-  read -r old nw <<< "$pair"
-  [ "$ok" = 1 ] && [ "$old" != - ] || continue
-  case "$live/:$live_notes/" in
-    *"$old"/*) echo "CLEANUP REFUSED: the server uses $old, or a folder inside it" >&2; ok=0; continue ;;
-  esac
-  ch=$(find "$old" -newer ~/postelmd-switched-$t -print -quit)
-  [ -z "$ch" ] || { echo "CLEANUP REFUSED: $ch changed after the switch" >&2; ok=0; }
-  for g in "$old" "$old/vaults/notes"; do
-    [ -d "$g/.git" ] || continue
-    ng=$nw${g#"$old"}
-    w=$( git --no-optional-locks -C "$g" status --porcelain
-      { echo --branches; echo --not; echo --remotes; git -C "$ng" for-each-ref --format='%(objectname)' refs/heads; } \
-        | git -C "$g" log --oneline --stdin 2>&1 )
-    [ -z "$w" ] || { printf 'CLEANUP REFUSED: git work in %s that %s lacks:\n%s\n' "$g" "$ng" "$w" >&2; ok=0; }
-  done
-done
-if [ "$ok" = 1 ]; then
-  for old in "$prev" "$prev_notes"; do
-    if [ "$old" != - ]; then rm -rf -- "$old" && echo "deleted $old"; fi
-  done
-fi
-```
+- take a backup of the current data;
+- check that it isn't a folder `docker inspect` reports (see
+  [Where your data is](#where-your-data-is));
+- check for anything you wrote there after the switch (a note, a git commit from the host);
+- for its git history, `git -C <new vault> fetch <old vault>` first brings over commits made
+  after the backup, which the restored vault doesn't have.
 
 ### Paths after a restore
 
@@ -412,22 +278,9 @@ so they follow it. Anything else that points at the old path must be pointed at 
   `notes-restored-…` folder, with an adopted folder);
 - a git clone of the vault elsewhere: `git remote set-url origin <new vault path>`.
 
-The restored vault's `.git` came with the backup, so git works at the new path, but it sits
-at the backup's commit. Commits made after the backup exist only in the old folder (or a
-remote you pushed to), and the cleanup refuses to delete them. To bring them over, fetch
-them from the old vault into the new one (the block takes both from the log's last line)
-and merge what you want:
-
-```sh
-read -r t port img prev prev_notes x new new_notes <<< "$(tail -n 1 ~/postelmd-restores.log)"
-if [ "$prev_notes" = - ]; then old_vault=$prev/vaults/notes vault=$new/vaults/notes
-else old_vault=$prev_notes vault=$new_notes; fi
-git -C "$vault" fetch "$old_vault" 'refs/heads/*:refs/remotes/before-restore/*'
-git -C "$vault" log --oneline --remotes=before-restore --not HEAD
-```
-
-Then `git -C "$vault" merge before-restore/<branch>` for the commits you want, and copy any
-uncommitted notes from the old folder by hand.
+The restored vault's `.git` came with the backup, so git works at the new path, at the
+backup's commit. Commits made after the backup are only in the old folder (or a remote you
+pushed to).
 ## Logs
 
 The logs are JSON lines on the container's stdout. Docker deletes them with the container, so
