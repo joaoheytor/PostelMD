@@ -116,10 +116,13 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The runbook's restore never moves, marks or deletes the folder the server uses: it
   extracts the backup into a new folder, can check it on a second port, and points the
   container at it, so a failed or interrupted extraction leaves the server running and a
-  rollback is one `docker run` on the untouched previous folder. Backups, upgrades and the
-  cleanup of an old folder take the live folder from `docker inspect`; the cleanup refuses
-  the folder the container serves. Backups get a timestamped name, are read back, and print
-  their size. Every log export is timestamped, and the runbook's commands have no trailing
+  rollback is one `docker run` on the untouched previous folder. Every switch is recorded in
+  `~/postelmd-restores.log`; the rollback and the cleanup read it, and refuse when the
+  server doesn't serve the folder it names. The cleanup also refuses a folder changed after
+  the switch, or holding git work the restored folder lacks. The runbook takes the data
+  folder, the `-p` address and the image from the running container (`docker inspect`), so
+  its commands work in a new terminal and after a restore. Backups get a timestamped name,
+  are read back, and print their size. Every log export is timestamped, and the runbook's commands have no trailing
   comments, which zsh would take as arguments.
 - A note closed while its edits couldn't be saved, then opened again in the same tab, now
   offers those edits as a draft to restore or compare, as it does after a reload. Typing in
