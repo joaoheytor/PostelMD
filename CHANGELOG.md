@@ -99,7 +99,7 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   import, and listed as such, instead of having their files committed as notes. Commits no
   longer fail with a "file/directory conflict" when the repository already records one.
 - Adopting a notes folder that already has a `.postelmd-tmp` or `.postelmd-trash` folder of
-  its own now stops at the first start with the folder to rename, instead of deleting the
+  its own now stops at the first start and says how to fix it, instead of deleting the
   files in `.postelmd-tmp`. PostelMD marks the folders it makes with
   `.postelmd-tmp/.created-by-postelmd`. **If you ran a `:main` build** and have deleted
   notes in the trash, the first start of this version stops once: run
