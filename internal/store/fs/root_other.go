@@ -30,6 +30,12 @@ func (r *Root) RenameNoReplace(string, string) error { return errors.ErrUnsuppor
 // CreateFile is unsupported on this platform.
 func (r *Root) CreateFile(string, []byte, uint32) error { return errors.ErrUnsupported }
 
+// CreateFileMode is unsupported on this platform.
+func (r *Root) CreateFileMode(string, []byte, uint32) error { return errors.ErrUnsupported }
+
+// Perm is unsupported on this platform.
+func (r *Root) Perm(string) (uint32, error) { return 0, errors.ErrUnsupported }
+
 // Rename is unsupported on this platform.
 func (r *Root) Rename(string, string) error { return errors.ErrUnsupported }
 

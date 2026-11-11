@@ -38,7 +38,7 @@ docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
   --log-opt max-size=10m --log-opt max-file=3 \
   -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data \
   ghcr.io/joaoheytor/postelmd:main
-docker logs postelmd   # prints a one-time setup token
+docker logs postelmd
 ```
 
 Open http://localhost:8080/setup (the log prints this address; with another `-p` host port,

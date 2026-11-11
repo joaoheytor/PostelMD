@@ -5,13 +5,16 @@ WSL2. It covers backups, logs, upgrades and the things that can go wrong. Every 
 assumes the README's setup: the container is called `postelmd`, its data directory is
 `~/postelmd` on the host, and it runs as your user (`--user "$(id -u):$(id -g)"`).
 
-Set `IMAGE` once to the image you run, and use it below:
+Set `IMAGE` once to the image you run, and use it below. Until the first release candidate,
+that is the candidate from `main` (signed, not for production):
 
 ```sh
-IMAGE=ghcr.io/joaoheytor/postelmd:main      # candidate from main (signed, not for production)
-# IMAGE=ghcr.io/joaoheytor/postelmd:0.1.0-rc.1   # a release candidate, once published
-# IMAGE=docker.io/joaoheytor/postelmd:0.1        # after the v0.1.0 release
+IMAGE=ghcr.io/joaoheytor/postelmd:main
 ```
+
+A release candidate, once published, is `ghcr.io/joaoheytor/postelmd:0.1.0-rc.1`; after the
+v0.1.0 release, use `docker.io/joaoheytor/postelmd:0.1`. (The blocks in this runbook have no
+trailing comments: zsh, by default, would take them as arguments.)
 
 `:main` moves with every merge. Note the digest of the image the container runs, so you can
 go back to it:
@@ -21,8 +24,11 @@ docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Imag
 ```
 
 This asks the running container, not `$IMAGE`: after a `docker pull`, or when `$IMAGE` names
-a tag you haven't pulled yet, `$IMAGE` is not what runs. (An image you built yourself has no
-registry digest, and the command fails.) How to verify an image's signature:
+a tag you haven't pulled yet, `$IMAGE` is not what runs. For an image you built yourself, the
+result depends on Docker's image store: it may print a `postelmd@sha256:…` that no registry
+holds (it works only while that image stays on this machine), or fail with `index out of
+range` because there is no digest. Either way, keep a tag to go back to instead:
+`docker tag postelmd:dev postelmd:before-upgrade`. How to verify an image's signature:
 [verify-images](verify-images.md).
 
 ## What to back up
@@ -50,17 +56,18 @@ The simplest consistent copy stops the server for a few seconds:
 ```sh
 docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . \
   || echo "BACKUP FAILED" >&2
-docker start postelmd                # always, even when the backup failed
-docker ps --filter name=postelmd     # STATUS must say "Up"
+docker start postelmd
+docker ps --filter name=postelmd
 ```
 
-With an adopted folder mounted at `/data/vaults/notes`, copy it in the same stop:
+Run the `docker start` always, even when the backup failed, and check that `docker ps` says
+"Up" under STATUS. With an adopted folder mounted at `/data/vaults/notes`, copy it in the same stop:
 
 ```sh
 docker stop postelmd && tar -C ~/postelmd -cpf ~/postelmd-backup-$(date +%F).tar . \
   && tar -C ~/notes -cpf ~/notes-backup-$(date +%F).tar . || echo "BACKUP FAILED" >&2
-docker start postelmd                # always, even when the backup failed
-docker ps --filter name=postelmd     # STATUS must say "Up"
+docker start postelmd
+docker ps --filter name=postelmd
 ```
 
 `docker start` is a separate command on purpose: chained after `tar` with `&&`, a failed
@@ -71,10 +78,11 @@ so a short stop loses nothing.
 
 **On WSL2, copy the backup off the WSL disk.** Your WSL home lives in one virtual disk file;
 a backup next to the data is lost with it. A tar file is safe on the Windows side (only the
-live data must stay on the Linux filesystem):
+live data must stay on the Linux filesystem). Any Windows folder works; better, one that is
+itself backed up:
 
 ```sh
-mkdir -p /mnt/c/postelmd-backups      # any Windows folder; better, one that is backed up
+mkdir -p /mnt/c/postelmd-backups
 cp ~/postelmd-backup-$(date +%F).tar /mnt/c/postelmd-backups/
 ```
 
@@ -84,15 +92,16 @@ is usually fine for the notes, but stop the container first if you want a guaran
 consistent `.git`.
 
 **A named volume** (Docker Desktop on macOS, or `-v postelmd-data:/data`) isn't a folder you
-can tar from the host, and the image has no shell. Use a helper container:
+can tar from the host, and the image has no shell. Use a helper container (it runs as root,
+hence the `chown`), and start the server again even when the copy failed:
 
 ```sh
 docker stop postelmd
 docker run --rm -v postelmd-data:/data:ro -v "$HOME:/backup" busybox:1.37 \
   tar -C /data -cpf "/backup/postelmd-backup-$(date +%F).tar" .
-docker start postelmd                # always, even when the backup failed
-docker ps --filter name=postelmd     # STATUS must say "Up"
-sudo chown "$(id -u):$(id -g)" ~/postelmd-backup-$(date +%F).tar   # busybox ran as root
+docker start postelmd
+docker ps --filter name=postelmd
+sudo chown "$(id -u):$(id -g)" ~/postelmd-backup-$(date +%F).tar
 ```
 
 ## Restore drill
@@ -129,53 +138,198 @@ A real restore keeps the current data aside instead of deleting it (`rm -rf ~/po
 would also miss `.postelmd`), and **recreates the container**. Never `docker start` the old
 container after moving its folder: Docker Desktop keeps the bind mount on the folder it
 first mounted, so the container would serve `~/postelmd.old`, and new saves would land
-there.
+there. The restore moves the current data to `~/postelmd.old` (and `~/notes.old`), and a
+rollback moves it back.
 
-1. **Leave a marker.** In the web app, create a note named `restore-check`. It is newer than
-   the backup, so the restored instance must not have it.
-2. **Restore**, with exactly the `docker run` flags you started with (the README's, as in
-   [Upgrade and rollback](#upgrade-and-rollback)):
+**Never delete a `.old` folder that holds a `restore-check` marker** until step 4 says so: it
+may be your only current copy.
 
-   ```sh
-   docker stop postelmd
-   docker logs postelmd > ~/postelmd-logs-$(date +%F).jsonl 2>&1
-   docker rm postelmd
-   mv ~/postelmd ~/postelmd.old && mkdir ~/postelmd \
-     && tar -C ~/postelmd -xpf ~/postelmd-backup-YYYY-MM-DD.tar
-   docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
-     --log-opt max-size=10m --log-opt max-file=3 \
-     -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data "$IMAGE"
-   ```
-
-   With an adopted folder, move it aside and restore it too, before the `docker run`, and add
-   its mount back:
+1. **Leave a marker** in every folder the restore replaces: a fresh token, also kept in
+   `~/restore-check.token`, outside the data folders. A folder is your current data only if
+   its marker matches that token. Restored data never matches, even when the backup holds a
+   marker from an earlier attempt. Step 3 checks the marker in the web app (the note
+   `restore-check.md`), and the rollback uses it to tell the two folders apart. Running
+   step 1 again writes a new token, which is fine, but it refuses while a `.old` folder
+   exists. **README setup:**
 
    ```sh
-   mv ~/notes ~/notes.old && mkdir ~/notes \
-     && tar -C ~/notes -xpf ~/notes-backup-YYYY-MM-DD.tar
-   docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
-     --log-opt max-size=10m --log-opt max-file=3 \
-     -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" \
-     -v ~/postelmd:/data -v ~/notes:/data/vaults/notes "$IMAGE"
+   if [ -e ~/postelmd.old ]; then
+     echo "STOP: ~/postelmd.old exists. If it holds restore-check, it is your current data: roll back (step 3)." >&2
+   else
+     date +%s%N > ~/restore-check.token \
+       && cp ~/restore-check.token ~/postelmd/vaults/notes/restore-check.md
+   fi
    ```
 
+   **Adopted notes folder**, instead of the block above:
+
+   ```sh
+   if [ -e ~/postelmd.old ] || [ -e ~/notes.old ]; then
+     echo "STOP: ~/postelmd.old or ~/notes.old exists. If it holds restore-check, it is your current data: roll back (step 3)." >&2
+   else
+     date +%s%N > ~/restore-check.token \
+       && cp ~/restore-check.token ~/postelmd/restore-check \
+       && cp ~/restore-check.token ~/notes/restore-check.md
+   fi
+   ```
+
+   The adopted setup's `~/postelmd/restore-check` has no `.md` on purpose: PostelMD refuses
+   to start with a Markdown file directly in its data directory.
+
+   Also write down two or three notes you know the backup has.
+2. **Restore.** Run **one** of the two blocks below, the one for your setup. Each first checks
+   that no `.old` folder exists and that step 1's markers are in place, without touching
+   anything if not. Then it stops and removes the container, moves the current data aside,
+   extracts the backup, and starts a new container with exactly the flags you started with.
+   Every command runs only if the one before it succeeded.
+
+   **README setup** (everything in `~/postelmd`):
+
+   ```sh
+   if [ -e ~/postelmd.old ]; then
+     echo "STOP: ~/postelmd.old exists. If it holds restore-check, it is your current data: roll back (step 3)." >&2
+   elif ! cmp -s ~/restore-check.token ~/postelmd/vaults/notes/restore-check.md; then
+     echo "STOP: ~/postelmd has no marker matching ~/restore-check.token: do step 1 first." >&2
+   else
+     docker stop postelmd \
+       && docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1 \
+       && docker rm postelmd \
+       && mv -T ~/postelmd ~/postelmd.old && mkdir ~/postelmd \
+       && tar -C ~/postelmd -xpf ~/postelmd-backup-YYYY-MM-DD.tar \
+       && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+         --log-opt max-size=10m --log-opt max-file=3 \
+         -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data "$IMAGE" \
+       || echo "RESTORE FAILED: no new container was started. Roll back (step 3)." >&2
+   fi
+   ```
+
+   **Adopted notes folder** (`-v ~/notes:/data/vaults/notes`), instead of the block above:
+
+   ```sh
+   if [ -e ~/postelmd.old ] || [ -e ~/notes.old ]; then
+     echo "STOP: ~/postelmd.old or ~/notes.old exists. If it holds restore-check, it is your current data: roll back (step 3)." >&2
+   elif ! cmp -s ~/restore-check.token ~/postelmd/restore-check \
+     || ! cmp -s ~/restore-check.token ~/notes/restore-check.md; then
+     echo "STOP: ~/postelmd or ~/notes has no marker matching ~/restore-check.token: do step 1 first." >&2
+   else
+     docker stop postelmd \
+       && docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1 \
+       && docker rm postelmd \
+       && mv -T ~/postelmd ~/postelmd.old && mkdir ~/postelmd \
+       && tar -C ~/postelmd -xpf ~/postelmd-backup-YYYY-MM-DD.tar \
+       && mv -T ~/notes ~/notes.old && mkdir ~/notes \
+       && tar -C ~/notes -xpf ~/notes-backup-YYYY-MM-DD.tar \
+       && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+         --log-opt max-size=10m --log-opt max-file=3 \
+         -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" \
+         -v ~/postelmd:/data -v ~/notes:/data/vaults/notes "$IMAGE" \
+       || echo "RESTORE FAILED: no new container was started. Roll back (step 3)." >&2
+   fi
+   ```
+
+   On success it prints the new container's ID. After `RESTORE FAILED` (a wrong backup name
+   gives `tar: …: Cannot open`), the server is down: roll back (step 3) before you try again.
+   A `STOP` changed nothing. A `.old` folder whose `restore-check` matches
+   `~/restore-check.token` (`cmp ~/restore-check.token ~/postelmd.old/vaults/notes/restore-check.md`,
+   or `~/postelmd.old/restore-check` and `~/notes.old/restore-check.md` for an adopted folder)
+   is your current data: roll back. One that doesn't match is left from an earlier restore:
+   move it to a name without `.old` (`mv -T ~/postelmd.old ~/postelmd-before-YYYY-MM-DD`),
+   look inside, and delete it only when you're sure you don't need it.
 3. **Check** in the web app (log in again if asked, with the password you had when the
-   backup was taken): `restore-check` is gone, and the notes
-   you expect from the backup are there. If `restore-check` is still listed, the container
-   is serving the old folder: stop here, and don't delete anything.
-4. Only after that check, and only with the recreated container running, delete
-   `~/postelmd.old` (and `~/notes.old`).
+   backup was taken): the note `restore-check.md` must be gone, or hold a different number
+   than `cat ~/restore-check.token` prints (a backup taken after an earlier attempt holds an
+   old marker), **and** the notes you wrote down must be there. If either is wrong, or step 2
+   failed, **roll back** with the block for your setup.
+
+   The rollback checks the markers before it touches the container. A folder whose marker
+   matches the token is your current data and stays where it is. Otherwise its `.old` must
+   match, or the whole block stops without changing anything (so it never takes the server
+   down after a successful restore). The data it replaces is kept as `*.failed-<time>`. When
+   nothing needs to move, it only makes sure the server runs. After a failed step 2 there is
+   no container, so `docker stop` and `docker rm` say `No such container`.
+
+   **README setup:**
+
+   ```sh
+   tok=~/restore-check.token ok=1 move=0
+   for p in "$HOME/postelmd:vaults/notes/restore-check.md"; do
+     d=${p%%:*} f=${p#*:}
+     if cmp -s "$tok" "$d/$f"; then
+       echo "$d has the marker: it is your current data, left in place"
+     elif cmp -s "$tok" "$d.old/$f"; then
+       move=1
+     else
+       echo "STOP: neither $d nor $d.old has the marker in $tok" >&2; ok=0
+     fi
+   done
+   if [ "$ok" = 1 ] && [ "$move" = 1 ]; then
+     docker stop postelmd
+     docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1
+     docker rm postelmd
+     ! docker inspect postelmd >/dev/null 2>&1 || { echo "STOP: the container still exists" >&2; ok=0; }
+     for p in "$HOME/postelmd:vaults/notes/restore-check.md"; do
+       d=${p%%:*} f=${p#*:}
+       if [ "$ok" = 1 ] && cmp -s "$tok" "$d.old/$f"; then
+         { [ ! -e "$d" ] || mv -T "$d" "$d.failed-$(date +%F-%H%M%S)"; } && mv -T "$d.old" "$d" || ok=0
+       fi
+     done
+   fi
+   [ "$ok" = 1 ] && { docker start postelmd 2>/dev/null || docker run -d --name postelmd \
+     --restart unless-stopped --stop-timeout 60 --log-opt max-size=10m --log-opt max-file=3 \
+     -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data "$IMAGE"; } \
+     || echo "ROLLBACK STOPPED: see the messages above" >&2
+   ```
+
+   **Adopted notes folder**, instead of the block above:
+
+   ```sh
+   tok=~/restore-check.token ok=1 move=0
+   for p in "$HOME/postelmd:restore-check" "$HOME/notes:restore-check.md"; do
+     d=${p%%:*} f=${p#*:}
+     if cmp -s "$tok" "$d/$f"; then
+       echo "$d has the marker: it is your current data, left in place"
+     elif cmp -s "$tok" "$d.old/$f"; then
+       move=1
+     else
+       echo "STOP: neither $d nor $d.old has the marker in $tok" >&2; ok=0
+     fi
+   done
+   if [ "$ok" = 1 ] && [ "$move" = 1 ]; then
+     docker stop postelmd
+     docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1
+     docker rm postelmd
+     ! docker inspect postelmd >/dev/null 2>&1 || { echo "STOP: the container still exists" >&2; ok=0; }
+     for p in "$HOME/postelmd:restore-check" "$HOME/notes:restore-check.md"; do
+       d=${p%%:*} f=${p#*:}
+       if [ "$ok" = 1 ] && cmp -s "$tok" "$d.old/$f"; then
+         { [ ! -e "$d" ] || mv -T "$d" "$d.failed-$(date +%F-%H%M%S)"; } && mv -T "$d.old" "$d" || ok=0
+       fi
+     done
+   fi
+   [ "$ok" = 1 ] && { docker start postelmd 2>/dev/null || docker run -d --name postelmd \
+     --restart unless-stopped --stop-timeout 60 --log-opt max-size=10m --log-opt max-file=3 \
+     -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" \
+     -v ~/postelmd:/data -v ~/notes:/data/vaults/notes "$IMAGE"; } \
+     || echo "ROLLBACK STOPPED: see the messages above" >&2
+   ```
+
+   The note `restore-check.md` is listed again, with the token's number. Delete the
+   `*.failed-*` folders once you know why the restore failed.
+4. Only after the check passes, and only with the recreated container running, delete
+   `~/postelmd.old` (and `~/notes.old`), and the note `restore-check.md` if the restored
+   data has one.
 
 ## Logs
 
 The logs are JSON lines on the container's stdout. Docker deletes them with the container, so
-**export them before every `docker rm`**. Docker's default `json-file` log driver never
-rotates, so the README's `docker run` caps them with `--log-opt max-size=10m --log-opt
-max-file=3`: Docker keeps the last 30 MB or so, and drops older lines. Export them more often
-than that fills up if you want the whole four weeks:
+**export them before every `docker rm`**. Docker's default log driver may not rotate; the
+README's `docker run` caps it with `--log-opt max-size=10m --log-opt max-file=3`: Docker
+keeps the last 30 MB or so, and drops older lines. Export them more often
+than that fills up if you want the whole four weeks. The time in the name keeps a second
+export on the same day from replacing the first:
 
 ```sh
-docker logs postelmd > ~/postelmd-logs-$(date +%F).jsonl 2>&1
+docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1
 ```
 
 Every write to the API (PUT, POST, DELETE, PATCH under `/api/v1/`) leaves one line: the
@@ -196,10 +350,10 @@ four-week test (ADR-0020's success criteria):
   loaded it, and the conflict view opened. It's a failure only if you couldn't resolve it or
   lost text. The log has no paths, so check each 412 against your memory of the day.
 
-Count them (the setup lines aren't JSON, hence `fromjson?`):
+Count them in the newest export (the setup lines aren't JSON, hence `fromjson?`):
 
 ```sh
-f=~/postelmd-logs-$(date +%F).jsonl
+f=$(ls -t ~/postelmd-logs-*.jsonl | head -n 1)
 jq -cR 'fromjson? | select(.msg == "request" and .status >= 500 and .status != 503)' "$f"
 jq -cR 'fromjson? | select(.msg == "request" and .status == 412)' "$f" | wc -l
 ```
@@ -208,9 +362,12 @@ A 503 with `Retry-After` (the vault was busy) is retried by the browser and isn'
 
 ## Health
 
+The first command prints `healthy`, `starting` or `unhealthy`; restarts show in the second's
+STATUS:
+
 ```sh
-docker inspect -f '{{.State.Health.Status}}' postelmd   # healthy, starting or unhealthy
-docker ps --filter name=postelmd                         # restarts show in STATUS
+docker inspect -f '{{.State.Health.Status}}' postelmd
+docker ps --filter name=postelmd
 ```
 
 ## Reaching it by a host name
@@ -224,14 +381,41 @@ see v0.2's trusted-proxy setting.
 
 ## Upgrade and rollback
 
-v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`.
+v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`. The data's format
+is recorded in `~/postelmd/.postelmd/format` (v0.1 writes `1` at its first start; ADR-0025).
+A later release that changes the format raises that number, and an older build then refuses
+to start with `this data was written by a newer PostelMD (format N); run that version or
+newer`, before it changes anything. So a **rollback across a format change** means restoring
+the backup you took before the upgrade, not only the older image; within the same format,
+the digest swap below is enough. Never edit `format` to get past the check.
+
+If PostelMD says `format` is **damaged** (anything but a number on one line), back up
+`~/postelmd` first. If only v0.1 ever used it, delete `~/postelmd/.postelmd/format` and start
+again: the next start writes `1`. Otherwise restore the backup you took before the last
+upgrade.
+
+If PostelMD stops with **`.postelmd-trash` (or `.postelmd-tmp`) in your notes folder isn't
+empty**, it found its own folders without its marker file. That happens after upgrading
+from a build before 0.1.0-rc.1, after deleting `.postelmd-tmp` by hand, or after
+`git clean -X` in the notes folder. If PostelMD made those folders, run this in the notes
+folder (`~/postelmd/vaults/notes`, or your own notes folder if you mounted one) and start
+again:
 
 ```sh
-# note the digest the container runs now (not $IMAGE's: that is the new one)
+mkdir -p .postelmd-tmp && touch .postelmd-tmp/.created-by-postelmd
+```
+
+Don't rename PostelMD's own `.postelmd-trash`: the deleted notes in it would become ordinary
+notes, shown and committed. Rename a folder only if it's really yours (ADR-0027).
+
+To upgrade, run the block below. Its first command notes the digest the container runs now
+(not `$IMAGE`'s: that is the new one), and `docker stop` waits up to 60 s for saves:
+
+```sh
 docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Image}}' postelmd)"
 docker pull "$IMAGE"
-docker stop postelmd                                          # waits up to 60 s for saves
-docker logs postelmd > ~/postelmd-logs-$(date +%F).jsonl 2>&1
+docker stop postelmd
+docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1
 docker rm postelmd
 docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
   --log-opt max-size=10m --log-opt max-file=3 \
@@ -273,10 +457,11 @@ The commit dialog shows this banner when `.git/index.lock` or the branch's ref l
 A crash during a commit can leave one behind; so can a git command you're running on the host
 against `~/postelmd/vaults/notes`. **Remove the lock** is safe only when no git command is
 running there: no open `git commit`, `git rebase` or editor waiting for a commit message, no
-IDE with a git integration polling the folder. Check, then tick the box and remove it:
+IDE with a git integration polling the folder. Check, then tick the box and remove it. If
+this prints nothing for the vault, it's safe:
 
 ```sh
-pgrep -a git    # nothing for the vault: safe
+pgrep -a git
 ```
 
 `pgrep` only sees Linux processes: it can't see a Windows `git.exe` or an IDE working on the

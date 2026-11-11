@@ -32,6 +32,9 @@ func resetPassword(cfg config.Config, stdin *os.File, stdout io.Writer) error {
 		return fmt.Errorf("%w; stop the server first", err)
 	}
 	defer func() { _ = lk.Release() }()
+	if err := layout.EnsureFormat(paths.State); err != nil { // never change a newer build's data
+		return err
+	}
 	pw, err := readPassword(stdin, stdout)
 	if err != nil {
 		return err
