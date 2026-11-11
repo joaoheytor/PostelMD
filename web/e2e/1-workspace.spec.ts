@@ -51,7 +51,7 @@ test("create a note, edit it, and the edit is on disk after a reload", async ({ 
   await expect(text).toBeVisible();
   await text.press("ControlOrMeta+End");
   await text.pressSequentially("Saved by the browser.");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
   expect(readFileSync(join(env("PM_E2E_VAULT"), "hello.md"), "utf8")).toContain("Saved by the browser.");
 
   await page.reload();
@@ -74,7 +74,7 @@ test("an edit made outside the editor is a conflict, not an overwrite", async ({
   expect(readFileSync(file, "utf8")).toBe("# Changed on disk\n");
 
   await page.getByRole("button", { name: "Keep my version" }).click();
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
   expect(readFileSync(file, "utf8")).toContain("and in the browser");
 });
 
@@ -115,11 +115,12 @@ test("a move never overwrites an existing note", async ({ page }) => {
 
 test("move a folder; its open note follows it", async ({ page }) => {
   await login(page);
-  await page.getByRole("button", { name: "archive" }).click();
+  const archive = page.getByRole("button", { name: /^\S archive$/ }); // the tree's, after its ▸ or ▾ marker
+  await archive.click();
   await page.getByRole("button", { name: "runbook.md" }).click();
   await expect(page.getByRole("textbox", { name: "Text of archive/runbook.md" })).toBeVisible();
 
-  await page.getByRole("button", { name: "archive" }).click(); // selects it (and collapses it)
+  await archive.click(); // selects it (and collapses it)
   await page.getByRole("button", { name: "Rename or move folder" }).click();
   await page.getByLabel("New path for archive").fill("ops");
   await page.getByRole("button", { name: "Move", exact: true }).click();
@@ -172,7 +173,7 @@ test("see what changed since an older version, and restore it", async ({ page })
   const text = page.getByRole("textbox", { name: "Text of ops/runbook.md" });
   await text.press("ControlOrMeta+End");
   await text.pressSequentially(" (v2)");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
 
   await page.getByRole("button", { name: "Commit…" }).click();
   const commit = page.getByRole("dialog", { name: "Commit changes" });

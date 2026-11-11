@@ -276,3 +276,10 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   to start against a newer schema" is applied to `/data` as a whole by a format number in
   `/data/.postelmd/format`, checked under the instance lock at every start: see
   [ADR-0025](0025-data-format-version.md).
+- **2026-11-11, `@codemirror/lang-html` is a direct dependency** (#117), under the existing
+  CodeMirror 6 (`@codemirror/*`) row. The editor configures the HTML that Markdown embeds
+  with it, so that it highlights raw HTML but turns off tag auto-close and HTML indentation
+  on Enter: those turned a typed `<details>` body into an indented code block. It was
+  already in the lockfile as a dependency of `@codemirror/lang-markdown`, and becoming
+  direct didn't change its version (6.4.12) or its integrity hash; the lockfile only gains
+  the line in `package.json`'s dependencies.

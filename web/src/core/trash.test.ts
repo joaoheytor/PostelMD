@@ -57,6 +57,20 @@ describe("Trash", () => {
     expect(d.reveal).toHaveBeenCalledWith("ops/runbook.md");
   });
 
+  it("refuses a note restored under a name starting with a dot, as New note and Rename do", async () => {
+    const d = deps();
+    const restore = vi.spyOn(d, "restore");
+    const t = new Trash(d);
+    await t.load();
+    expect(await t.restore(note, ".hidden")).toBeUndefined();
+    expect(restore).not.toHaveBeenCalled();
+    expect(t.state.value.error).toMatch(/^Couldn't restore runbook\.md: A note name can't start with a dot/);
+    expect(t.state.value.items).toHaveLength(2);
+    // A dot folder is fine, and so is a folder restored as a dot name: only note names count.
+    expect(await t.restore(note, ".github/pr-checklist")).toBe(".github/pr-checklist.md");
+    expect(await t.restore(folder, ".config")).toBe(".config");
+  });
+
   it("explains a name clash plainly and keeps the item", async () => {
     const d = deps();
     vi.spyOn(d, "restore").mockRejectedValueOnce(new ApiError(409, "something with that name is already there; choose another name"));

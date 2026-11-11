@@ -1,4 +1,5 @@
 import { type Disposable, DisposableStore, toDisposable } from "../core/disposable";
+import { batchHTML, intact, keyAttr, newKey } from "./blocks";
 import { type Diagram, diagramClass, Diagrams } from "./diagrams";
 import type { Block } from "./render";
 import { assetWorker, sanitized } from "./sanitize";
@@ -23,6 +24,28 @@ function yieldNow(): Promise<void> {
 }
 
 /**
+ * A re-rendered block keeps its <details> open as the reader left them, matched by their
+ * summary text and occurrence: editing inside an open one must not close it on every
+ * keystroke, and a new one must not take another's state.
+ */
+function keepOpen(old: Element, next: DocumentFragment): void {
+  const keys = (all: Iterable<HTMLDetailsElement>) => {
+    const seen = new Map<string, number>();
+    return [...all].map((d) => {
+      const summary = d.querySelector(":scope > summary")?.textContent?.trim() ?? "";
+      const n = seen.get(summary) ?? 0;
+      seen.set(summary, n + 1);
+      return { d, key: `${n}\u0000${summary}` };
+    });
+  };
+  const was = new Map(keys(old.querySelectorAll("details")).map(({ d, key }) => [key, d.open]));
+  for (const { d, key } of keys(next.querySelectorAll("details"))) {
+    const open = was.get(key);
+    if (open !== undefined) d.open = open;
+  }
+}
+
+/**
  * The live preview of one note, rendered into el (ADR-0007): markdown-it in a Worker, then
  * DOMPurify inside the Trusted Types policy. The first render is batched and yields; after
  * that only the blocks whose HTML changed are sanitized and replaced. Code blocks get a copy
@@ -41,6 +64,8 @@ export class Preview implements Disposable {
   private diagrams: Diagrams | undefined;
   /** The copy buttons' "Copied" timers. */
   private readonly flashes = new DisposableStore();
+  /** Numbers this preview's block wrappers, so a note can't forge one (blocks.ts). */
+  private readonly key = newKey();
 
   /** onRender runs after each render, which can move the blocks (scroll sync follows). */
   constructor(
@@ -154,6 +179,7 @@ export class Preview implements Disposable {
       return;
     }
     const kids = this.el.children;
+    const before = this.lookup();
     r.blocks.forEach((b, i) => {
       const el = kids[i];
       if (el && this.source.get(el) === b.html) {
@@ -161,6 +187,8 @@ export class Preview implements Disposable {
         return;
       }
       const next = this.render([b]);
+      const was = before.bySource.get(b.html)?.shift() ?? before.byLine.get(String(b.line));
+      if (was) keepOpen(was, next);
       if (el) el.replaceWith(next);
       else this.el.append(next);
     });
@@ -168,11 +196,26 @@ export class Preview implements Disposable {
   }
 
   /**
+   * The blocks on screen before a patch, by source HTML (a block that only moved, e.g. under
+   * a new paragraph) and by first line (the block being edited), to carry <details> state.
+   */
+  private lookup(): { bySource: Map<string, Element[]>; byLine: Map<string, Element> } {
+    const bySource = new Map<string, Element[]>();
+    const byLine = new Map<string, Element>();
+    for (const el of this.el.children) {
+      const src = this.source.get(el) ?? "";
+      bySource.set(src, [...(bySource.get(src) ?? []), el]);
+      byLine.set(el.getAttribute("data-line") ?? "", el);
+    }
+    return { bySource, byLine };
+  }
+
+  /**
    * Sanitizes blocks into elements, remembering each one's source HTML. Copy buttons are
    * added after sanitizing, with DOM calls: the sanitizer allows no buttons in a note.
    */
   private render(blocks: Block[]): DocumentFragment {
-    const frag = sanitized(blocks.map((b) => `<div class="pm-block" data-line="${b.line}">${b.html}</div>`).join(""));
+    const frag = this.wrapped(blocks);
     [...frag.children].forEach((el, i) => this.source.set(el, blocks[i]?.html ?? ""));
     for (const code of frag.querySelectorAll("pre > code.language-mermaid")) {
       if (code.parentElement) void this.diagram(code.parentElement, code.textContent ?? "");
@@ -185,5 +228,27 @@ export class Preview implements Disposable {
       pre.append(button);
     }
     return frag;
+  }
+
+  /**
+   * Sanitizes blocks into one wrapper each. One call for the whole batch (ADR-0007), unless
+   * a block's HTML broke the wrappers (blocks.ts): then each block alone, in a wrapper made
+   * with DOM calls, where no tag in it can reach outside its own.
+   */
+  private wrapped(blocks: Block[]): DocumentFragment {
+    const frag = sanitized(batchHTML(blocks, this.key));
+    if (intact(frag.childNodes, blocks, this.key)) {
+      for (const el of frag.children) el.removeAttribute(keyAttr);
+      return frag;
+    }
+    const out = document.createDocumentFragment();
+    for (const b of blocks) {
+      const div = document.createElement("div");
+      div.className = "pm-block";
+      div.dataset["line"] = String(b.line);
+      div.append(sanitized(b.html));
+      out.append(div);
+    }
+    return out;
   }
 }

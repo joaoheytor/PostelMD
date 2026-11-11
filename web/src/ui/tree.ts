@@ -1,5 +1,6 @@
 import { html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
+import { nameProblem, noteFile } from "../core/names";
 import type { Template } from "../core/templates";
 import { isNote, join, parent } from "../core/tree";
 import type { Workspace } from "../core/workspace";
@@ -21,6 +22,8 @@ export class FileTree extends LightElement {
     moving: { state: true },
     folder: { state: true },
     template: { state: true },
+    problem: { state: true },
+    done: { state: true },
   };
   declare workspace: Workspace;
   declare creating: Creating;
@@ -30,6 +33,10 @@ export class FileTree extends LightElement {
   declare folder: string;
   /** The new-note form's chosen template; undefined for a blank note. */
   declare template: Template | undefined;
+  /** Why the typed note name can't be used, shown in the form. */
+  declare problem: string | undefined;
+  /** What the last delete did, for the status region (empty until one completes). */
+  declare done: string;
 
   private readonly tree = new StoreController(this, () => this.workspace?.tree.state);
   private readonly ws = new StoreController(this, () => this.workspace?.state);
@@ -42,6 +49,7 @@ export class FileTree extends LightElement {
     super();
     this.folder = "";
     this.moving = false;
+    this.done = "";
   }
 
   /** Selects folder and focuses its entry (the Vault button for the root), e.g. after a delete. */
@@ -64,18 +72,25 @@ export class FileTree extends LightElement {
 
   private start(what: "note" | "folder" | "move", e: Event): void {
     this.opener = e.currentTarget as Element;
+    this.done = ""; // the last delete's status is old news once the tree is used again
     if (what === "move") this.moving = true;
     else this.creating = what;
   }
 
   private async open(path: string): Promise<void> {
-    this.folder = parent(path);
+    this.select(parent(path));
     await openNote(this.workspace, path);
   }
 
   private async toggle(path: string): Promise<void> {
-    this.folder = path;
+    this.select(path);
     await this.workspace.tree.toggle(path);
+  }
+
+  /** The user picks a folder (or a note in it): the last delete's status is cleared. */
+  private select(folder: string): void {
+    this.folder = folder;
+    this.done = "";
   }
 
   private async create(e: SubmitEvent): Promise<void> {
@@ -86,8 +101,14 @@ export class FileTree extends LightElement {
     const form = e.target as HTMLFormElement;
     const template = chosen(form);
     if (this.creating === "note") {
-      await this.workspace.createNote(this.folder, name, template && { template, values: values(form) });
-      this.creating = this.template = undefined; // the new note's editor has the focus
+      this.problem = nameProblem(noteFile(name));
+      if (!this.problem && (await this.workspace.createNote(this.folder, name, template && { template, values: values(form) }))) {
+        this.creating = this.template = undefined; // the new note's editor has the focus
+        return;
+      }
+      // Not created: the form keeps what was typed, and the name gets the focus to fix it.
+      await this.updateComplete;
+      input?.focus();
       return;
     }
     await this.workspace.createFolder(this.folder, name);
@@ -96,8 +117,27 @@ export class FileTree extends LightElement {
 
   private cancel(): void {
     this.creating = undefined;
-    this.template = undefined;
+    this.template = this.problem = undefined;
     void refocus(this, this.opener);
+  }
+
+  /**
+   * Moves the selected folder and everything in it to the trash, after asking. An open note
+   * inside it is saved first, so the trash holds its latest text. Once it went, the status
+   * says so and the parent folder takes the focus, as after a note's delete; if it didn't,
+   * the error says why and the focus stays.
+   */
+  private async trashFolder(): Promise<void> {
+    const folder = this.folder;
+    this.done = "";
+    if (!confirm(`Move the folder ${folder} and everything in it to the trash? You can restore it from the Trash.`)) return;
+    const open = this.workspace.state.value.open?.doc.path;
+    if (open?.startsWith(`${folder}/`) && !(await this.workspace.saveOpen()) && !confirm(`Some edits to ${open} aren't saved. Delete the folder anyway?`)) {
+      return;
+    }
+    if (!(await this.workspace.trash(folder, "folder"))) return;
+    this.done = `Moved the folder ${folder} to the trash.`;
+    await this.focusFolder(parent(folder));
   }
 
   private entry(folder: string, e: Entry): TemplateResult {
@@ -139,8 +179,10 @@ export class FileTree extends LightElement {
           <button type="button" @click=${(e: Event) => this.start("folder", e)}>New folder</button>
           ${this.folder === ""
             ? nothing
-            : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>`}
+            : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>
+                <button type="button" @click=${() => this.trashFolder()}>Delete folder ${this.folder}</button>`}
         </div>
+        <p class="pm-tree-status" role="status" aria-label="File tree status">${this.done}</p>
         ${this.moving && this.folder !== ""
           ? html`<pm-move
               .workspace=${this.workspace}
@@ -156,8 +198,16 @@ export class FileTree extends LightElement {
         ${this.creating
           ? html`<form class="pm-tree-create" @submit=${this.create}>
               <label>${this.creating === "note" ? "Note" : "Folder"} name in ${where}
-                <input name="name" required @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.cancel()} />
+                <input
+                  name="name"
+                  required
+                  aria-invalid=${this.problem ? "true" : "false"}
+                  aria-describedby=${this.problem ? "pm-tree-name-problem" : nothing}
+                  @input=${() => (this.problem = undefined)}
+                  @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.cancel()}
+                />
               </label>
+              ${this.problem ? html`<p id="pm-tree-name-problem" class="pm-error" role="alert">${this.problem}</p>` : nothing}
               ${this.creating === "note"
                 ? templateFields(this.template, () => (this.template = chosen(this.querySelector("form.pm-tree-create") as HTMLFormElement)))
                 : nothing}
@@ -166,7 +216,7 @@ export class FileTree extends LightElement {
             </form>`
           : nothing}
         ${error ? html`<p class="pm-error" role="alert">${error}</p>` : nothing}
-        <button type="button" class="pm-tree-root" aria-pressed=${this.folder === ""} @click=${() => (this.folder = "")}>Vault</button>
+        <button type="button" class="pm-tree-root" aria-pressed=${this.folder === ""} @click=${() => this.select("")}>Vault</button>
         ${this.list("")}
       </nav>
     `;
