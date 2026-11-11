@@ -145,3 +145,9 @@ A `docker run` smoke test on the release digest, for both architectures:
 | Compose as the minimum | Fails the one-command requirement |
 | Mount the notes folder as `/data` directly | Mixes app state into a vault (ADR-0006) |
 | Auth off on localhost | Port mapping makes "localhost" ambiguous inside a container |
+
+## Clarifications
+- **2026-11-10, log rotation.** The README and the v0.1 runbook
+  ([running-v0.1](../operations/running-v0.1.md)) add `--log-opt max-size=10m --log-opt
+  max-file=3` to the canonical command above: Docker's default log driver may not rotate,
+  and these options cap the container's logs at about 30 MB.

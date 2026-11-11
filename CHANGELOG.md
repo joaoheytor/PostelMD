@@ -95,6 +95,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   landed in the copy the runbook then said to delete. The restore now recreates the container,
   checks that a note made after the backup is gone, and deletes the old folder only after
   that check. Backups now restart the server even when the copy fails.
+- The runbook's restore has one complete block per setup (README or adopted notes folder),
+  so following it in order no longer leaves an empty instance running. It starts the server
+  only if the backup extracted, rolls back when the restored notes are missing, and
+  timestamps every log export so a second one never overwrites the first.
 - A note closed while its edits couldn't be saved, then opened again in the same tab, now
   offers those edits as a draft to restore or compare, as it does after a reload. Typing in
   the reopened note no longer writes over them, and "Unsaved drafts" lists them at once.
