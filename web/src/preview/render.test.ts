@@ -68,21 +68,29 @@ describe("renderBlocks", () => {
     // "<div" then "<a" over and over, no ">" and no blank line: one HTML block that a
     // backtracking tag pattern scans to its end from every "<" (security review of #117).
     const note = (n: number) => `<div\n${"<a".repeat(n)}\n`;
-    const median = (n: number) => {
-      const runs: number[] = [];
-      for (let i = 0; i < 5; i++) {
-        const t0 = performance.now();
-        renderBlocks(note(n));
-        runs.push(performance.now() - t0);
-      }
-      return runs.sort((a, b) => a - b)[2] ?? 0;
+    // One render here takes well under a millisecond, which timer noise and a GC pause can
+    // double (a 4n/n ratio of single runs failed once at 10.1 against 9). So each sample
+    // renders until 5 ms have passed and keeps the time per render.
+    const perRender = (text: string) => {
+      const t0 = performance.now();
+      let runs = 0;
+      do {
+        renderBlocks(text);
+        runs++;
+      } while (performance.now() - t0 < 5);
+      return (performance.now() - t0) / runs;
     };
-    const n = 8_000;
+    const median = (n: number) => {
+      const text = note(n);
+      const samples = Array.from({ length: 7 }, () => perRender(text));
+      return samples.sort((a, b) => a - b)[3] ?? 0;
+    };
+    const n = 4_000;
     median(n); // warm up
     const small = median(n);
-    const large = median(4 * n);
-    // Linear: about 4×; quadratic: about 16×.
-    expect(large / Math.max(small, 0.05)).toBeLessThan(9);
+    const large = median(8 * n);
+    // Linear: about 8×; quadratic: about 64×. The threshold sits well between the two.
+    expect(large / small).toBeLessThan(24);
     expect(large).toBeLessThan(5_000); // a hang guard only
   }, 60_000);
 
