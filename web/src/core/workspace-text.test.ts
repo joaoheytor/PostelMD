@@ -196,6 +196,23 @@ describe("Workspace: files that aren't Markdown", () => {
     expect(ws.state.value.open?.doc.path).toBe("app-recovered.yaml");
   });
 
+  it("a stalled save that landed is recognised by its exact bytes, byte order mark and CRLF included", async () => {
+    await openAndAttach("app.yaml");
+    shown += "c: 3\n";
+    ws.state.value.open?.doc.edit();
+    const sent = `${bomChar}a: 1\r\nb: 2\r\nc: 3\r\n`;
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "unknown" }); // timed out: maybe landed
+    expect(await ws.saveOpen()).toBe(false);
+    expect(ws.state.value.open?.doc.state.value.status).toBe("stalled");
+    // It had landed: the retry over the same base gets a 412 whose body is the bytes sent.
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "conflict", etag: '"e7"', content: sent });
+    expect(await ws.saveOpen()).toBe(true);
+    expect(api.saveNote).toHaveBeenNthCalledWith(1, "app.yaml", sent, '"e1"');
+    expect(api.saveNote).toHaveBeenNthCalledWith(2, "app.yaml", sent, '"e1"');
+    expect(ws.state.value.open?.doc.state.value).toEqual({ status: "clean" }); // no conflict view
+    expect(ws.state.value.open?.doc.etag).toBe('"e7"');
+  });
+
   it("saving the text as a new file keeps its format", async () => {
     await openAndAttach("app.yaml");
     await ws.saveAsNew();

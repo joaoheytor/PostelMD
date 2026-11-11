@@ -19,10 +19,11 @@ export interface DocState {
 export interface DocOptions {
   save: (path: string, content: string, baseETag: string) => Promise<SaveResult>;
   /**
-   * Reads the editor's text, only when a save or a draft starts. Undefined when the editor is
-   * gone: then nothing is saved or drafted, since no other text holds the user's edits.
+   * Reads the editor's text, only when a save or a draft starts. Undefined with no editor: nothing
+   * is saved or drafted, and a save waits for one, unless current() is false: the session disposes.
    */
   read: () => string | undefined;
+  current?: () => boolean;
   debounceMs?: number;
   /** Where unsaved edits are kept until a save lands (ADR-0003 §7). */
   draft?: NoteDrafts;
@@ -157,9 +158,8 @@ export class DocumentSession implements Disposable {
   }
 
   /**
-   * The editor's text is now based on etag (a restored draft's base), not on the last save:
-   * the next save sends If-Match etag, so if the note changed since, the server answers 412
-   * and the user chooses in the conflict view. Call it with no save in flight (after flush).
+   * The editor's text is now based on etag (a restored draft's base), not on the last save: the
+   * next save sends If-Match etag, so a note changed since gets the conflict view. After flush only.
    */
   rebase(etag: string): void {
     this.baseETag = etag;
@@ -224,7 +224,7 @@ export class DocumentSession implements Disposable {
   private async saveOnce(): Promise<void> {
     if (!this.dirty || !this.saveable()) return;
     const content = this.opts.read();
-    if (content === undefined) return this.schedule(this.debounceMs); // no editor yet: try again, until disposed
+    if (content === undefined) return this.opts.current?.() === false ? this.dispose() : this.schedule(this.debounceMs);
     const snap = { content, gen: this.gen, base: this.baseETag };
     // A retry leaves a failure or a stall shown until it lands: it isn't announced again.
     const { status } = this.state.value;

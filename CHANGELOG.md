@@ -203,6 +203,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The preview renders raw HTML that spans Markdown blocks correctly: a `<details>` keeps the
   Markdown inside it collapsible and stays open while you edit inside it, and an unclosed
   `<div>` or a stray `</div>` no longer makes paragraphs show twice or vanish after an edit.
+- A note that failed to open could keep saving in the background and, in rare cases, write
+  another note's text into its file.
+- Opening another note while a move, delete or history restore was in progress could reopen
+  the old note over it.
 
 ### Security
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library

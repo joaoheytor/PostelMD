@@ -21,6 +21,10 @@ export function openFailure(path: string, err: unknown): { error: string; conver
   return { error: `Couldn't open ${path}: ${message(err)}` };
 }
 
+/** A note opened, but this browser's drafts couldn't be read (IndexedDB): its message says nothing to the user. */
+export const draftsUnchecked =
+  "Couldn't check this browser for unsaved drafts of your notes. This note is open and saves as usual; reload the page to check again.";
+
 /** Why a move failed, in words: the server's 404 doesn't say which side is missing. */
 export function moveError(err: unknown, from: string, to: string): string {
   if (!(err instanceof ApiError)) return message(err);
