@@ -153,7 +153,8 @@ export class NoteEditor extends LightElement {
     this.mounted = { note, host };
     this.workspace.reader = () => editor.text();
     this.docSub = note.doc.state.subscribe(() => this.requestUpdate());
-    editor.focus();
+    // A note just created starts with its title: typing goes after it, not before.
+    editor.focus(this.workspace.takeCreated(note.doc.path) ? "end" : undefined);
   }
 
   /** Starts the preview when it is shown (or its element changed), and stops it when hidden. */

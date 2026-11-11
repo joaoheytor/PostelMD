@@ -72,8 +72,17 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   each was deleted, and restores one to the folder and name you choose (the vault root by
   default). A restore never overwrites: if the name is taken, it says so and you type
   another. Emptying the trash comes in v0.2.
+- A "Delete folder" button in the file tree, named after the selected folder: after you
+  confirm, the folder and everything in it go to the trash, from where they can be restored.
+  An open note inside it is saved first, and the tree says when the folder has gone.
 
 ### Changed
+- A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note
+  (`nginx.conf.md`): only a trailing `.md` counts as the extension, for New note and for
+  Rename or move. A note's own name can't start with a dot (New note, Rename or move and
+  Restore say so in their form); its folder can, as in `.github/pr-checklist`.
+- The editor no longer completes or closes HTML tags as you type them, and Enter keeps the
+  line's own indent, so a `<details>` body isn't indented into a code block.
 - The conflict banner shows a line diff between your text and the other version, and says
   what "Keep my version" and "Use the other version" each do.
 - The file tree shows the open note however it was opened (Ctrl+P, a link, "Save it as a new
@@ -113,6 +122,14 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   landed in the copy the runbook then said to delete. The restore now recreates the container,
   checks that a note made after the backup is gone, and deletes the old folder only after
   that check. Backups now restart the server even when the copy fails.
+- The runbook's restore has one complete block per setup (README or adopted notes folder),
+  so following it in order no longer leaves an empty instance running. It starts the server
+  only if the backup extracted, refuses to start while a `.old` folder exists, and rolls back
+  when the restored notes are missing. The rollback tells current data from restored data by
+  a fresh token in a marker (so a marker that reached a backup can't fool it), and stops
+  without touching the server when there is nothing to roll back. Every log export is
+  timestamped, so a second one never overwrites the first, and the runbook's commands have no
+  trailing comments, which zsh would take as arguments.
 - A note closed while its edits couldn't be saved, then opened again in the same tab, now
   offers those edits as a draft to restore or compare, as it does after a reload. Typing in
   the reopened note no longer writes over them, and "Unsaved drafts" lists them at once.
@@ -165,6 +182,15 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   modes), the editor now says so instead of acting as if the copy existed, and tries again on
   your next edit. The save status says "your edits are kept in this browser" only when they
   are.
+- A new note opens with the cursor after its title, so typing no longer goes in front of the
+  `# title` line; notes opened from the tree still start at the top.
+- A New note that fails (the name is taken) keeps its form open, with the template and the
+  values typed, and puts the focus back on the name.
+- The finder keeps the highlighted note in sight when the arrow keys move it through a long
+  list.
+- The preview renders raw HTML that spans Markdown blocks correctly: a `<details>` keeps the
+  Markdown inside it collapsible and stays open while you edit inside it, and an unclosed
+  `<div>` or a stray `</div>` no longer makes paragraphs show twice or vanish after an edit.
 
 ### Security
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library

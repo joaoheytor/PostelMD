@@ -31,6 +31,29 @@ test("Ctrl+P finds a note by part of its path and opens it", async ({ page }) =>
   await expect(page.getByRole("textbox", { name: "Text of ops/db/failover-redis.md" })).toContainText("# Redis failover");
 });
 
+test("the arrows keep the highlighted note in sight in a long list", async ({ page }) => {
+  const vault = env("PM_E2E_VAULT");
+  mkdirSync(join(vault, "scroll"), { recursive: true });
+  for (let i = 0; i < 60; i++) writeFileSync(join(vault, "scroll", `alert-${String(i).padStart(2, "0")}.md`), `# ${i}\n`);
+  await login(page);
+
+  await page.getByRole("button", { name: "Find a note" }).click();
+  const finder = page.getByRole("dialog", { name: "Find a note" });
+  const input = finder.getByRole("combobox", { name: "Note path" });
+  await input.fill("scroll/alert-");
+  await expect(finder.getByRole("option")).toHaveCount(50); // the finder lists the first 50
+  for (let i = 0; i < 40; i++) await input.press("ArrowDown");
+  const active = finder.getByRole("option", { selected: true });
+  await expect(active).toHaveCount(1);
+  await expect(active).toBeInViewport({ ratio: 1 });
+  await expect(finder.getByRole("option").first()).not.toBeInViewport();
+
+  // Up from the first option wraps to the last one, which comes into sight too.
+  for (let i = 0; i < 41; i++) await input.press("ArrowUp");
+  await expect(finder.getByRole("option").last()).toHaveAttribute("aria-selected", "true");
+  await expect(finder.getByRole("option").last()).toBeInViewport({ ratio: 1 });
+});
+
 test("the finder opens from its button, moves with the arrows, and closes with Escape", async ({ page }) => {
   const vault = env("PM_E2E_VAULT");
   writeFileSync(join(vault, "runbook-a.md"), "# A\n");

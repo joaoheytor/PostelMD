@@ -1,6 +1,7 @@
 import * as api from "./api";
 import { DocumentSession } from "./document";
 import type { Draft, Drafts } from "./drafts";
+import { nameProblem, noteFile, noteTitle } from "./names";
 import { Store } from "./store";
 import { SecretWatch } from "./secretwatch";
 import { join, parent, rebase, Tree } from "./tree";
@@ -40,6 +41,8 @@ export class Workspace {
   readonly secrets = new SecretWatch();
   /** Counts open() and close() calls, so a slower, earlier open can tell it was superseded. */
   private opens = 0;
+  /** The note createNote just made, until its editor asks (takeCreated). */
+  private created: string | undefined;
 
   useDrafts(drafts: Drafts): void {
     this.drafts = drafts;
@@ -98,20 +101,41 @@ export class Workspace {
     }
   }
 
-  /** Creates a note, blank or from a template with its placeholders' values, and opens it. */
-  async createNote(folder: string, name: string, from?: { template: Template; values: Record<string, string> }): Promise<void> {
-    const file = /\.[a-z]+$/i.test(name) ? name : `${name}.md`;
-    const path = join(folder, file);
-    const title = name.replace(/\.[a-z]+$/i, "");
+  /**
+   * Creates a note, blank or from a template with its placeholders' values, and opens it.
+   * False when it wasn't created (a refused name, an existing note): the error says why.
+   */
+  async createNote(folder: string, name: string, from?: { template: Template; values: Record<string, string> }): Promise<boolean> {
+    const path = join(folder, noteFile(name));
+    const problem = nameProblem(path);
+    if (problem) {
+      this.state.update((s) => ({ ...s, error: problem }));
+      return false;
+    }
+    const title = noteTitle(name);
     const content = from ? fill(from.template.body, { ...from.values, title, date: localDate(new Date()) }) : `# ${title}\n\n`;
     try {
       await api.createNote(path, content);
     } catch (err) {
-      this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${message(err)}` }));
-      return;
+      const why = err instanceof api.ApiError && err.status === 409 ? "it already exists" : message(err);
+      this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${why}` }));
+      return false;
     }
     await this.tree.changed(path);
+    this.created = path;
     if (await this.saveOpen()) await this.open(path);
+    else this.created = undefined;
+    return true;
+  }
+
+  /**
+   * Whether path is the note createNote just opened (its editor puts the cursor after the
+   * text it starts with). True once: a later open of the same note is an ordinary one.
+   */
+  takeCreated(path: string): boolean {
+    const created = this.created === path;
+    this.created = undefined;
+    return created;
   }
 
   async createFolder(folder: string, name: string): Promise<void> {
@@ -195,19 +219,22 @@ export class Workspace {
     return true;
   }
 
-  /** Moves a note or folder to the trash. An open note inside it is closed unsaved. */
-  async trash(path: string, kind: "file" | "folder"): Promise<void> {
+  /** Moves a note or folder to the trash; true when it went. An open note inside it is closed unsaved. */
+  async trash(path: string, kind: "file" | "folder"): Promise<boolean> {
     const open = this.state.value.open;
     if (open && (open.doc.path === path || open.doc.path.startsWith(`${path}/`))) {
       open.doc.dispose();
       this.state.set({});
     }
+    let ok = true;
     try {
       await api.trash(path, kind);
     } catch (err) {
+      ok = false;
       this.state.update((s) => ({ ...s, error: `Couldn't delete ${path}: ${message(err)}` }));
     }
     await this.tree.changed(path);
+    return ok;
   }
 
   /**
