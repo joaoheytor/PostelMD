@@ -41,6 +41,10 @@ The maintainer's steps for a release candidate and a release. The design is in
 4. Test the RC by digest (`ghcr.io/joaoheytor/postelmd@sha256:…`, or `:0.1.0-rc.1`), and
    check it as in [verify-images](verify-images.md#release-candidates-and-candidates).
 
+**Don't merge to `main` while `prerelease` runs.** Its `publish` job shares the
+`ghcr-referrers` group with `candidate`: a `candidate` publish queued behind it can cancel the
+pending RC publish. Merge again once the pre-release is published.
+
 Found a problem? Fix it on `main` and tag `v0.1.0-rc.2`. RC numbers only go up; a tag is
 never moved or reused.
 
