@@ -3,6 +3,7 @@ package vault
 import (
 	"errors"
 	"fmt"
+	iofs "io/fs"
 	"strings"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
@@ -21,13 +22,20 @@ var ErrUnsafeExclude = errors.New("vault: .git/info/exclude is a symlink or not 
 // a pattern never untracks a committed file, so fn sees those, flagged ignored, and the
 // caller still commits their changes. A .gitignore is read only if it is a regular file,
 // through the confined root, so a symlinked one is never followed.
+//
+// A folder with a .git of its own (a folder in a clone, a file in a submodule) is a nested
+// repository: git add -A records a gitlink there, never the files inside, so the walk doesn't
+// descend into it; it reports it to nested, flagged ignored or not (ADR-0026). An existing
+// gitlink is never listed by git.Files, so commits leave it as it is.
 type commitWalk struct {
 	v       *Vault
 	tracked map[string]bool // directories holding committed files
 	fn      func(p string, size int64, ignored bool) error
+	nested  func(p string, ignored bool)
 }
 
-func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error) error {
+func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error,
+	nested func(p string, ignored bool)) error {
 	exclude, err := v.git.Exclude()
 	if errors.Is(err, git.ErrExcludeNotRegular) {
 		// Git would follow it and apply its patterns; reading past it could commit what
@@ -41,21 +49,33 @@ func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, s
 	if err != nil {
 		return err
 	}
-	w := &commitWalk{v: v, tracked: map[string]bool{}, fn: fn}
+	w := &commitWalk{v: v, tracked: map[string]bool{}, fn: fn, nested: nested}
 	for p := range committed {
 		for d := p; strings.Contains(d, "/"); {
 			d = d[:strings.LastIndex(d, "/")]
 			w.tracked[d] = true
 		}
 	}
-	return w.walk(".", git.NewIgnore(fold).With(exclude, "."), false)
-}
-
-func (w *commitWalk) walk(dir string, ign *git.Ignore, ignored bool) error {
-	entries, err := w.v.root.ReadDir(dir)
+	entries, err := v.root.ReadDir(".")
 	if err != nil {
 		return err
 	}
+	return w.walk(".", entries, git.NewIgnore(fold).With(exclude, "."), false)
+}
+
+// hasGit reports whether a folder's entries include a .git of any kind (a folder in a clone,
+// a file in a submodule). The name is matched exactly, as git on Linux does: ".GIT" doesn't
+// make a repository.
+func hasGit(entries []iofs.DirEntry) bool {
+	for _, e := range entries {
+		if e.Name() == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *commitWalk) walk(dir string, entries []iofs.DirEntry, ign *git.Ignore, ignored bool) error {
 	if !ignored {
 		for _, e := range entries {
 			if e.Name() == ".gitignore" && e.Type().IsRegular() {
@@ -78,7 +98,15 @@ func (w *commitWalk) walk(dir string, ign *git.Ignore, ignored bool) error {
 			if isIgnored && !w.tracked[p] {
 				continue
 			}
-			if err := w.walk(p, ign, isIgnored); err != nil {
+			sub, err := w.v.root.ReadDir(p)
+			if err != nil {
+				return err
+			}
+			if hasGit(sub) {
+				w.nested(p, isIgnored)
+				continue
+			}
+			if err := w.walk(p, sub, ign, isIgnored); err != nil {
 				return err
 			}
 		case e.Type().IsRegular():
@@ -87,6 +115,37 @@ func (w *commitWalk) walk(dir string, ign *git.Ignore, ignored bool) error {
 				return err
 			}
 			if err := w.fn(p, info.Size(), isIgnored); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// walk calls fn for every regular file under dir that isn't reserved. Symlinks and other
+// special files are skipped, never followed. Unlike commitWalk, it applies no ignore rules
+// and descends into nested repositories: the finder lists every note.
+func (v *Vault) walk(dir string, fn func(p string, size int64) error) error {
+	entries, err := v.root.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		p := subPath(dir, e.Name())
+		if fs.IsReserved(p) {
+			continue
+		}
+		switch {
+		case e.IsDir():
+			if err := v.walk(p, fn); err != nil {
+				return err
+			}
+		case e.Type().IsRegular():
+			info, err := e.Info()
+			if err != nil {
+				return err
+			}
+			if err := fn(p, info.Size()); err != nil {
 				return err
 			}
 		}

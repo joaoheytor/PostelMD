@@ -7,6 +7,7 @@ import (
 	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,25 @@ func TestCreateFile(t *testing.T) {
 		}
 		wantContent("secret", "SECRET")(t, filepath.Dir(vault))
 	})
+}
+
+// TestCreateFileModeAndPerm: CreateFileMode sets exactly the bits asked for, even ones the
+// umask would clear, and Perm reads them back without following a symlink.
+func TestCreateFileModeAndPerm(t *testing.T) {
+	r, _ := newVault(t)
+	for _, perm := range []uint32{0o600, 0o644, 0o664, 0o755} {
+		rel := "dir/mode-" + strconv.FormatUint(uint64(perm), 8)
+		mustDo(t, r.CreateFileMode(rel, []byte("x"), perm))
+		if got, err := r.Perm(rel); err != nil || got != perm {
+			t.Fatalf("Perm after CreateFileMode(%o) = %o, %v", perm, got, err)
+		}
+	}
+	if _, err := r.Perm("link-outside"); !errors.Is(err, ErrSymlink) {
+		t.Fatalf("Perm on a symlink = %v, want ErrSymlink", err)
+	}
+	if _, err := r.Perm("dir"); !errors.Is(err, ErrNotRegular) {
+		t.Fatalf("Perm on a directory = %v, want ErrNotRegular", err)
+	}
 }
 
 func TestRenameReplaces(t *testing.T) {

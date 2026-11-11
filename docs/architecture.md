@@ -85,6 +85,7 @@ Everything else consumes their interfaces.
       .postelmd-tmp/         # reserved; temp files of in-flight writes, named by their intents
   .postelmd/                 # app state; never inside a vault; reserved
     instance.lock            # flock held by the single running process (ADR-0014)
+    format                   # data format number; an older binary refuses a newer one (ADR-0025)
     admin.sock               # 0600 Unix socket for online CLI commands (ADR-0009)
     app.db                   # SQLite WAL: identity, ACLs, file IDs, findings, outbox, intent log, FTS
     keys/                    # key ring, one key per purpose, versioned, 0600 (ADR-0005)

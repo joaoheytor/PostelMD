@@ -230,8 +230,8 @@ func TestCommitCrashEverywhere(t *testing.T) {
 		must(t, err)
 		_, err = v.EnableGit()
 		must(t, err)
-		if entries, _ := os.ReadDir(filepath.Join(dir, TmpDir)); len(entries) != 0 {
-			t.Fatalf("kill at %d: %d leftovers in the temp directory", n, len(entries))
+		if left := temps(dir); left != 0 {
+			t.Fatalf("kill at %d: %d leftovers in the temp directory", n, left)
 		}
 		st, err := v.Status(ctx)
 		must(t, err)

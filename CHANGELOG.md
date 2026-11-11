@@ -90,6 +90,24 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   for secrets before you push the repository anywhere.
 
 ### Fixed
+- A save retried after its response was lost (a dropped connection, a timeout) no longer
+  shows a conflict between two identical texts: if the note already holds what was sent,
+  the retry succeeds.
+- Saving a note keeps its file permissions; every save used to make it readable by its
+  owner only (`0600`), and took the executable bit off scripts.
+- Clones and submodules inside the notes folder are left out of commits and the initial
+  import, and listed as such, instead of having their files committed as notes. Commits no
+  longer fail with a "file/directory conflict" when the repository already records one.
+- Adopting a notes folder that already has a `.postelmd-tmp` or `.postelmd-trash` folder of
+  its own now stops at the first start and says how to fix it, instead of deleting the
+  files in `.postelmd-tmp`. PostelMD marks the folders it makes with
+  `.postelmd-tmp/.created-by-postelmd`. **If you ran a `:main` build** and have deleted
+  notes in the trash, the first start of this version stops once: run
+  `mkdir -p .postelmd-tmp && touch .postelmd-tmp/.created-by-postelmd` in your notes folder,
+  then start again. Don't rename the trash.
+- PostelMD now records its data format in `/data/.postelmd/format`, so a future release
+  that changes the format can't be rolled back onto data an older build doesn't understand:
+  the older build refuses to start and says which version to run.
 - The runbook's restore from a backup restarted the old container after moving its data
   folder aside. On Docker Desktop that container kept serving the moved folder, so new saves
   landed in the copy the runbook then said to delete. The restore now recreates the container,

@@ -183,8 +183,8 @@ func TestTooLarge(t *testing.T) {
 }
 
 func TestOpenSweepsTempFiles(t *testing.T) {
-	dir := t.TempDir()
-	must(t, os.MkdirAll(filepath.Join(dir, TmpDir), 0o700))
+	first, dir := newVault(t) // makes and marks the temp folder
+	_ = first.Close()
 	must(t, os.WriteFile(filepath.Join(dir, TmpDir, "leftover"), []byte("half a save"), 0o600))
 	v, err := Open(dir)
 	must(t, err)
@@ -194,11 +194,21 @@ func TestOpenSweepsTempFiles(t *testing.T) {
 
 func assertNoTemps(t *testing.T, dir string) {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(dir, TmpDir))
-	must(t, err)
-	if len(entries) != 0 {
-		t.Fatalf("%d entries left in %s", len(entries), TmpDir)
+	if n := temps(dir); n != 0 {
+		t.Fatalf("%d entries left in %s", n, TmpDir)
 	}
+}
+
+// temps counts the entries in the temp folder, apart from PostelMD's marker.
+func temps(dir string) int {
+	entries, _ := os.ReadDir(filepath.Join(dir, TmpDir))
+	n := 0
+	for _, e := range entries {
+		if e.Name() != ownerMarker {
+			n++
+		}
+	}
+	return n
 }
 
 func TestConcurrentSavesWithTheSameRev(t *testing.T) {
@@ -333,8 +343,8 @@ func TestOpenRefusesAFilesystemWithoutNoReplace(t *testing.T) {
 	if !errors.Is(err, fs.ErrNoReplaceUnsupported) || !strings.Contains(err.Error(), "named volume") {
 		t.Fatalf("Open on a 9p-like filesystem = %v, want ErrNoReplaceUnsupported with the fix", err)
 	}
-	if entries, _ := os.ReadDir(filepath.Join(dir, TmpDir)); len(entries) != 0 {
-		t.Fatalf("the probe left %d files", len(entries))
+	if n := temps(dir); n != 0 {
+		t.Fatalf("the probe left %d files", n)
 	}
 }
 

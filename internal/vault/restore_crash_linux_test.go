@@ -30,9 +30,10 @@ func TestCrashDuringRestore(t *testing.T) {
 			sawEmpty := false
 			for crashAt := 0; ; crashAt++ {
 				dir := t.TempDir()
-				writeFiles(t, dir, map[string]string{TrashDir + "/" + tc.trashed: "A"})
+				// The marker: this trash is PostelMD's own. It also puts the temp folder in the
+				// disk's snapshot, as in crashEverywhere.
+				writeFiles(t, dir, map[string]string{TrashDir + "/" + tc.trashed: "A", TmpDir + "/" + ownerMarker: ""})
 				must(t, os.MkdirAll(filepath.Join(dir, "notes"), 0o700))
-				must(t, os.Mkdir(filepath.Join(dir, TmpDir), 0o700)) // in the disk's snapshot, as in crashEverywhere
 				disk, err := faultfs.New(dir, crashAt)
 				must(t, err)
 				hook := &armed{disk: disk}

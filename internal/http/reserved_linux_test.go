@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/joaoheytor/PostelMD/internal/vault"
@@ -19,6 +20,10 @@ var reservedCases = []struct{ name, dir, file string }{
 	{"git", ".git", ".git/config"},
 	{"git, other case", ".GIT", ".GIT/config"},
 	{"git, nested", "notes/.git", "notes/.git/config"},
+	// A clone in the notes folder: writing its hooks or config would run code when the user
+	// next runs git in it on the host.
+	{"git, a clone's hooks", "clone/.git/hooks", "clone/.git/hooks/post-checkout"},
+	{"git, a clone's config, other case", "clone/.Git", "clone/.Git/config"},
 	{"app state", ".postelmd", ".postelmd/state.json"},
 	{"trash", vault.TrashDir, vault.TrashDir + "/old.md"},
 	{"temp", vault.TmpDir, vault.TmpDir + "/inflight"},
@@ -67,6 +72,26 @@ func TestReservedPathsOverHTTP(t *testing.T) {
 				t.Fatalf("the vault changed:\nbefore %v\nafter  %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
 			}
 		})
+	}
+}
+
+// TestNestedGitIsNeverListed: a clone's .git folder and a submodule's .git file appear in
+// neither the folder listing nor the finder's file list.
+func TestNestedGitIsNeverListed(t *testing.T) {
+	srv, dir := newAPI(t)
+	for p, s := range map[string]string{"clone/.git/config": "x", "clone/a.md": "a", "sub/.git": "gitdir: ../.git/modules/sub", "sub/b.md": "b"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(p)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, p), []byte(s), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{"/api/v1/folders/clone", "/api/v1/folders/sub", "/api/v1/files"} {
+		resp, body := do(t, srv, call{method: "GET", path: path})
+		if resp.StatusCode != 200 || strings.Contains(body, ".git") || !strings.Contains(body, ".md") {
+			t.Errorf("GET %s = %d %s; want the notes without .git", path, resp.StatusCode, body)
+		}
 	}
 }
 

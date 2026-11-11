@@ -1,6 +1,6 @@
 # ADR-0020: MVP scope: one user, one vault, no database
 
-- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md) and its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md)
+- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md), its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md), its "what `git add -A` would" commit bullet, for nested repositories, by [ADR-0026](0026-nested-repositories-in-the-vault.md), and its save-mismatch and startup-sweep statements by [ADR-0027](0027-landed-retries-and-the-adoption-marker.md)
 - **Date:** 2026-11-09
 
 ## Context

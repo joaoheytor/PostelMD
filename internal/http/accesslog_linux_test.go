@@ -71,7 +71,7 @@ func TestEveryWriteIsLogged(t *testing.T) {
 	}{
 		{"create", call{method: "PUT", path: "/api/v1/notes/" + secretName, body: secretBody,
 			header: auth(map[string]string{"If-None-Match": "*"})}, true, 201, "PUT /api/v1/notes/{path...}", "INFO"},
-		{"stale save", call{method: "PUT", path: "/api/v1/notes/" + secretName, body: secretBody,
+		{"stale save", call{method: "PUT", path: "/api/v1/notes/" + secretName, body: secretBody + "-edited", // same bytes would be a landed retry: 204
 			header: auth(map[string]string{"If-Match": stale})}, true, 412, "PUT /api/v1/notes/{path...}", "WARN"},
 		{"read", call{method: "GET", path: "/api/v1/notes/" + secretName, header: auth(nil)}, false, 200, "", ""},
 		{"history", call{method: "GET", path: "/api/v1/history/" + secretName, header: auth(nil)}, false, 200, "", ""},

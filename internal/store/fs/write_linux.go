@@ -14,6 +14,17 @@ import (
 // file is removed. It is reported as two steps, OpCreate then OpSyncFile, so a crash between
 // writing and syncing can be tested.
 func (r *Root) CreateFile(rel string, data []byte, perm uint32) error {
+	return r.createFile(rel, data, perm, false)
+}
+
+// CreateFileMode is CreateFile with exactly perm's permission bits, whatever the process's
+// umask: a save's temp file takes the note's own bits before it replaces the note
+// (ADR-0003 §5). The mode is set before the fsync, so it is as durable as the data.
+func (r *Root) CreateFileMode(rel string, data []byte, perm uint32) error {
+	return r.createFile(rel, data, perm&0o777, true)
+}
+
+func (r *Root) createFile(rel string, data []byte, perm uint32, exact bool) error {
 	if err := checkRel(rel); err != nil {
 		return err
 	}
@@ -29,7 +40,11 @@ func (r *Root) CreateFile(rel string, data []byte, perm uint32) error {
 		if err != nil {
 			return err
 		}
-		if werr := writeAll(fd, data); werr != nil {
+		werr := writeAll(fd, data)
+		if werr == nil && exact {
+			werr = unix.Fchmod(fd, perm)
+		}
+		if werr != nil {
 			_ = unix.Close(fd)
 			_ = unix.Unlinkat(dfd, base, 0)
 			return werr
@@ -167,6 +182,26 @@ func (r *Root) RemoveDir(rel string) error {
 		return mapErr("remove", rel, err)
 	}
 	return nil
+}
+
+// Perm returns the permission bits of the regular file rel. A symlink is never followed.
+func (r *Root) Perm(rel string) (uint32, error) {
+	if err := checkRel(rel); err != nil {
+		return 0, err
+	}
+	fd, err := r.openat(rel, unix.O_PATH)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return 0, mapErr("stat", rel, err)
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return 0, fmt.Errorf("%w: %s", ErrNotRegular, rel)
+	}
+	return st.Mode & 0o777, nil
 }
 
 // SyncFile fsyncs the regular file rel through a fresh descriptor (on Linux, fsync flushes
