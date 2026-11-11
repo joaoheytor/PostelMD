@@ -264,11 +264,20 @@ func (b *blockOn) After(fs.Op, error) {}
 func TestSaveBehindADeleteNeverRecreates(t *testing.T) {
 	block := newBlock(fs.OpRenameNoReplace)
 	v, dir := newVault(t, fs.WithHook(block))
+	waiting := make(chan struct{})
+	var once sync.Once
+	v.onWait = func() { once.Do(func() { close(waiting) }) }
 	deleted := make(chan error)
 	go func() { _, err := v.Delete(ctx, "notes/a.md"); deleted <- err }()
 	<-block.reached // the delete holds the mutex
-	saved := make(chan error)
+	saved := make(chan error, 1)
 	go func() { _, err := v.Save(ctx, "notes/a.md", RevOf([]byte("A")), []byte("B")); saved <- err }()
+	select {
+	case <-waiting: // the save found the mutex held and waits for it
+	case err := <-saved:
+		close(block.release)
+		t.Fatalf("the save finished (%v) while the delete held the vault mutex; delete: %v", err, <-deleted)
+	}
 	close(block.release)
 	must(t, <-deleted)
 	if err := <-saved; !errors.Is(err, ErrNotFound) {

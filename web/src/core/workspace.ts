@@ -1,14 +1,15 @@
 import * as api from "./api";
-import type { Draft, Drafts } from "./drafts";
+import type { Draft, Drafts, NoteDrafts } from "./drafts";
 import { nameProblem, noteFile, noteTitle } from "./names";
 import { Store } from "./store";
 import { SecretWatch } from "./secretwatch";
-import { join, parent, rebase, Tree } from "./tree";
+import { join, Tree } from "./tree";
 import { fill, localDate, type Template } from "./templates";
+import { moveItem } from "./move";
 import { fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
 import { restoreVersion } from "./restore";
 import { normalize } from "./textfile";
-import { message, moveError, openFailure, recoveredPath } from "./workspace-errors";
+import { draftsUnchecked, message, openFailure, recoveredPath } from "./workspace-errors";
 
 export type { OpenNote } from "./open-file";
 export { message } from "./workspace-errors";
@@ -64,13 +65,17 @@ export class Workspace {
   /**
    * Closes the open note (call saveOpen first): its session stops saving, and an edit not in a
    * draft yet goes into one while the editor is still there. A loading open() opens nothing.
+   * Returns whether no note was opened or closed since, for a reopen after a request.
    */
-  close(): void {
-    this.opens++;
+  close(): () => boolean {
+    const seq = ++this.opens;
+    // dispose() first, while state.open is still this session: its closing draft reads the
+    // editor only while the session is current. Swapping these two lines drops that draft.
     this.state.value.open?.doc.dispose();
     this.state.set({});
     this.noteDrafts.set([]);
     this.secrets.clear();
+    return () => seq === this.opens;
   }
 
   /**
@@ -79,30 +84,36 @@ export class Workspace {
    * last one wins: an earlier one that finishes later changes nothing.
    */
   async open(path: string, convert = false): Promise<void> {
-    this.close();
-    const seq = this.opens;
+    const current = this.close();
+    let draft: NoteDrafts | undefined;
     try {
       const note = await api.readNote(path);
-      if (seq !== this.opens) return;
+      if (!current()) return;
       const offered = (await this.drafts?.offered(path)) ?? [];
-      if (seq !== this.opens) return;
+      if (!current()) return;
+      draft = this.drafts?.forNote(path);
       const opened = openSession(path, note, convert, {
         // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
         reader: () => this.reader?.(),
+        current: (o) => this.state.value.open === o,
         // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
         save: (p, content, base) => {
           this.secrets.check(content);
           return api.saveNote(p, content, base);
         },
-        draft: this.drafts?.forNote(path),
+        draft,
       });
       this.noteDrafts.set(offered);
       this.state.set({ open: opened });
-      await this.refreshOffered(); // the note closed to open this one may have left a draft
-      await this.tree.reveal(path); // the tree shows it, however it was opened
     } catch (err) {
-      if (seq === this.opens) this.state.set(openFailure(path, err));
+      draft?.close(); // no session took its draft key (openSession threw): don't leave it live
+      if (current()) this.state.set(openFailure(path, err));
+      return;
     }
+    // The session is published and closes with the note: nothing from here may replace it.
+    // The note closed to open this one may have left a draft; the tree shows this one.
+    await this.refreshOffered().catch(() => current() && this.fail(draftsUnchecked));
+    await this.tree.reveal(path);
   }
 
   /**
@@ -153,40 +164,11 @@ export class Workspace {
     await this.tree.changed(path);
   }
 
-  /**
-   * Renames or moves a note or folder; never onto an existing one. An open note inside it is
-   * saved first and reopened at its new path; if it can't be saved, nothing moves. True when
-   * it moved.
-   */
+  /** Renames or moves a note or folder, never onto an existing one (move.ts). True when it moved. */
   async move(from: string, to: string): Promise<boolean> {
-    // Never creates folders on the way: a move has no contract for that (CLAUDE.md rule 4).
-    const into = parent(to);
-    if (await this.tree.missing(into)) {
-      this.fail(`Folder ${into} doesn't exist. Create it first with New folder.`);
-      return false;
-    }
-    const open = this.state.value.open;
-    const reopen = open && rebase(open.doc.path, from, to);
-    if (open && reopen) {
-      if (!(await this.saveOpen())) {
-        this.fail(`Save or resolve ${open.doc.path} before moving it.`);
-        return false;
-      }
-      // Closed before the move, so no autosave can target the old path.
-      open.doc.dispose();
-      this.state.set({});
-    }
-    try {
-      await api.move(from, to);
-    } catch (err) {
-      const why = moveError(err, from, to);
-      if (open && reopen) await this.open(open.doc.path); // reopening clears the error
-      this.fail(`Couldn't move ${from}: ${why}`);
-      return false;
-    }
-    await this.tree.moved(from, to);
-    if (reopen) await this.open(reopen);
-    return true;
+    const r = await moveItem(this, from, to);
+    if (r !== true) this.fail(r);
+    return r === true;
   }
 
   /** Replaces the open note's text with its version from commit, through the save path (restore.ts). */
@@ -199,10 +181,8 @@ export class Workspace {
   /** Moves a note or folder to the trash; true when it went. An open note inside it is closed unsaved. */
   async trash(path: string, kind: "file" | "folder"): Promise<boolean> {
     const open = this.state.value.open;
-    if (open && (open.doc.path === path || open.doc.path.startsWith(`${path}/`))) {
-      open.doc.dispose();
-      this.state.set({});
-    }
+    // close()'s "still current" check is unused on purpose: a trashed note is never reopened.
+    if (open && (open.doc.path === path || open.doc.path.startsWith(`${path}/`))) this.close();
     let ok = true;
     try {
       await api.trash(path, kind);
