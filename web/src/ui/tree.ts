@@ -72,18 +72,25 @@ export class FileTree extends LightElement {
 
   private start(what: "note" | "folder" | "move", e: Event): void {
     this.opener = e.currentTarget as Element;
+    this.done = ""; // the last delete's status is old news once the tree is used again
     if (what === "move") this.moving = true;
     else this.creating = what;
   }
 
   private async open(path: string): Promise<void> {
-    this.folder = parent(path);
+    this.select(parent(path));
     await openNote(this.workspace, path);
   }
 
   private async toggle(path: string): Promise<void> {
-    this.folder = path;
+    this.select(path);
     await this.workspace.tree.toggle(path);
+  }
+
+  /** The user picks a folder (or a note in it): the last delete's status is cleared. */
+  private select(folder: string): void {
+    this.folder = folder;
+    this.done = "";
   }
 
   private async create(e: SubmitEvent): Promise<void> {
@@ -175,7 +182,7 @@ export class FileTree extends LightElement {
             : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>
                 <button type="button" @click=${() => this.trashFolder()}>Delete folder ${this.folder}</button>`}
         </div>
-        ${this.done ? html`<p class="pm-tree-status" role="status">${this.done}</p>` : nothing}
+        <p class="pm-tree-status" role="status" aria-label="File tree status">${this.done}</p>
         ${this.moving && this.folder !== ""
           ? html`<pm-move
               .workspace=${this.workspace}
@@ -209,7 +216,7 @@ export class FileTree extends LightElement {
             </form>`
           : nothing}
         ${error ? html`<p class="pm-error" role="alert">${error}</p>` : nothing}
-        <button type="button" class="pm-tree-root" aria-pressed=${this.folder === ""} @click=${() => (this.folder = "")}>Vault</button>
+        <button type="button" class="pm-tree-root" aria-pressed=${this.folder === ""} @click=${() => this.select("")}>Vault</button>
         ${this.list("")}
       </nav>
     `;

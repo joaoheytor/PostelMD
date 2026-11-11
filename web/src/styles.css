@@ -94,6 +94,7 @@ pm-app, pm-workspace { display: flex; flex-direction: column; height: 100%; }
 /* Tree */
 .pm-tree-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .pm-tree-status { margin: 0 0 8px; font-size: 0.85rem; color: var(--muted); }
+.pm-tree-status:empty { margin: 0; } /* always in the page, so what goes in is announced */
 .pm-tree-create { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .pm-tree-create label { display: flex; flex-direction: column; gap: 4px; width: 100%; font-size: 0.85rem; color: var(--muted); }
 .pm-tree-create select, .pm-tree-create input { font: inherit; }

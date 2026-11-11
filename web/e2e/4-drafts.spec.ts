@@ -41,7 +41,7 @@ test("an edit that never reached the server is recovered after its tab is gone",
   await page.getByRole("button", { name: "drafty.md" }).click();
   await serverDown(context, page);
   await typeAtEnd(page, "drafty.md", "restart the pod");
-  await expect(page.getByRole("status")).toHaveText(/^Not saved/);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText(/^Not saved/);
   await crash(context, page);
   expect(readFileSync(vault("drafty.md"), "utf8")).toBe("# Drafty\n"); // only the draft has it
 
@@ -57,7 +57,7 @@ test("an edit that never reached the server is recovered after its tab is gone",
   await expect(again.getByRole("textbox", { name: "Text of drafty.md" })).toContainText("restart the pod");
   // It saves through the normal path. (The status read "Saved" before, too: wait for the file.)
   await expect.poll(() => readFileSync(vault("drafty.md"), "utf8")).toBe("# Drafty\nrestart the pod");
-  await expect(again.getByRole("status")).toHaveText("Saved");
+  await expect(again.getByRole("status", { name: "Save status" })).toHaveText("Saved");
   await expect(banner).toBeHidden();
 
   // Saved, so nothing is left to offer.
@@ -75,7 +75,7 @@ test("a reload offers the draft the page had, instead of writing over it", async
   await page.getByRole("button", { name: "reload.md" }).click();
   await serverDown(context, page);
   await typeAtEnd(page, "reload.md", "drain the node");
-  await expect(page.getByRole("status")).toHaveText(/^Not saved/);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText(/^Not saved/);
   // The reload flushes the edit, as it should; a request sent while the page navigates can
   // escape the routes (#87). Changing the note first makes such a save fail its If-Match
   // with 412 instead of landing, so only the draft can hold the edit.
@@ -100,7 +100,7 @@ test("the draft of a note deleted meanwhile can be saved as a new note", async (
   await page.getByRole("button", { name: "doomed.md" }).click();
   await serverDown(context, page);
   await typeAtEnd(page, "doomed.md", "last words");
-  await expect(page.getByRole("status")).toHaveText(/^Not saved/);
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText(/^Not saved/);
   await crash(context, page);
   rmSync(vault("doomed.md"));
 

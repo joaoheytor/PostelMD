@@ -244,7 +244,7 @@ export class NoteEditor extends LightElement {
     return html`
       <header class="pm-editor-bar">
         <h2 class="pm-editor-path">${note.doc.path}</h2>
-        <span class="pm-editor-status" data-status=${st.status} role="status"
+        <span class="pm-editor-status" data-status=${st.status} role="status" aria-label="Save status"
           >${statusText[st.status]}${st.message ? `: ${st.message}` : ""}</span
         >
         <button type="button" aria-pressed=${this.previewing} @click=${this.togglePreview}>Preview</button>

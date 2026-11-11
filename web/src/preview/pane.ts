@@ -25,13 +25,24 @@ function yieldNow(): Promise<void> {
 
 /**
  * A re-rendered block keeps its <details> open as the reader left them, matched by their
- * order in the block: editing inside an open one must not close it on every keystroke.
+ * summary text and occurrence: editing inside an open one must not close it on every
+ * keystroke, and a new one must not take another's state.
  */
 function keepOpen(old: Element, next: DocumentFragment): void {
-  const was = [...old.querySelectorAll("details")].map((d) => d.open);
-  next.querySelectorAll("details").forEach((d, i) => {
-    if (was[i] !== undefined) d.open = was[i];
-  });
+  const keys = (all: Iterable<HTMLDetailsElement>) => {
+    const seen = new Map<string, number>();
+    return [...all].map((d) => {
+      const summary = d.querySelector(":scope > summary")?.textContent?.trim() ?? "";
+      const n = seen.get(summary) ?? 0;
+      seen.set(summary, n + 1);
+      return { d, key: `${n}\u0000${summary}` };
+    });
+  };
+  const was = new Map(keys(old.querySelectorAll("details")).map(({ d, key }) => [key, d.open]));
+  for (const { d, key } of keys(next.querySelectorAll("details"))) {
+    const open = was.get(key);
+    if (open !== undefined) d.open = open;
+  }
 }
 
 /**
@@ -168,6 +179,7 @@ export class Preview implements Disposable {
       return;
     }
     const kids = this.el.children;
+    const before = this.lookup();
     r.blocks.forEach((b, i) => {
       const el = kids[i];
       if (el && this.source.get(el) === b.html) {
@@ -175,12 +187,27 @@ export class Preview implements Disposable {
         return;
       }
       const next = this.render([b]);
-      if (el) {
-        keepOpen(el, next);
-        el.replaceWith(next);
-      } else this.el.append(next);
+      const was = before.bySource.get(b.html)?.shift() ?? before.byLine.get(String(b.line));
+      if (was) keepOpen(was, next);
+      if (el) el.replaceWith(next);
+      else this.el.append(next);
     });
     while (kids.length > r.blocks.length) this.el.lastElementChild?.remove();
+  }
+
+  /**
+   * The blocks on screen before a patch, by source HTML (a block that only moved, e.g. under
+   * a new paragraph) and by first line (the block being edited), to carry <details> state.
+   */
+  private lookup(): { bySource: Map<string, Element[]>; byLine: Map<string, Element> } {
+    const bySource = new Map<string, Element[]>();
+    const byLine = new Map<string, Element>();
+    for (const el of this.el.children) {
+      const src = this.source.get(el) ?? "";
+      bySource.set(src, [...(bySource.get(src) ?? []), el]);
+      byLine.set(el.getAttribute("data-line") ?? "", el);
+    }
+    return { bySource, byLine };
   }
 
   /**

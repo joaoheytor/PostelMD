@@ -12,6 +12,9 @@ const onDisk = (p: string) => () => (existsSync(vault(p)) ? readFileSync(vault(p
 const treeFolder = (page: Page, name: string) =>
   page.getByRole("navigation", { name: "Notes" }).getByRole("list").getByRole("button", { name: new RegExp(`^\\S ${name}$`) });
 
+/** The tree's status region: empty until a delete completes, cleared by the next action. */
+const treeStatus = (page: Page) => page.getByRole("status", { name: "File tree status" });
+
 async function deleteNote(page: Page, name: string): Promise<void> {
   await page.getByRole("button", { name, exact: true }).click();
   page.once("dialog", (d) => void d.accept());
@@ -84,7 +87,7 @@ test("Delete folder moves it to the trash, open note and all, and it restores wh
   await page.getByRole("button", { name: "Delete folder old-runbooks" }).click();
   await expect(folder).toHaveCount(0);
   expect(asked).toBe("Move the folder old-runbooks and everything in it to the trash? You can restore it from the Trash.");
-  await expect(page.getByRole("status")).toHaveText("Moved the folder old-runbooks to the trash.");
+  await expect(treeStatus(page)).toHaveText("Moved the folder old-runbooks to the trash.");
   await expect(page.getByRole("button", { name: "Vault" })).toBeFocused();
   await expect(text).toHaveCount(0);
   expect(existsSync(vault("old-runbooks"))).toBe(false);
@@ -148,25 +151,28 @@ test("Delete folder by keyboard: Cancel keeps it, OK deletes it, and a failure k
   await expect.poll(() => asked.length).toBe(1);
   await expect(del).toBeFocused();
   await expect(treeFolder(page, "by-keys")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(treeStatus(page)).toHaveText("");
   expect(existsSync(vault("by-keys", "a.md"))).toBe(true);
 
   // OK: it goes, the status says so, and the focus moves to its parent.
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("status")).toHaveText("Moved the folder by-keys to the trash.");
+  await expect(treeStatus(page)).toHaveText("Moved the folder by-keys to the trash.");
   await expect(page.getByRole("button", { name: "Vault" })).toBeFocused();
   expect(existsSync(vault("by-keys"))).toBe(false);
 
-  // A delete that fails says why and leaves the focus where it was.
+  // The next action in the tree clears it.
   await treeFolder(page, "gone-meanwhile").focus();
   await page.keyboard.press("Enter");
+  await expect(treeStatus(page)).toHaveText("");
+
+  // A delete that fails says why and leaves the focus where it was.
   rmSync(vault("gone-meanwhile"), { recursive: true });
   const gone = page.getByRole("button", { name: "Delete folder gone-meanwhile" });
   await gone.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("alert")).toContainText("Couldn't delete gone-meanwhile");
   await expect(gone).toBeFocused();
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(treeStatus(page)).toHaveText("");
   page.off("dialog", answer);
 });
 

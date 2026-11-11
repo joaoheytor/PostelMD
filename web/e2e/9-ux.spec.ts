@@ -109,8 +109,8 @@ test("when the server can't be reached, the status says so in plain words", asyn
   await page.getByRole("textbox", { name: "Text of unreachable.md" }).click();
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("no network");
-  await expect(page.getByRole("status")).toHaveText("Not saved: can't reach the server. Retrying; your edits are kept in this browser.");
-  await expect(page.getByRole("status")).not.toContainText("TypeError");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Not saved: can't reach the server. Retrying; your edits are kept in this browser.");
+  await expect(page.getByRole("status", { name: "Save status" })).not.toContainText("TypeError");
 
   // Back online: the retry saves it.
   await context.unroute("**/api/v1/notes/**");

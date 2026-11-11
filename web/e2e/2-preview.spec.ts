@@ -25,7 +25,7 @@ test("the preview renders the note as you type, and stays on after a reload", as
   await expect(preview.getByRole("img", { name: "Done", exact: true })).toHaveCount(1);
   await expect(preview.getByRole("img", { name: "To do", exact: true })).toHaveCount(1);
   await expect(preview.getByRole("table")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
   await noSeriousA11yViolations(page);
 
   await page.reload();
@@ -169,6 +169,33 @@ test("a nested <details> typed by keyboard stays as typed, and its body is Markd
   await page.keyboard.press("End");
   await page.keyboard.type(" More.");
   await expect(outer.getByText("Body one. More.")).toBeVisible();
+});
+
+test("an open <details> stays open, and only it, when blocks are typed above it", async ({ page }) => {
+  writeFileSync(join(env("PM_E2E_VAULT"), "keep-open.md"), "# Keep open\n\nTop.\n\n<details><summary>Logs</summary>\n\nLog body.\n\n</details>\n");
+  await login(page);
+  await page.getByRole("button", { name: "keep-open.md" }).click();
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByRole("region", { name: "Preview of keep-open.md" });
+  const logs = preview.getByRole("group").filter({ hasText: "Logs" });
+  await logs.getByText("Logs", { exact: true }).click();
+  await expect(logs.getByText("Log body.")).toBeVisible();
+
+  // A paragraph above it shifts every block after it; Logs keeps its state.
+  const text = page.getByRole("textbox", { name: "Text of keep-open.md" });
+  await text.press("ControlOrMeta+Home");
+  for (let i = 0; i < 2; i++) await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.type("\n\nInserted para.");
+  await expect(preview.getByText("Inserted para.")).toBeVisible();
+  await expect(logs.getByText("Log body.")).toBeVisible();
+
+  // A new <details> where Logs was doesn't take its open state.
+  await page.keyboard.type("\n\n<details><summary>New</summary>\n\nNew body.\n\n</details>");
+  const fresh = preview.getByRole("group").filter({ hasText: "New body." });
+  await expect(fresh.getByText("New", { exact: true })).toBeVisible();
+  await expect(fresh.getByText("New body.")).toBeHidden();
+  await expect(logs.getByText("Log body.")).toBeVisible();
 });
 
 test("raw HTML across blocks: <details> holds its Markdown, and nothing shows twice after an edit", async ({ page }) => {
