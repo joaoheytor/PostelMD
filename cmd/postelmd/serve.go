@@ -40,8 +40,8 @@ func setupURL(listen, actual string) string {
 }
 
 // serve runs the server until ctx ends. The startup order is: layout and the filesystem
-// checks of the state and vault directories → instance lock → auth state → vault (temp
-// sweep, rename probe) → the vault's git repository (adopted, or created empty) → HTTP.
+// checks of the state and vault directories → instance lock → data format (ADR-0025) → auth
+// state → vault (adoption check, temp sweep, rename probe) → the vault's git repository (adopted, or created empty) → HTTP.
 // ready, if set, gets the listening address.
 func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(addr string)) error {
 	log := slog.New(slog.NewJSONHandler(stdout, nil))
@@ -57,6 +57,9 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = lk.Release() }()
+	if err := layout.EnsureFormat(paths.State); err != nil {
+		return err
+	}
 
 	svc, err := auth.OpenDir(paths.State, audit.New(log))
 	if err != nil {

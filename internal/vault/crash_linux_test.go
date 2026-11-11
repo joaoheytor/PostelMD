@@ -99,8 +99,8 @@ func crashEverywhere(t *testing.T, op func(v *Vault) error, check func(t *testin
 		reopened, err := Open(dir) // restart: the sweep runs
 		must(t, err)
 		_ = reopened.Close()
-		if entries, _ := os.ReadDir(filepath.Join(dir, TmpDir)); len(entries) != 0 {
-			t.Fatalf("crash at step %d: %d temp files after a restart", crashAt, len(entries))
+		if n := temps(dir); n != 0 {
+			t.Fatalf("crash at step %d: %d temp files after a restart", crashAt, n)
 		}
 		if completed {
 			return

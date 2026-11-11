@@ -41,7 +41,7 @@ const (
 // AuthAPI serves:
 //
 //	POST   /api/v1/setup/check       {token}: the token is valid; {files} the import will commit
-//	POST   /api/v1/setup             {token, password, name, email}: first run only; {imported, skipped}
+//	POST   /api/v1/setup             {token, password, name, email}: first run only; {imported, skipped, repositories}
 //	GET    /api/v1/session           204 with a valid session, else 401
 //	POST   /api/v1/session           {password}: log in
 //	DELETE /api/v1/session           log out this browser
@@ -129,10 +129,12 @@ func (a *AuthAPI) setup(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		a.log.Error("initial import", pathless(err))
 	}
 	// skipped: files over the commit size limit, left out of git; the notice says so.
+	// repositories: nested repositories (clones, submodules), also left out.
 	writeJSON(w, stdhttp.StatusCreated, struct {
-		Imported int `json:"imported"`
-		Skipped  int `json:"skipped,omitempty"`
-	}{imp.Files, len(imp.Skipped)})
+		Imported     int `json:"imported"`
+		Skipped      int `json:"skipped,omitempty"`
+		Repositories int `json:"repositories,omitempty"`
+	}{imp.Files, len(imp.Skipped), len(imp.Repositories)})
 }
 
 // checkSetup lets the setup page check the token and show how many files the setup will

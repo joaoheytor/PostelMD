@@ -82,7 +82,8 @@ type Vault struct {
 	log        *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
 }
 
-// Open opens the vault at dir, removes every leftover temp file (a save that didn't finish
+// Open opens the vault at dir, refuses an adopted folder whose reserved folders hold entries
+// PostelMD didn't create (adopt), removes every leftover temp file (a save that didn't finish
 // never answered 200, so its edit is still the client's draft), and refuses a filesystem
 // without RENAME_NOREPLACE (ADR-0020). Call it before serving requests.
 func Open(dir string, opts ...fs.Option) (*Vault, error) {
@@ -92,7 +93,10 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 	}
 	v := &Vault{root: root, dir: dir, opts: opts, mu: make(chan struct{}, 1), wait: 5 * time.Second, now: time.Now,
 		log: slog.New(slog.DiscardHandler)}
-	err = v.sweepTemps()
+	err = v.adopt()
+	if err == nil {
+		err = v.sweepTemps()
+	}
 	if err == nil {
 		err = v.probeNoReplace()
 	}
@@ -107,26 +111,6 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 // EnableGit.
 func (v *Vault) SetLogger(l *slog.Logger) { v.log = l }
 
-// probeNoReplace renames a temp file to an absent name with RENAME_NOREPLACE. The target
-// must be absent: the VFS answers EEXIST for an existing one before asking the filesystem,
-// which would prove nothing (ADR-0014 §1).
-func (v *Vault) probeNoReplace() error {
-	tmp, err := v.writeTemp(nil)
-	if err != nil {
-		return err
-	}
-	probe := tmp + ".probe"
-	err = v.root.RenameNoReplace(tmp, probe)
-	if errors.Is(err, fs.ErrNoReplaceUnsupported) {
-		return errors.Join(fmt.Errorf("vault: this filesystem can't rename without replacing, "+
-			"so moves could overwrite notes; use a named volume or a WSL-side folder (ADR-0020): %w", err), v.root.Remove(tmp))
-	}
-	if err != nil {
-		return errors.Join(err, v.root.Remove(tmp))
-	}
-	return v.root.Remove(probe)
-}
-
 // Close releases the vault's directory handles.
 func (v *Vault) Close() error {
 	var err error
@@ -134,41 +118,6 @@ func (v *Vault) Close() error {
 		err = v.git.Close()
 	}
 	return errors.Join(err, v.root.Close())
-}
-
-func (v *Vault) sweepTemps() error {
-	if err := v.ensureDir(TmpDir); err != nil {
-		return err
-	}
-	entries, err := v.root.ReadDir(TmpDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		rm := v.root.Remove
-		if e.IsDir() { // a repository Init didn't finish
-			rm = v.removeTree
-		}
-		if err := rm(TmpDir + "/" + e.Name()); err != nil {
-			return fmt.Errorf("vault: sweep %s: %w", e.Name(), err)
-		}
-	}
-	if len(entries) > 0 {
-		return v.root.SyncDir(TmpDir)
-	}
-	return nil
-}
-
-// ensureDir creates a reserved directory at the root, durably, if it's missing.
-func (v *Vault) ensureDir(name string) error {
-	err := v.root.Mkdir(name)
-	if errors.Is(err, iofs.ErrExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return v.root.SyncDir(".")
 }
 
 // lock takes the vault mutex, waiting at most v.wait.
@@ -299,14 +248,18 @@ func (v *Vault) Read(p string) ([]byte, Rev, error) {
 	return b, RevOf(b), nil
 }
 
-// writeTemp writes content to a new, synced temp file and returns its path.
-func (v *Vault) writeTemp(content []byte) (string, error) {
+// newFilePerm is the mode of a note PostelMD creates: private, like the rest of /data.
+const newFilePerm = 0o600
+
+// writeTemp writes content to a new, synced temp file with exactly perm's permission bits
+// and returns its path.
+func (v *Vault) writeTemp(content []byte, perm uint32) (string, error) {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", err
 	}
 	tmp := TmpDir + "/" + hex.EncodeToString(id[:])
-	return tmp, v.root.CreateFile(tmp, content, 0o600)
+	return tmp, v.root.CreateFileMode(tmp, content, perm)
 }
 
 // syncDirs fsyncs each directory once, in order.

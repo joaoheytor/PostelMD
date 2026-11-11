@@ -32,8 +32,11 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
         missing `fsync` is caught. Git refs and objects are crash-tested the same way (#54, #56);
       - **for the MVP (ADR-0020):** a move, a delete to the trash and a restore from it
         (ADR-0024, both trash layouts) crashed at every step, the
-        startup temp sweep, saves racing each other and a delete under the vault mutex (these
-        are done, in `internal/vault`), a commit crash followed by a restart and the next
+        startup temp sweep and the adoption marker (ADR-0027), a lost save response retried
+        with the old `If-Match` (`204` with the current ETag when the note already holds those
+        bytes), saves racing each other and
+        a delete under the vault mutex (these are done, in `internal/vault`), the data format
+        file written at every crash point (ADR-0025, `internal/store/layout`), a commit crash followed by a restart and the next
         commit (the git lock path), a second process on the same `/data`, and `fsync` and `EXDEV`
         errors (no fallback, no retried `fsync`). The rest of this list lands with the feature
         that needs it (v0.2 and later):
@@ -56,8 +59,8 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       - **drafts:** orphaned drafts (closed tab, tombstoned file) are listed on vault load and
         never deleted without the user's choice;
       - **save:** a crash at every step of a save (each reaching its recovery-table row), a
-        lost response retried with the old `If-Match` (`200`, no new generation), the startup
-        temp sweep, `EXDEV` and `fsync` errors (no fallback, no retried `fsync`), ABA
+        lost response retried with the old `If-Match` without a new generation (the
+        content-hash case is in v0.1), the startup temp sweep, `EXDEV` and `fsync` errors (no fallback, no retried `fsync`), ABA
         delete+recreate, a stale response vs a newer edit, two offline tab drafts,
         an ambiguous external rename, an external write in the rename window (shows what is
         and isn't detected);
@@ -134,9 +137,17 @@ PostelMD is worth using before building the rest of the design.
   without `RENAME_NOREPLACE`, refuses to start.
 - Two tabs edit the same note → the second save gets 412 and the conflict view; nothing is
   lost. An edit made outside PostelMD is caught the same way. Concurrent saves with the same
-  `If-Match` → exactly one `200`, the rest `412` (scenario test against the vault mutex).
+  `If-Match` and different bytes → exactly one succeeds (`204`), the rest `412` (scenario
+  test against the vault mutex). A save whose response was lost, retried with the old
+  `If-Match`, → `204` with the current ETag; other content with that `If-Match` → `412`
+  (ADR-0027). A save keeps the note's permissions.
 - An existing notes folder mounted at `/data/vaults/notes` is adopted (initialized as a git
   repository if it isn't one); a Windows-path bind mount is refused with the named-volume fix.
+  A folder whose `.postelmd-tmp` or `.postelmd-trash` holds the user's own files is refused
+  at the first start, untouched. Clones and submodules inside it are left out of commits and
+  named, and an existing gitlink still commits (ADR-0026).
+- A data directory written by a newer data format is refused by `serve` and
+  `reset-password` before anything changes (ADR-0025).
 - Deleting a note while an autosave is pending does **not** recreate it (`404`, "this note was
   deleted"), including a save already waiting on the vault mutex when the delete runs.
 - Moving onto an existing file returns 409, and the destination is unchanged. A delete moves

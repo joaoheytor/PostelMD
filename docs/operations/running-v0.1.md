@@ -381,9 +381,35 @@ see v0.2's trusted-proxy setting.
 
 ## Upgrade and rollback
 
-v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`. The first command
-notes the digest the container runs now (not `$IMAGE`'s: that is the new one), and
-`docker stop` waits up to 60 s for saves:
+v0.1 has no data migrations: any v0.1 build reads the same `~/postelmd`. The data's format
+is recorded in `~/postelmd/.postelmd/format` (v0.1 writes `1` at its first start; ADR-0025).
+A later release that changes the format raises that number, and an older build then refuses
+to start with `this data was written by a newer PostelMD (format N); run that version or
+newer`, before it changes anything. So a **rollback across a format change** means restoring
+the backup you took before the upgrade, not only the older image; within the same format,
+the digest swap below is enough. Never edit `format` to get past the check.
+
+If PostelMD says `format` is **damaged** (anything but a number on one line), back up
+`~/postelmd` first. If only v0.1 ever used it, delete `~/postelmd/.postelmd/format` and start
+again: the next start writes `1`. Otherwise restore the backup you took before the last
+upgrade.
+
+If PostelMD stops with **`.postelmd-trash` (or `.postelmd-tmp`) in your notes folder isn't
+empty**, it found its own folders without its marker file. That happens after upgrading
+from a build before 0.1.0-rc.1, after deleting `.postelmd-tmp` by hand, or after
+`git clean -X` in the notes folder. If PostelMD made those folders, run this in the notes
+folder (`~/postelmd/vaults/notes`, or your own notes folder if you mounted one) and start
+again:
+
+```sh
+mkdir -p .postelmd-tmp && touch .postelmd-tmp/.created-by-postelmd
+```
+
+Don't rename PostelMD's own `.postelmd-trash`: the deleted notes in it would become ordinary
+notes, shown and committed. Rename a folder only if it's really yours (ADR-0027).
+
+To upgrade, run the block below. Its first command notes the digest the container runs now
+(not `$IMAGE`'s: that is the new one), and `docker stop` waits up to 60 s for saves:
 
 ```sh
 docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Image}}' postelmd)"

@@ -28,7 +28,7 @@ type Author interface {
 
 // GitAPI serves:
 //
-//	GET  /api/v1/git/status                  {branch, changes, skipped, locks}
+//	GET  /api/v1/git/status                  {branch, changes, skipped, repositories, locks}
 //	POST /api/v1/git/commit                  {message, changes: [{path, rev}]}: commit the
 //	                                         changes if they are still exactly those
 //	POST /api/v1/git/locks/remove            {confirmNoOtherGit: true}
