@@ -152,6 +152,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   files over 50 MB were left out of git instead of implying the whole folder was imported.
 
 ### Security
+- Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library
+  (GO-2026-6859).
 - PostelMD answers only to `localhost`, IP addresses and the host names in the new
   `allowed_hosts` setting (`POSTELMD_ALLOWED_HOSTS`); any other name gets
   `421 Misdirected Request`, which stops DNS-rebinding attacks from a web page. **If you reach
