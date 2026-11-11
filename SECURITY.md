@@ -10,7 +10,7 @@ minor release and the previous one are supported.
 **Do not open a public issue.** Report it privately through GitHub's
 **Security → Report a vulnerability** (Private Vulnerability Reporting) on the repository.
 
-Please include the affected version, the configuration (`docker run`, Helm, binary), steps to
+Please include the affected version, the configuration (`docker run` and its flags), steps to
 reproduce, the impact, and a proof of concept if you have one.
 
 ## What to expect
@@ -27,8 +27,11 @@ credited unless they ask not to be.
 
 ## Scope
 
-In scope: the PostelMD server, web UI, official Helm chart and image, and the
-`@postelmd/plugin-api` package. Third-party plugins are out of scope; report those to their
-authors (and to us if the plugin API itself is at fault).
+In scope: the PostelMD server and web UI, the official container images
+(`ghcr.io/joaoheytor/postelmd` and `docker.io/joaoheytor/postelmd`), and the release
+workflows that build and sign them. v0.1 has no Helm chart, binaries or plugin API: they come
+later ([roadmap](docs/roadmap.md)), and each joins this scope when it first ships, along with
+the `@postelmd/plugin-api` package. Third-party plugins will be out of scope; report those to
+their authors (and to us if the plugin API itself is at fault).
 
 The design-level security model is described in [docs/threat-model.md](docs/threat-model.md).
