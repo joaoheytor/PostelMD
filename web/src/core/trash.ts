@@ -1,4 +1,5 @@
 import { ApiError } from "./api";
+import { nameProblem } from "./names";
 import { Store } from "./store";
 import type { TrashItem } from "./trash-api";
 import { moveTarget, parent } from "./tree";
@@ -50,6 +51,12 @@ export class Trash {
   /** Restores item to the typed path (see restoreTarget); returns its new path, or undefined (the state says why). */
   async restore(item: TrashItem, typed: string): Promise<string | undefined> {
     const to = restoreTarget(typed, item.name, item.kind);
+    // A note's name follows the same rule as for New note and Rename (names.ts).
+    const problem = item.kind === "file" ? nameProblem(to.name) : undefined;
+    if (problem) {
+      this.state.update((s) => ({ ...s, error: `Couldn't restore ${item.name}: ${problem}` }));
+      return undefined;
+    }
     let path: string;
     try {
       path = await this.deps.restore(item.id, to.folder, to.name);
