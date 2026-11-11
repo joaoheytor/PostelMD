@@ -14,26 +14,45 @@ async function typeAtEnd(page: Page, name: string, text: string): Promise<void> 
 }
 
 const isSave = (r: Route) => r.request().method() === "PUT";
+const saveStatus = (page: Page) => page.getByRole("status", { name: "Save status" });
+
+/** page's saves answer 503 after a while, for good. */
+async function busyServer(page: Page, afterMs = 0): Promise<void> {
+  await page.route("**/api/v1/notes/**", async (r) => {
+    if (!isSave(r)) return r.fallback();
+    await new Promise((done) => setTimeout(done, afterMs));
+    await r.fulfill({ status: 503, headers: { "Retry-After": "60" }, json: { error: "busy" } }).catch(() => {});
+  });
+}
 
 test("logging out while a save fails asks first, and keeps the edits as a draft", async ({ page }) => {
   writeFileSync(vault("leaving.md"), "# Leaving\n");
   try {
     await login(page);
     await page.getByRole("button", { name: "leaving.md" }).click();
-    await page.route("**/api/v1/notes/**", (r) =>
-      isSave(r) ? r.fulfill({ status: 503, headers: { "Retry-After": "60" }, json: { error: "busy" } }) : r.fallback(),
-    );
+    await busyServer(page, 1500);
+    const text = page.getByRole("textbox", { name: "Text of leaving.md" });
     await typeAtEnd(page, "leaving.md", "cordon the node");
-    await expect(page.getByRole("status")).toHaveText(/^Not saved/);
+    await expect(saveStatus(page)).toHaveText("Not saved: the server is busy. Retrying; your edits are kept in this browser.");
 
+    // The save it tries first takes a while: the button says so at once.
     await page.getByRole("button", { name: "Log out" }).click();
+    await expect(page.getByRole("button", { name: "Saving before you log out…" })).toBeDisabled();
     const ask = page.getByRole("dialog", { name: "Your edits to leaving.md aren't saved" });
     await expect(ask).toBeVisible();
-    await expect(ask).toContainText("the server is busy");
+    await expect(ask).toContainText("The server is busy.");
     await noSeriousA11yViolations(page);
     await ask.getByRole("button", { name: "Stay" }).click();
     await expect(ask).toBeHidden();
-    await expect(page.getByRole("textbox", { name: "Text of leaving.md" })).toContainText("cordon the node");
+    await expect(text).toBeFocused();
+    await expect(text).toContainText("cordon the node");
+
+    // Escape stays too.
+    await page.getByRole("button", { name: "Log out" }).click();
+    await expect(ask).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(ask).toBeHidden();
+    await expect(text).toBeFocused();
 
     await page.getByRole("button", { name: "Log out" }).click();
     await ask.getByRole("button", { name: "Log out and keep a draft" }).click();
@@ -79,10 +98,17 @@ async function stallFirstSave(page: Page, landed: boolean): Promise<{ saves: () 
   };
 }
 
-for (const landed of [false, true]) {
-  test(`a save that never answers says it is retrying, then saves (${landed ? "it had landed" : "it hadn't landed"})`, async ({ page }) => {
+const stalls = [
+  { name: "stuck.md", landed: false, more: "", what: "it hadn't landed" },
+  // The retry sends the same bytes: the server answers 204 (ADR-0027).
+  { name: "stuck-landed.md", landed: true, more: "", what: "it had landed" },
+  // The retry sends other bytes: a 412 with the stalled bytes, which landed, is no conflict.
+  { name: "stuck-typed.md", landed: true, more: " now", what: "it had landed, and the user typed on" },
+];
+
+for (const { name, landed, more, what } of stalls) {
+  test(`a save that never answers says it is retrying, then saves (${what})`, async ({ page }) => {
     test.setTimeout(60_000); // the save gives up after 15 s
-    const name = landed ? "stuck-landed.md" : "stuck.md";
     writeFileSync(vault(name), "# Stuck\n");
     let stall: Awaited<ReturnType<typeof stallFirstSave>> | undefined;
     try {
@@ -90,14 +116,14 @@ for (const landed of [false, true]) {
       await page.getByRole("button", { name }).click();
       stall = await stallFirstSave(page, landed);
       await typeAtEnd(page, name, "scale the deployment");
-      const status = page.getByRole("status");
+      const status = saveStatus(page);
       await expect(status).toHaveText("Saving…");
+      if (more) await page.keyboard.type(more);
       await expect(status).toHaveText("Saving is taking too long; retrying", { timeout: 20_000 });
       if (!landed) expect(readFileSync(vault(name), "utf8")).toBe("# Stuck\n");
-      await expect.poll(() => readFileSync(vault(name), "utf8")).toBe("# Stuck\nscale the deployment");
+      await expect.poll(() => readFileSync(vault(name), "utf8")).toBe(`# Stuck\nscale the deployment${more}`);
       await expect(status).toHaveText("Saved");
-      expect(stall.saves()).toBe(2);
-      // A retry of bytes that had landed is answered like a save (ADR-0027): no conflict.
+      expect(stall.saves()).toBe(more ? 3 : 2);
       await expect(page.getByRole("button", { name: "Keep my version" })).toHaveCount(0);
     } finally {
       await stall?.release();
@@ -105,3 +131,35 @@ for (const landed of [false, true]) {
     }
   });
 }
+
+test("when the browser refuses the draft, the editor says so and never claims the edits are kept", async ({ page }) => {
+  writeFileSync(vault("no-room.md"), "# No room\n");
+  try {
+    // IndexedDB over its quota: every draft write throws.
+    await page.addInitScript(() => {
+      IDBObjectStore.prototype.put = () => {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      };
+    });
+    await login(page);
+    await page.getByRole("button", { name: "no-room.md" }).click();
+    const copy = page.getByRole("status", { name: "Local copy" });
+    await expect(copy).toHaveText(""); // there all along, so it is announced when it speaks
+    await busyServer(page);
+    await typeAtEnd(page, "no-room.md", "evict the pod");
+    await expect(copy).toHaveText(/^Couldn't keep a local copy of your edits in this browser/);
+    await expect(saveStatus(page)).toHaveText("Not saved: the server is busy. Retrying.");
+
+    // Logging out can't keep a draft either: the focus moves to Stay as the other choice goes.
+    await page.getByRole("button", { name: "Log out" }).click();
+    const ask = page.getByRole("dialog", { name: "Your edits to no-room.md aren't saved" });
+    await ask.getByRole("button", { name: "Log out and keep a draft" }).click();
+    await expect(ask.getByRole("alert")).toContainText("Couldn't keep a local copy of your edits in this browser either.");
+    await expect(ask.getByRole("button", { name: "Log out and keep a draft" })).toHaveCount(0);
+    await expect(ask.getByRole("button", { name: "Stay" })).toBeFocused();
+    await ask.getByRole("button", { name: "Stay" }).click();
+    await expect(page.getByRole("textbox", { name: "Text of no-room.md" })).toContainText("evict the pod");
+  } finally {
+    rmSync(vault("no-room.md"), { force: true });
+  }
+});

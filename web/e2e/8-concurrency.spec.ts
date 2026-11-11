@@ -42,7 +42,7 @@ test("two tabs edit the same note: the second save is a conflict, and nothing is
     .getByRole("alert")
     .filter({ has: tab2.getByRole("heading", { name: "This note changed in another tab or outside this editor" }) });
   await expect(conflict).toBeVisible();
-  await expect(tab2.getByRole("status")).toHaveText("Not saved: conflict");
+  await expect(tab2.getByRole("status", { name: "Save status" })).toHaveText("Not saved: conflict");
   expect(tab2Saves).toEqual([412]);
 
   // Nothing is lost: tab 1's text is on disk, and tab 2 still has its own edit and shows tab 1's.
@@ -63,7 +63,7 @@ test("two tabs edit the same note: the second save is a conflict, and nothing is
   // Autosave stays stopped until the user chooses.
   await typeAtEnd(tab2, "shared.md", " still");
   await tab2.keyboard.press("ControlOrMeta+S");
-  await expect(tab2.getByRole("status")).toHaveText("Not saved: conflict");
+  await expect(tab2.getByRole("status", { name: "Save status" })).toHaveText("Not saved: conflict");
   expect(tab2Saves).toEqual([412]);
   expect(readFileSync(vault("shared.md"), "utf8")).toBe("# Shared\nfrom tab one");
   await tab2.close();
@@ -96,13 +96,13 @@ test("a slow save's response never marks newer edits as saved", async ({ page })
 
   expect((await firstResponse).status()).toBe(204);
   // The response is for "alpha" only: " beta" is still an unsaved edit.
-  await expect(page.getByRole("status")).toHaveText("Edited");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Edited");
   expect(readFileSync(vault("slow.md"), "utf8")).toBe("# Slow\nalpha");
 
   // A second save sends it.
   await expect.poll(() => readFileSync(vault("slow.md"), "utf8")).toBe("# Slow\nalpha beta");
   expect(bodies).toEqual(["# Slow\nalpha", "# Slow\nalpha beta"]);
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
 });
 
 test("a note deleted while its autosave is pending is not recreated", async ({ page }) => {
@@ -119,7 +119,7 @@ test("a note deleted while its autosave is pending is not recreated", async ({ p
 
   const gone = page.getByRole("alert").filter({ has: page.getByRole("heading", { name: "This note was deleted or moved outside this editor" }) });
   await expect(gone).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("Not saved: the note is gone");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Not saved: the note is gone");
   expect(saves).toEqual([404]);
   await expect(page.getByRole("textbox", { name: "Text of ephemeral.md" })).toContainText("one more line");
 

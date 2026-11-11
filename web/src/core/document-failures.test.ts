@@ -73,7 +73,7 @@ describe("DocumentSession failures", () => {
       saves[0]?.answer({ kind: "unknown" });
       await vi.advanceTimersByTimeAsync(0);
       type("v2");
-      expect(doc.state.value.status).toBe("dirty");
+      expect(doc.state.value.status).toBe("stalled"); // typing doesn't hide the stall
       await vi.advanceTimersByTimeAsync(1000);
       expect(saves.at(-1)?.content).toBe("v2");
       type("v3"); // during the retry
@@ -89,6 +89,84 @@ describe("DocumentSession failures", () => {
       saves[0]?.answer({ kind: "unknown" });
       await flushed;
       expect(doc.dirty).toBe(true);
+    });
+
+    it("typing while stalled keeps the backoff growing: each edit doesn't restart it at 1 s", async () => {
+      type("v1");
+      void doc.flush();
+      saves[0]?.answer({ kind: "unknown" }); // backoff 1 s
+      await vi.advanceTimersByTimeAsync(0);
+      type("v2");
+      await vi.advanceTimersByTimeAsync(1000); // the debounce sends v2
+      saves[1]?.answer({ kind: "unknown" }); // backoff 2 s
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(saves).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(saves).toHaveLength(3);
+    });
+
+    it("a retry doesn't announce 'saving' again: the status stays on the stall until it lands", async () => {
+      type("v1");
+      void doc.flush();
+      saves[0]?.answer({ kind: "unknown" });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(saves).toHaveLength(2);
+      expect(doc.state.value.status).toBe("stalled");
+    });
+
+    describe("then a 412 whose body is the stalled save's bytes (it had landed)", () => {
+      const stallThenType = async () => {
+        type("v1");
+        void doc.flush();
+        saves[0]?.answer({ kind: "unknown" });
+        await vi.advanceTimersByTimeAsync(0);
+        type("v2");
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(saves[1]).toMatchObject({ content: "v2", base: '"e0"' });
+      };
+
+      it("is no conflict: the newest text is saved at once over the 412's ETag", async () => {
+        await stallThenType();
+        saves[1]?.answer({ kind: "conflict", etag: '"e1"', content: "v1" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value.status).not.toBe("conflict");
+        expect(saves[2]).toMatchObject({ content: "v2", base: '"e1"' });
+        saves[2]?.answer({ kind: "saved", etag: '"e2"' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value.status).toBe("clean");
+      });
+
+      it("a 412 with other bytes is still a conflict", async () => {
+        await stallThenType();
+        saves[1]?.answer({ kind: "conflict", etag: '"e1"', content: "someone else's" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value.status).toBe("conflict");
+      });
+
+      it("once a save lands, the stalled bytes count for nothing", async () => {
+        type("v1");
+        void doc.flush();
+        saves[0]?.answer({ kind: "unknown" });
+        await vi.advanceTimersByTimeAsync(1000);
+        saves[1]?.answer({ kind: "saved", etag: '"e1"' });
+        await vi.advanceTimersByTimeAsync(0);
+        type("v2");
+        void doc.flush();
+        saves[2]?.answer({ kind: "conflict", etag: '"e9"', content: "v1" }); // reverted elsewhere
+        await vi.advanceTimersByTimeAsync(0);
+        expect(doc.state.value.status).toBe("conflict");
+      });
+    });
+  });
+
+  describe("a save that fails, then is retried", () => {
+    it("doesn't announce 'saving' again on the retry: the failure stays shown until it lands", async () => {
+      type("v1");
+      void doc.flush();
+      saves[0]?.answer({ kind: "error", message: "the server is busy", next: "Retrying", retryAfterMs: 0, retry: true });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(saves).toHaveLength(2);
+      expect(doc.state.value).toMatchObject({ status: "error", message: "the server is busy", next: "Retrying" });
     });
   });
 

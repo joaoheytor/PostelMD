@@ -159,7 +159,7 @@ export type SaveResult =
   | { kind: "conflict"; etag: string; content: string }
   | { kind: "gone" }
   | { kind: "unknown" }
-  | { kind: "error"; message: string; retryAfterMs: number; retry: boolean };
+  | { kind: "error"; message: string; next?: string; retryAfterMs: number; retry: boolean };
 
 /**
  * Saves over baseETag (If-Match). It never creates a note (ADR-0003 §7). After timeoutMs
@@ -181,22 +181,23 @@ export async function saveNote(path: string, content: string, baseETag: string, 
     // Busy (503), an expired session (401) and server errors are retried; 413 and other client
     // errors won't get better by themselves.
     const retry = e.status === 401 || e.status === 503 || e.status >= 500;
-    return { kind: "error", message: saveError(e), retryAfterMs: e.retryAfterMs, retry };
+    return { kind: "error", ...saveError(e), retryAfterMs: e.retryAfterMs, retry };
   } catch {
     if (signal.aborted) return { kind: "unknown" };
-    return { kind: "error", message: `can't reach the server. ${kept}`, retryAfterMs: 0, retry: true };
+    return { kind: "error", message: "can't reach the server", next: "Retrying", retryAfterMs: 0, retry: true };
   }
 }
 
-const kept = "Retrying; your edits are kept in this browser.";
-
-/** Why a save failed, as the end of the status line ("Not saved: …"): never a raw error. */
-function saveError(e: ApiError): string {
-  if (e.status === 401) return "your session expired. Log in again; your edits are kept in this browser.";
-  if (e.status === 503) return `the server is busy. ${kept}`;
-  if (e.status === 413) return "the note is too large to save.";
-  if (e.status >= 500) return `the server had an error. ${kept}`;
-  return e.message;
+/**
+ * Why a save failed, never a raw error, and what happens next. Whether the edits are kept in
+ * this browser is for the editor to say: only it knows whether a draft holds them.
+ */
+function saveError(e: ApiError): { message: string; next?: string } {
+  if (e.status === 401) return { message: "your session expired", next: "Log in again" };
+  if (e.status === 503) return { message: "the server is busy", next: "Retrying" };
+  if (e.status === 413) return { message: "the note is too large to save" };
+  if (e.status >= 500) return { message: "the server had an error", next: "Retrying" };
+  return { message: e.message };
 }
 
 /** Creates a note (If-None-Match: *); fails with 409 if it exists. */
@@ -274,26 +275,6 @@ export async function readFileBytes(path: string): Promise<{ bytes: Uint8Array; 
 /** Removes the git locks; the user has confirmed that no other git command is running. */
 export async function removeGitLocks(): Promise<void> {
   await ok(await request("POST", "/api/v1/git/locks/remove", json({ confirmNoOtherGit: true })));
-}
-
-export interface Version {
-  commit: string;
-  message: string;
-  author: string;
-  when: string;
-  /** The commit removed the note: there is no content to show. */
-  deleted: boolean;
-}
-
-/** The commits that changed the note, newest first. */
-export async function history(path: string): Promise<Version[]> {
-  const resp = await ok(await request("GET", `/api/v1/history/${encodePath(path)}`));
-  return ((await resp.json()) as { versions: Version[] }).versions;
-}
-
-/** The note's text in a commit. */
-export async function version(commit: string, path: string): Promise<string> {
-  return (await ok(await request("GET", `/api/v1/versions/${encodeURIComponent(commit)}/${encodePath(path)}`))).text();
 }
 
 /** Writes the note's text from commit through the save path; 412 if it isn't at base. */

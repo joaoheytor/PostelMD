@@ -1,27 +1,17 @@
 import { html, nothing } from "lit";
 import { keyed } from "lit/directives/keyed.js";
-import type { DocState } from "../core/document";
+import type { DocumentSession } from "../core/document";
 import { type Disposable, DisposableStore } from "../core/disposable";
-import { isNote, parent } from "../core/tree";
+import { shownState, statusText } from "../core/save-status";
 import type { OpenNote, Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
 import { Preview } from "../preview/pane";
 import { ScrollSync } from "../preview/sync";
-import { LightElement, listen, openNote, StoreController } from "./base";
+import { followLink, LightElement, listen, StoreController } from "./base";
 import { conflictBanner } from "./conflict";
 import "./drafts";
 import "./history";
 import "./move";
-
-const statusText: Record<DocState["status"], string> = {
-  clean: "Saved",
-  dirty: "Edited",
-  saving: "Saving…",
-  stalled: "Saving is taking too long; retrying",
-  error: "Not saved",
-  conflict: "Not saved: conflict",
-  gone: "Not saved: the note is gone",
-};
 
 /** Whether the preview is shown, remembered in this browser only. */
 const previewKey = "postelmd.preview";
@@ -67,6 +57,7 @@ export class NoteEditor extends LightElement {
   private docSub: Disposable | undefined;
   private preview: { pane: Preview; sync: ScrollSync; el: Element } | undefined;
   private listeners: DisposableStore | undefined;
+  private draftSub: { doc: DocumentSession; sub: Disposable } | undefined;
 
   constructor() {
     super();
@@ -105,6 +96,8 @@ export class NoteEditor extends LightElement {
     super.disconnectedCallback();
     this.listeners?.dispose();
     this.unmount();
+    this.draftSub?.sub.dispose();
+    this.draftSub = undefined;
   }
 
   private unmount(): void {
@@ -122,6 +115,25 @@ export class NoteEditor extends LightElement {
   protected override updated(): void {
     this.mountEditor();
     this.mountPreview();
+    this.watchDraft();
+  }
+
+  /** Puts the focus in the note's text (a dialog over it closed). */
+  focusText(): void {
+    this.editor?.focus();
+  }
+
+  /** The status line says the edits are kept only while a draft that outlives the tab holds them. */
+  private keptLocally(doc: DocumentSession): boolean {
+    return !!this.workspace.drafts?.persistent && !doc.draftFailed.value;
+  }
+
+  /** Renders again when the open note's draft starts or stops failing. */
+  private watchDraft(): void {
+    const doc = this.mounted?.note.doc;
+    if (this.draftSub?.doc === doc) return;
+    this.draftSub?.sub.dispose();
+    this.draftSub = doc && { doc, sub: doc.draftFailed.subscribe(() => this.requestUpdate()) };
   }
 
   private mountEditor(): void {
@@ -170,19 +182,6 @@ export class NoteEditor extends LightElement {
     } catch {
       // storage blocked: the choice lasts until reload
     }
-  }
-
-  /**
-   * Links in the preview never navigate away from the editor: a relative link to a note
-   * opens it; other relative links do nothing. External links open in a new tab (sanitize.ts).
-   */
-  private followLink(e: MouseEvent, from: string): void {
-    const href = (e.target as Element).closest("a")?.getAttribute("href");
-    if (href === null || href === undefined || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
-    e.preventDefault();
-    const url = new URL(href, `https://vault.invalid/${parent(from) ? `${parent(from)}/` : ""}`);
-    const path = decodeURIComponent(url.pathname.slice(1));
-    if (url.host === "vault.invalid" && isNote(path)) void openNote(this.workspace, path);
   }
 
   /** ADR-0020: a warning only. It names each finding by rule, line and a short hint, never the secret. */
@@ -240,11 +239,11 @@ export class NoteEditor extends LightElement {
   protected override render() {
     const note = this.ws.value?.open;
     if (!note) return html`<p class="pm-editor-empty">Open a note from the list, or create one.</p>`;
-    const st = note.doc.state.value;
+    const st = shownState(note.doc.state.value, this.keptLocally(note.doc));
     return html`
       <header class="pm-editor-bar">
         <h2 class="pm-editor-path">${note.doc.path}</h2>
-        <span class="pm-editor-status" data-status=${st.status} role="status"
+        <span class="pm-editor-status" data-status=${st.status} role="status" aria-label="Save status"
           >${statusText[st.status]}${st.message ? `: ${st.message}` : ""}</span
         >
         <button type="button" aria-pressed=${this.previewing} @click=${this.togglePreview}>Preview</button>
@@ -289,7 +288,7 @@ export class NoteEditor extends LightElement {
               html`<section
                 class="pm-preview"
                 aria-label="Preview of ${note.doc.path}"
-                @click=${(e: MouseEvent) => this.followLink(e, note.doc.path)}
+                @click=${(e: MouseEvent) => followLink(this.workspace, e, note.doc.path)}
               ></section>`,
             )
           : nothing}

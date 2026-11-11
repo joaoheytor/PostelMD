@@ -25,7 +25,7 @@ test("the preview renders the note as you type, and stays on after a reload", as
   await expect(preview.getByRole("img", { name: "Done", exact: true })).toHaveCount(1);
   await expect(preview.getByRole("img", { name: "To do", exact: true })).toHaveCount(1);
   await expect(preview.getByRole("table")).toBeVisible();
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
   await noSeriousA11yViolations(page);
 
   await page.reload();

@@ -129,6 +129,8 @@ pm-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .pm-editor-status[data-status="error"],
 .pm-editor-status[data-status="conflict"],
 .pm-editor-status[data-status="gone"] { color: var(--danger); }
+/* Always present (a live region), so empty it takes no room. */
+.pm-draft-failed { margin: 0; padding: 0 16px; color: var(--danger); font-size: 0.85rem; }
 .pm-editor-host { flex: 1; min-height: 0; }
 .pm-banner { margin: 8px 16px; padding: 12px 16px; border-radius: 8px; background: var(--warn-bg); }
 .pm-banner h3 { margin: 0 0 6px; font-size: 1rem; }

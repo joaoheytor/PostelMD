@@ -1,6 +1,7 @@
 import { LitElement, type ReactiveController, type ReactiveControllerHost } from "lit";
 import type { Disposable } from "../core/disposable";
 import type { Store } from "../core/store";
+import { isNote, parent } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 
 /**
@@ -68,6 +69,19 @@ export function fields(form: HTMLFormElement): Record<string, string> {
 export async function refocus(host: LitElement, el: Element | null | undefined): Promise<void> {
   await host.updateComplete;
   if (el instanceof HTMLElement && el.isConnected) el.focus();
+}
+
+/**
+ * Links in the preview never navigate away from the editor: a relative link to a note opens
+ * it; other relative links do nothing. External links open in a new tab (sanitize.ts).
+ */
+export function followLink(workspace: Workspace, e: MouseEvent, from: string): void {
+  const href = (e.target as Element).closest("a")?.getAttribute("href");
+  if (href === null || href === undefined || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+  e.preventDefault();
+  const url = new URL(href, `https://vault.invalid/${parent(from) ? `${parent(from)}/` : ""}`);
+  const path = decodeURIComponent(url.pathname.slice(1));
+  if (url.host === "vault.invalid" && isNote(path)) void openNote(workspace, path);
 }
 
 /** Opens a note, after saving the open one; asks first if some of its edits can't be saved. */

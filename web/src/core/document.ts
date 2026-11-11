@@ -10,6 +10,8 @@ export interface DocState {
   status: DocStatus;
   /** Why the last save failed (status "error"). */
   message?: string;
+  /** What happens next ("Retrying", "Log in again"), if anything. */
+  next?: string;
   /** The server's copy after a 412 (status "conflict"). */
   conflict?: { content: string; etag: string };
 }
@@ -17,9 +19,8 @@ export interface DocState {
 export interface DocOptions {
   save: (path: string, content: string, baseETag: string) => Promise<SaveResult>;
   /**
-   * Reads the editor's current text. Called only when a save or a draft starts, never per
-   * keystroke. Undefined when the editor is gone: then nothing is saved or drafted, since no
-   * other text (such as the one the note was loaded with) holds the user's edits.
+   * Reads the editor's text, only when a save or a draft starts. Undefined when the editor is
+   * gone: then nothing is saved or drafted, since no other text holds the user's edits.
    */
   read: () => string | undefined;
   debounceMs?: number;
@@ -67,6 +68,8 @@ export class DocumentSession implements Disposable {
   private undraftedSince: number | undefined;
   /** The generation the last draft write holds. */
   private draftedGen = 0;
+  /** The save that last timed out, until one lands: a 412 with its bytes means it landed. */
+  private stalled: { content: string; gen: number } | undefined;
 
   constructor(
     readonly path: string,
@@ -92,6 +95,11 @@ export class DocumentSession implements Disposable {
     this.scheduleDraft();
     const { status } = this.state.value;
     if (status === "conflict" || status === "gone") return; // waits for the user
+    if (status === "stalled") {
+      // The stall stays shown and its backoff keeps growing: typing doesn't make it go away.
+      this.schedule(this.debounceMs);
+      return;
+    }
     if (status !== "saving") this.state.set({ status: "dirty" });
     this.failures = 0;
     this.schedule(this.debounceMs);
@@ -222,14 +230,20 @@ export class DocumentSession implements Disposable {
     const content = this.opts.read();
     if (content === undefined) return; // the editor is gone: nothing holds the edits to send
     const snap = { content, gen: this.gen, base: this.baseETag };
-    this.state.set({ status: "saving" });
+    // A retry leaves a failure or a stall shown until it lands: it isn't announced again.
+    const { status } = this.state.value;
+    if (status !== "error" && status !== "stalled") this.state.set({ status: "saving" });
     const r = await this.opts.save(this.path, snap.content, snap.base);
     // The server holds snap.gen now, even if the note was closed meanwhile: its draft (written
     // on close, under this session's key) is cleared up to that generation, never past it.
     if (r.kind === "saved") this.opts.draft?.saved(snap.gen);
+    const landed = r.kind === "conflict" && this.stalled?.content === r.content ? this.stalled : undefined;
+    if (landed) this.opts.draft?.saved(landed.gen);
     if (this.disposed) return;
+    if (landed && r.kind === "conflict") return this.stallLanded(landed.gen, r.etag);
     switch (r.kind) {
       case "saved":
+        this.stalled = undefined;
         this.baseETag = r.etag;
         this.savedGen = snap.gen;
         this.failures = 0;
@@ -243,6 +257,7 @@ export class DocumentSession implements Disposable {
         }
         return;
       case "conflict":
+        this.stalled = undefined;
         this.cancelTimer();
         this.state.set({ status: "conflict", conflict: { content: r.content, etag: r.etag } });
         return;
@@ -251,16 +266,28 @@ export class DocumentSession implements Disposable {
         this.state.set({ status: "gone" });
         return;
       case "unknown":
-        // Timed out: the bytes may have landed. The note stays dirty and the retry sends the
-        // newest text over the same base; an identical retry is answered 204 (ADR-0027).
+        // Timed out, maybe landed: the retry sends the newest text over the same base. Identical
+        // bytes get a 204 (ADR-0027); a 412 with these bytes means they landed (stallLanded).
+        this.stalled = { content: snap.content, gen: snap.gen };
         this.state.set({ status: "stalled" });
         this.retry(0);
         return;
       case "error":
-        this.state.set({ status: "error", message: r.message });
+        this.state.set({ status: "error", message: r.message, ...(r.next && { next: r.next }) });
         if (r.retry) this.retry(r.retryAfterMs);
         return;
     }
+  }
+
+  /** A 412 with the stalled save's bytes: it landed as etag. No conflict: save the newest now. */
+  private stallLanded(gen: number, etag: string): void {
+    this.stalled = undefined;
+    this.baseETag = etag;
+    this.savedGen = Math.max(this.savedGen, gen);
+    this.failures = 0;
+    if (!this.dirty) return this.state.set({ status: "clean" });
+    this.state.set({ status: "dirty" });
+    this.schedule(0);
   }
 
   private retry(afterMs: number): void {

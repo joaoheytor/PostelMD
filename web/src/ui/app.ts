@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import type { App, Leaving } from "../core/app";
+import type { App } from "../core/app";
 import { DisposableStore } from "../core/disposable";
 import { parent } from "../core/tree";
 import { LightElement, listen, StoreController } from "./base";
@@ -7,6 +7,8 @@ import "./commit";
 import "./drafts";
 import "./finder";
 import "./editor";
+import type { NoteEditor } from "./editor";
+import "./leave";
 import "./login";
 import "./setup";
 import "./trash";
@@ -93,7 +95,9 @@ export class WorkspaceView extends LightElement {
           : nothing}
         <button type="button" @click=${() => (this.inTrash = true)}>Trash</button>
         <button type="button" @click=${() => (this.committing = true)}>Commit…</button>
-        <button type="button" @click=${() => this.app.logout()}>Log out</button>
+        <button type="button" ?disabled=${!!this.appState.value?.loggingOut} @click=${() => this.app.logout()}>
+          ${this.appState.value?.loggingOut ? "Saving before you log out…" : "Log out"}
+        </button>
       </header>
       ${error
         ? html`<p class="pm-error pm-top-error" role="alert">
@@ -133,7 +137,7 @@ export class AppView extends LightElement {
   private readonly st = new StoreController(this, () => this.app?.state);
 
   protected override updated(): void {
-    const dialog = this.querySelector<HTMLDialogElement>("dialog.pm-reauth, dialog.pm-leave");
+    const dialog = this.querySelector<HTMLDialogElement>("dialog.pm-reauth");
     if (dialog && !dialog.open) dialog.showModal();
   }
 
@@ -153,7 +157,11 @@ export class AppView extends LightElement {
         return html`
           <pm-workspace .app=${this.app}></pm-workspace>
           ${s.leaving
-            ? leaveDialog(this.app, s.leaving)
+            ? html`<pm-leave
+                .app=${this.app}
+                .leaving=${s.leaving}
+                .afterStay=${() => this.querySelector<NoteEditor>("pm-editor")?.focusText()}
+              ></pm-leave>`
             : s.reauth
               ? html`<dialog class="pm-reauth" @cancel=${(e: Event) => e.preventDefault()}><pm-login .app=${this.app}></pm-login></dialog>`
               : nothing}
@@ -162,32 +170,3 @@ export class AppView extends LightElement {
   }
 }
 customElements.define("pm-app", AppView);
-
-/**
- * Logging out found edits that aren't saved: stay with them, or log out keeping them as a
- * local draft (ADR-0023), offered when the note is opened again. Never discarded silently.
- * Escape stays. Shown before the password dialog of an expired session, which comes back on
- * Stay.
- */
-function leaveDialog(app: App, l: Leaving) {
-  const stay = (e?: Event) => {
-    e?.preventDefault();
-    app.stay();
-  };
-  return html`<dialog class="pm-dialog pm-leave" aria-labelledby="pm-leave-title" @cancel=${stay}>
-    <div class="pm-card">
-      <h1 id="pm-leave-title">Your edits to ${l.path} aren't saved</h1>
-      <p>They couldn't be saved: ${l.why}.</p>
-      ${l.draftFailed
-        ? html`<p class="pm-error" role="alert">
-            Couldn't keep a local copy of your edits in this browser either. Stay, and copy your text somewhere safe before you log
-            out.
-          </p>`
-        : html`<p>Stay to keep working on them, or log out and keep them in this browser as a draft. The draft is offered when you open the note again.</p>`}
-      <div class="pm-dialog-actions">
-        <button type="button" @click=${() => stay()}>Stay</button>
-        ${l.draftFailed ? nothing : html`<button type="button" @click=${() => app.logoutKeepingDraft()}>Log out and keep a draft</button>`}
-      </div>
-    </div>
-  </dialog>`;
-}

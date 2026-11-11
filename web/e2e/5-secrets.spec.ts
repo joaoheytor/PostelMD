@@ -41,7 +41,7 @@ test("a typed token is caught on save; dismissing hides it until the findings ch
   await text.click(); // Dismiss had the focus
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type("\nsomething else");
-  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
   await expect(warning).toBeHidden(); // the same finding stays dismissed
 
   // Removing it clears the finding, so the same token added back is a new finding: shown again.

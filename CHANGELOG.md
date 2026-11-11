@@ -152,14 +152,19 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   files over 50 MB were left out of git instead of implying the whole folder was imported.
 - Logging out no longer loses edits that couldn't be saved. It now stops and asks: stay, or
   log out and keep the edits in this browser as a draft, offered when you open the note
-  again. Logging out also closes the open note, so nothing can later save the text it was
-  loaded with over your edits.
+  again. That choice is offered only when the browser can keep the draft after you log out.
+  While the last save runs, the button says "Saving before you log out…". Logging out also
+  closes the open note and reloads the page, so nothing can later save the text the note was
+  loaded with over your edits, and the file tree doesn't stay in memory. If the server can't
+  be reached, the app says "Couldn't log out" and you can try again.
 - A save that gets no answer within 15 seconds no longer leaves the note saying "Saving…"
   forever: the status says "Saving is taking too long; retrying", and the save is retried
-  until it lands.
+  until it lands. If the stuck save had in fact reached the server, the retry no longer shows
+  a conflict with your own text.
 - When the browser refuses to keep a local copy of your edits (storage full, some private
   modes), the editor now says so instead of acting as if the copy existed, and tries again on
-  your next edit.
+  your next edit. The save status says "your edits are kept in this browser" only when they
+  are.
 
 ### Security
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library
