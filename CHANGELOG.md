@@ -113,14 +113,14 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   landed in the copy the runbook then said to delete. The restore now recreates the container,
   checks that a note made after the backup is gone, and deletes the old folder only after
   that check. Backups now restart the server even when the copy fails.
-- The runbook's restore has one complete block per setup (README or adopted notes folder),
-  so following it in order no longer leaves an empty instance running. It starts the server
-  only if the backup extracted, refuses to start while a `.old` folder exists, and rolls back
-  when the restored notes are missing. The rollback tells current data from restored data by
-  a fresh token in a marker (so a marker that reached a backup can't fool it), and stops
-  without touching the server when there is nothing to roll back. Every log export is
-  timestamped, so a second one never overwrites the first, and the runbook's commands have no
-  trailing comments, which zsh would take as arguments.
+- The runbook's restore never moves, marks or deletes the folder the server uses: it
+  extracts the backup into a new folder, can check it on a second port, and points the
+  container at it, so a failed or interrupted extraction leaves the server running and a
+  rollback is one `docker run` on the untouched previous folder. Backups, upgrades and the
+  cleanup of an old folder take the live folder from `docker inspect`; the cleanup refuses
+  the folder the container serves. Backups get a timestamped name, are read back, and print
+  their size. Every log export is timestamped, and the runbook's commands have no trailing
+  comments, which zsh would take as arguments.
 - A note closed while its edits couldn't be saved, then opened again in the same tab, now
   offers those edits as a draft to restore or compare, as it does after a reload. Typing in
   the reopened note no longer writes over them, and "Unsaved drafts" lists them at once.
