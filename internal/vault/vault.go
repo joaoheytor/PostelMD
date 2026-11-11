@@ -79,7 +79,9 @@ type Vault struct {
 	now  func() time.Time
 	// afterCheck, in tests only, runs once a commit's check has passed, still under the mutex.
 	afterCheck func()
-	log        *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
+	// onWait, in tests only, runs when lock finds the mutex held, just before it waits.
+	onWait func()
+	log    *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
 }
 
 // Open opens the vault at dir, refuses an adopted folder whose reserved folders hold entries
@@ -122,6 +124,14 @@ func (v *Vault) Close() error {
 
 // lock takes the vault mutex, waiting at most v.wait.
 func (v *Vault) lock(ctx context.Context) (unlock func(), err error) {
+	select {
+	case v.mu <- struct{}{}:
+		return func() { <-v.mu }, nil
+	default:
+	}
+	if v.onWait != nil {
+		v.onWait()
+	}
 	t := time.NewTimer(v.wait)
 	defer t.Stop()
 	select {
