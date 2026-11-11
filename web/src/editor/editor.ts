@@ -1,4 +1,5 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, insertNewlineKeepIndent } from "@codemirror/commands";
+import { html } from "@codemirror/lang-html";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Annotation, EditorState } from "@codemirror/state";
@@ -75,8 +76,11 @@ export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange, on
       doc,
       extensions: [
         history(),
-        keymap.of([...defaultKeymap, ...historyKeymap]),
-        markdown(),
+        // Enter keeps the line's own indent: HTML's indent rules would push a <details> body
+        // four spaces in, which Markdown reads as a code block. Lists still continue (markdown()).
+        keymap.of([{ key: "Enter", run: insertNewlineKeepIndent }, ...defaultKeymap, ...historyKeymap]),
+        // Raw HTML is highlighted, but no tag is completed or closed for the writer.
+        markdown({ htmlTagLanguage: html({ autoCloseTags: false, matchClosingTags: false }), completeHTMLTags: false }),
         syntaxHighlighting(highlight),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ "aria-label": label }),

@@ -173,6 +173,13 @@ describe("Workspace.createNote", () => {
     expect(await ws.createNote("", ".hidden")).toBe(false);
     expect(api.createNote).not.toHaveBeenCalled();
     expect(ws.state.value.error).toMatch(/can't start with a dot/);
+    expect(await ws.createNote("ops", "x/.hidden")).toBe(false);
+    expect(api.createNote).not.toHaveBeenCalled();
+  });
+
+  it("accepts a note in a folder whose name starts with a dot", async () => {
+    expect(await new Workspace().createNote("", ".github/pr-checklist")).toBe(true);
+    expect(api.createNote).toHaveBeenCalledWith(".github/pr-checklist.md", "# pr-checklist\n\n");
   });
 
   it("returns false when the note exists, and opens nothing", async () => {

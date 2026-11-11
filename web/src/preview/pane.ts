@@ -24,6 +24,17 @@ function yieldNow(): Promise<void> {
 }
 
 /**
+ * A re-rendered block keeps its <details> open as the reader left them, matched by their
+ * order in the block: editing inside an open one must not close it on every keystroke.
+ */
+function keepOpen(old: Element, next: DocumentFragment): void {
+  const was = [...old.querySelectorAll("details")].map((d) => d.open);
+  next.querySelectorAll("details").forEach((d, i) => {
+    if (was[i] !== undefined) d.open = was[i];
+  });
+}
+
+/**
  * The live preview of one note, rendered into el (ADR-0007): markdown-it in a Worker, then
  * DOMPurify inside the Trusted Types policy. The first render is batched and yields; after
  * that only the blocks whose HTML changed are sanitized and replaced. Code blocks get a copy
@@ -164,8 +175,10 @@ export class Preview implements Disposable {
         return;
       }
       const next = this.render([b]);
-      if (el) el.replaceWith(next);
-      else this.el.append(next);
+      if (el) {
+        keepOpen(el, next);
+        el.replaceWith(next);
+      } else this.el.append(next);
     });
     while (kids.length > r.blocks.length) this.el.lastElementChild?.remove();
   }

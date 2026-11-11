@@ -72,13 +72,17 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   each was deleted, and restores one to the folder and name you choose (the vault root by
   default). A restore never overwrites: if the name is taken, it says so and you type
   another. Emptying the trash comes in v0.2.
-- A "Delete folder" button in the file tree: after you confirm, the folder and everything in
-  it go to the trash, from where they can be restored. An open note inside it is saved first.
+- A "Delete folder" button in the file tree, named after the selected folder: after you
+  confirm, the folder and everything in it go to the trash, from where they can be restored.
+  An open note inside it is saved first, and the tree says when the folder has gone.
 
 ### Changed
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note
   (`nginx.conf.md`): only a trailing `.md` counts as the extension, for New note and for
-  Rename or move. A note name starting with a dot is refused with a message in the form.
+  Rename or move. A note's own name can't start with a dot (New note, Rename or move and
+  Restore say so in their form); its folder can, as in `.github/pr-checklist`.
+- The editor no longer completes or closes HTML tags as you type them, and Enter keeps the
+  line's own indent, so a `<details>` body isn't indented into a code block.
 - The conflict banner shows a line diff between your text and the other version, and says
   what "Keep my version" and "Use the other version" each do.
 - The file tree shows the open note however it was opened (Ctrl+P, a link, "Save it as a new
@@ -139,8 +143,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The finder keeps the highlighted note in sight when the arrow keys move it through a long
   list.
 - The preview renders raw HTML that spans Markdown blocks correctly: a `<details>` keeps the
-  Markdown inside it collapsible, and an unclosed `<div>` or a stray `</div>` no longer makes
-  paragraphs show twice or vanish after an edit.
+  Markdown inside it collapsible and stays open while you edit inside it, and an unclosed
+  `<div>` or a stray `</div>` no longer makes paragraphs show twice or vanish after an edit.
 
 ### Security
 - PostelMD answers only to `localhost`, IP addresses and the host names in the new

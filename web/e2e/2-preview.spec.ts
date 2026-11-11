@@ -125,6 +125,52 @@ test("hostile HTML in a note never runs in the preview", async ({ page }) => {
   expect(readFileSync(join(env("PM_E2E_VAULT"), "hostile.md"), "utf8")).toBe(hostile); // only looked at
 });
 
+test("a nested <details> typed by keyboard stays as typed, and its body is Markdown, not code", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "New note" }).click();
+  await page.getByLabel("Note name in the vault").fill("typed-details");
+  await page.getByRole("button", { name: "Create" }).click();
+  const text = page.getByRole("textbox", { name: "Text of typed-details.md" });
+  await expect(text).toBeFocused();
+  // No tag is completed or indented for you; Enter keeps the line's own indent.
+  const typed = [
+    "<details><summary>Outer</summary>",
+    "",
+    "Body **one**.",
+    "",
+    "<details><summary>Inner</summary>",
+    "",
+    "Inner body.",
+    "",
+    "</details>",
+    "</details>",
+    "",
+    "  <b>kept</b>",
+    "  x",
+  ];
+  for (const [i, line] of typed.entries()) {
+    // Enter already put the previous line's indent on this one: type only the rest.
+    await page.keyboard.type(i > 0 && typed[i - 1]?.startsWith("  ") ? line.trimStart() : line);
+    if (i < typed.length - 1) await page.keyboard.press("Enter");
+  }
+  const file = join(env("PM_E2E_VAULT"), "typed-details.md");
+  await expect.poll(() => readFileSync(file, "utf8")).toBe(`# typed-details\n\n${typed.join("\n")}`);
+
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByRole("region", { name: "Preview of typed-details.md" });
+  const outer = preview.getByRole("group").filter({ hasText: "Outer" }).first();
+  await outer.getByText("Outer", { exact: true }).click();
+  await expect(outer.getByText("Body one.")).toBeVisible();
+  await expect(preview.getByRole("code")).toHaveCount(0); // not an indented code block
+
+  // Editing inside the open <details> re-renders it, and it stays open.
+  await text.press("ControlOrMeta+Home");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.type(" More.");
+  await expect(outer.getByText("Body one. More.")).toBeVisible();
+});
+
 test("raw HTML across blocks: <details> holds its Markdown, and nothing shows twice after an edit", async ({ page }) => {
   // On disk, not typed: the editor completes and indents HTML tags as they are typed.
   const note = [
@@ -174,6 +220,9 @@ test("raw HTML across blocks: <details> holds its Markdown, and nothing shows tw
   }
 
   // The forged wrapper stayed inside a real one: scroll sync sees only the note's own lines.
+  // This reads the DOM, not roles: scroll sync (sync.ts) maps the preview's direct children
+  // by their data-line, which no role or label exposes, and a forged top-level child with
+  // data-line="9999" is exactly what would mislead it.
   const lines = await preview.evaluate((el) => [...el.children].map((c) => c.getAttribute("data-line")));
   expect(lines).not.toContain("9999");
   expect(lines.every((l) => l !== null && Number(l) < 20)).toBe(true);

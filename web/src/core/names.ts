@@ -1,3 +1,5 @@
+import { isNote } from "./tree";
+
 /**
  * What a typed note name means. Only a trailing ".md" counts as the extension: a name like
  * "nginx.conf" or "v1.2" is a title with a dot in it, and still makes a note.
@@ -8,19 +10,19 @@ export function noteFile(name: string): string {
   return /\.md$/i.test(name) ? name : `${name}.md`;
 }
 
-/** The title a new note's name gives: the name without a trailing ".md". */
+/** The title a new note's name gives: its last part, without a trailing ".md". */
 export function noteTitle(name: string): string {
-  return name.replace(/\.md$/i, "");
+  return name.slice(name.lastIndexOf("/") + 1).replace(/\.md$/i, "");
 }
 
 /**
- * Why a typed note name can't be used, or undefined. A name, or a folder in it, that starts
- * with a dot is refused: most tools hide it, and the vault reserves some such names (.git, its
- * trash), which the server answers as not found.
+ * Why a note can't go at path, or undefined. The one rule for New note, Rename or move and
+ * Restore: a note's own name (the last part) can't start with a dot, since most tools hide
+ * it. Its folders may (".github/pr-checklist.md"), and folders and other files aren't
+ * checked: the server refuses only its reserved names (.git, its trash), as not found.
  */
-export function nameProblem(name: string): string | undefined {
-  if (name.split("/").some((part) => part.startsWith("."))) {
-    return `A note name can't start with a dot ("${name}"). Remove the dot, or put it later in the name.`;
-  }
-  return undefined;
+export function nameProblem(path: string): string | undefined {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  if (!isNote(name) || !name.startsWith(".")) return undefined;
+  return `A note name can't start with a dot ("${name}"). Remove the dot, or put it later in the name.`;
 }

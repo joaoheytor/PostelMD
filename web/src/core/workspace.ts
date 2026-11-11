@@ -96,12 +96,12 @@ export class Workspace {
    * False when it wasn't created (a refused name, an existing note): the error says why.
    */
   async createNote(folder: string, name: string, from?: { template: Template; values: Record<string, string> }): Promise<boolean> {
-    const problem = nameProblem(name);
+    const path = join(folder, noteFile(name));
+    const problem = nameProblem(path);
     if (problem) {
       this.state.update((s) => ({ ...s, error: problem }));
       return false;
     }
-    const path = join(folder, noteFile(name));
     const title = noteTitle(name);
     const content = from ? fill(from.template.body, { ...from.values, title, date: localDate(new Date()) }) : `# ${title}\n\n`;
     try {
@@ -209,19 +209,22 @@ export class Workspace {
     return true;
   }
 
-  /** Moves a note or folder to the trash. An open note inside it is closed unsaved. */
-  async trash(path: string, kind: "file" | "folder"): Promise<void> {
+  /** Moves a note or folder to the trash; true when it went. An open note inside it is closed unsaved. */
+  async trash(path: string, kind: "file" | "folder"): Promise<boolean> {
     const open = this.state.value.open;
     if (open && (open.doc.path === path || open.doc.path.startsWith(`${path}/`))) {
       open.doc.dispose();
       this.state.set({});
     }
+    let ok = true;
     try {
       await api.trash(path, kind);
     } catch (err) {
+      ok = false;
       this.state.update((s) => ({ ...s, error: `Couldn't delete ${path}: ${message(err)}` }));
     }
     await this.tree.changed(path);
+    return ok;
   }
 
   /**

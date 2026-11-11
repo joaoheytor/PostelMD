@@ -148,6 +148,7 @@ test("the tree shows the open note, however it was opened", async ({ page }) => 
 
 test("a note name with a dot still makes a note; a name starting with a dot is refused", async ({ page }) => {
   writeFileSync(vault("from-tree.md"), "# From tree\n");
+  mkdirSync(vault(".github"), { recursive: true });
   await login(page);
   await page.getByRole("button", { name: "Vault" }).click();
   await page.getByRole("button", { name: "New note" }).click();
@@ -174,8 +175,15 @@ test("a note name with a dot still makes a note; a name starting with a dot is r
   await to.press("Enter");
   await expect(page.getByRole("alert")).toHaveText(/^A note name can't start with a dot/);
   await expect(to).toBeFocused();
-  await to.fill("haproxy.cfg");
+  // Only the note's own name counts: a folder starting with a dot is fine.
+  await to.fill(".github/pr-checklist");
   await to.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Text of .github/pr-checklist.md" })).toBeFocused();
+  await expect.poll(() => existsSync(vault(".github", "pr-checklist.md"))).toBe(true);
+  await page.getByRole("button", { name: "Rename or move" }).click();
+  const back = page.getByLabel("New path for .github/pr-checklist.md");
+  await back.fill("haproxy.cfg");
+  await back.press("Enter");
   await expect(page.getByRole("textbox", { name: "Text of haproxy.cfg.md" })).toBeFocused();
   await expect.poll(() => existsSync(vault("haproxy.cfg.md"))).toBe(true);
 

@@ -56,11 +56,35 @@ describe("renderBlocks", () => {
     expect(blocks[1]).toEqual({ line: 12, html: "<p>B</p>\n" });
   });
 
-  it("runs an unclosed <div> to the end of the note, as the browser would", () => {
+  it("groups nothing for a container never closed: the rest of the note stays in blocks", () => {
+    // Typing "<details>" before its "</details>" must not make the rest of the note one block.
     const blocks = renderBlocks("Before.\n\n<div>\n\nOne.\n\nTwo.\n");
-    expect(blocks.map((b) => b.line)).toEqual([0, 2]);
-    expect(blocks[1]?.html).toBe("<div>\n<p>One.</p>\n<p>Two.</p>\n");
+    expect(blocks.map((b) => b.line)).toEqual([0, 2, 4, 6]);
+    // Closed later: grouped, however far; a second unclosed one after it isn't.
+    expect(renderBlocks("<div>\n\nA\n\n</div>\n\n<div>\n\nB\n").map((b) => b.line)).toEqual([0, 6, 8]);
   });
+
+  it("takes linear time on an HTML block full of unclosed tags", () => {
+    // "<div" then "<a" over and over, no ">" and no blank line: one HTML block that a
+    // backtracking tag pattern scans to its end from every "<" (security review of #117).
+    const note = (n: number) => `<div\n${"<a".repeat(n)}\n`;
+    const median = (n: number) => {
+      const runs: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const t0 = performance.now();
+        renderBlocks(note(n));
+        runs.push(performance.now() - t0);
+      }
+      return runs.sort((a, b) => a - b)[2] ?? 0;
+    };
+    const n = 8_000;
+    median(n); // warm up
+    const small = median(n);
+    const large = median(4 * n);
+    // Linear: about 4×; quadratic: about 16×.
+    expect(large / Math.max(small, 0.05)).toBeLessThan(9);
+    expect(large).toBeLessThan(5_000); // a hang guard only
+  }, 60_000);
 
   it("splits HTML blocks that close what they open as before", () => {
     expect(renderBlocks("<div>a</div>\n\n<p>b</p>\n\nc\n").map((b) => b.line)).toEqual([0, 2, 4]);

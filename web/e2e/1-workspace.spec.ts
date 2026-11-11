@@ -115,11 +115,12 @@ test("a move never overwrites an existing note", async ({ page }) => {
 
 test("move a folder; its open note follows it", async ({ page }) => {
   await login(page);
-  await page.getByRole("button", { name: "archive" }).click();
+  const archive = page.getByRole("button", { name: /^\S archive$/ }); // the tree's, after its ▸ or ▾ marker
+  await archive.click();
   await page.getByRole("button", { name: "runbook.md" }).click();
   await expect(page.getByRole("textbox", { name: "Text of archive/runbook.md" })).toBeVisible();
 
-  await page.getByRole("button", { name: "archive" }).click(); // selects it (and collapses it)
+  await archive.click(); // selects it (and collapses it)
   await page.getByRole("button", { name: "Rename or move folder" }).click();
   await page.getByLabel("New path for archive").fill("ops");
   await page.getByRole("button", { name: "Move", exact: true }).click();

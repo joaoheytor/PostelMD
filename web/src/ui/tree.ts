@@ -1,6 +1,6 @@
 import { html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
-import { nameProblem } from "../core/names";
+import { nameProblem, noteFile } from "../core/names";
 import type { Template } from "../core/templates";
 import { isNote, join, parent } from "../core/tree";
 import type { Workspace } from "../core/workspace";
@@ -23,6 +23,7 @@ export class FileTree extends LightElement {
     folder: { state: true },
     template: { state: true },
     problem: { state: true },
+    done: { state: true },
   };
   declare workspace: Workspace;
   declare creating: Creating;
@@ -34,6 +35,8 @@ export class FileTree extends LightElement {
   declare template: Template | undefined;
   /** Why the typed note name can't be used, shown in the form. */
   declare problem: string | undefined;
+  /** What the last delete did, for the status region (empty until one completes). */
+  declare done: string;
 
   private readonly tree = new StoreController(this, () => this.workspace?.tree.state);
   private readonly ws = new StoreController(this, () => this.workspace?.state);
@@ -46,6 +49,7 @@ export class FileTree extends LightElement {
     super();
     this.folder = "";
     this.moving = false;
+    this.done = "";
   }
 
   /** Selects folder and focuses its entry (the Vault button for the root), e.g. after a delete. */
@@ -90,7 +94,7 @@ export class FileTree extends LightElement {
     const form = e.target as HTMLFormElement;
     const template = chosen(form);
     if (this.creating === "note") {
-      this.problem = nameProblem(name);
+      this.problem = nameProblem(noteFile(name));
       if (!this.problem && (await this.workspace.createNote(this.folder, name, template && { template, values: values(form) }))) {
         this.creating = this.template = undefined; // the new note's editor has the focus
         return;
@@ -112,17 +116,20 @@ export class FileTree extends LightElement {
 
   /**
    * Moves the selected folder and everything in it to the trash, after asking. An open note
-   * inside it is saved first, so the trash holds its latest text; then the parent folder
-   * takes the focus, as after a note's delete.
+   * inside it is saved first, so the trash holds its latest text. Once it went, the status
+   * says so and the parent folder takes the focus, as after a note's delete; if it didn't,
+   * the error says why and the focus stays.
    */
   private async trashFolder(): Promise<void> {
     const folder = this.folder;
+    this.done = "";
     if (!confirm(`Move the folder ${folder} and everything in it to the trash? You can restore it from the Trash.`)) return;
     const open = this.workspace.state.value.open?.doc.path;
     if (open?.startsWith(`${folder}/`) && !(await this.workspace.saveOpen()) && !confirm(`Some edits to ${open} aren't saved. Delete the folder anyway?`)) {
       return;
     }
-    await this.workspace.trash(folder, "folder");
+    if (!(await this.workspace.trash(folder, "folder"))) return;
+    this.done = `Moved the folder ${folder} to the trash.`;
     await this.focusFolder(parent(folder));
   }
 
@@ -166,8 +173,9 @@ export class FileTree extends LightElement {
           ${this.folder === ""
             ? nothing
             : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>
-                <button type="button" @click=${() => this.trashFolder()}>Delete folder</button>`}
+                <button type="button" @click=${() => this.trashFolder()}>Delete folder ${this.folder}</button>`}
         </div>
+        ${this.done ? html`<p class="pm-tree-status" role="status">${this.done}</p>` : nothing}
         ${this.moving && this.folder !== ""
           ? html`<pm-move
               .workspace=${this.workspace}

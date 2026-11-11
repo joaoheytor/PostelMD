@@ -68,20 +68,38 @@ export function renderBlocks(text: string): Block[] {
   }
   const env = {};
   const tokens = md.parse(text, env);
+  const closes = closingAt(tokens);
   let start = 0;
-  let open = 0; // containers opened by raw HTML blocks and not closed yet
-  const push = (end: number) => {
-    const line = (tokens[start]?.map?.[0] ?? 0) + offset;
-    blocks.push({ line, html: md.renderer.render(tokens.slice(start, end), md.options, env) });
-    start = end;
-  };
+  let until = -1; // the token that closes the container being grouped, if any
   tokens.forEach((t, i) => {
-    if (t.type === "html_block" && t.level === 0) open = Math.max(0, open + containerDepth(t.content));
-    if (t.level !== 0 || t.nesting === 1 || open > 0) return;
-    push(i + 1);
+    if (i > until) until = closes[i] ?? -1;
+    if (t.level !== 0 || t.nesting === 1 || i < until) return;
+    const line = (tokens[start]?.map?.[0] ?? 0) + offset;
+    blocks.push({ line, html: md.renderer.render(tokens.slice(start, i + 1), md.options, env) });
+    start = i + 1;
   });
-  if (start < tokens.length) push(tokens.length); // a container never closed runs to the end
   return blocks;
+}
+
+/**
+ * For each top-level HTML block that opens containers, the index of the HTML block that
+ * closes them all; -1 when none does. A container never closed (typed before its closing
+ * tag) groups nothing, so the rest of the note isn't re-rendered as one block. Linear: the
+ * close of a block that opens is the next token at or below the depth before it.
+ */
+function closingAt(tokens: readonly { type: string; level: number; content: string }[]): number[] {
+  // depth[k] is the depth after token k-1; depth[0] = 0 is the note's start.
+  const depth = [0];
+  for (const t of tokens) depth.push((depth.at(-1) ?? 0) + (t.type === "html_block" && t.level === 0 ? containerDepth(t.content) : 0));
+  // atOrBelow[k]: the first k' > k with depth[k'] <= depth[k] (a monotonic stack), or -1.
+  const atOrBelow = new Array<number>(depth.length).fill(-1);
+  const stack: number[] = [];
+  depth.forEach((v, k) => {
+    while (stack.length && (depth[stack.at(-1) ?? 0] ?? 0) >= v) atOrBelow[stack.pop() ?? 0] = k;
+    stack.push(k);
+  });
+  // Token i opens when its depth rises; it is closed by token atOrBelow[i] - 1.
+  return tokens.map((_, i) => ((depth[i + 1] ?? 0) > (depth[i] ?? 0) && (atOrBelow[i] ?? -1) > 0 ? (atOrBelow[i] ?? 0) - 1 : -1));
 }
 
 /**
@@ -94,7 +112,9 @@ const containers = new Set(["details", "div", "section", "article", "aside", "fi
 /** How many containers an HTML block opens (positive) or closes (negative). */
 function containerDepth(html: string): number {
   let depth = 0;
-  const tags = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
+  // [^<>], not [^>]: a "<" without its ">" ends the attempt there, so no "<" is scanned to
+  // the end of the block from every one before it (quadratic; security review of #117).
+  const tags = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b[^<>]*?(\/?)>/g;
   for (const m of html.replace(/<!--[\s\S]*?(?:-->|$)/g, "").matchAll(tags)) {
     if (!containers.has((m[2] ?? "").toLowerCase()) || m[3]) continue;
     depth += m[1] ? -1 : 1;

@@ -19,12 +19,15 @@ describe("note names", () => {
     expect(noteTitle("v1.2")).toBe("v1.2");
   });
 
-  it("refuses a name, or a folder in it, that starts with a dot", () => {
-    expect(nameProblem(".hidden")).toMatch(/can't start with a dot/);
-    expect(nameProblem("ops/.env")).toMatch(/can't start with a dot/);
-    expect(nameProblem("../x")).toMatch(/can't start with a dot/);
-    expect(nameProblem("nginx.conf")).toBeUndefined();
-    expect(nameProblem("ops/runbook")).toBeUndefined();
+  it("refuses a note whose own name starts with a dot; its folders may", () => {
+    expect(nameProblem(".hidden.md")).toMatch(/^A note name can't start with a dot \("\.hidden\.md"\)/);
+    expect(nameProblem("ops/.env.md")).toMatch(/can't start with a dot/);
+    expect(nameProblem(".github/pr-checklist.md")).toBeUndefined();
+    expect(nameProblem("nginx.conf.md")).toBeUndefined();
+    expect(nameProblem("ops/runbook.md")).toBeUndefined();
+    // Not a note: a folder or another file is not checked.
+    expect(nameProblem(".config")).toBeUndefined();
+    expect(nameProblem("ops/.env")).toBeUndefined();
   });
 
   it("applies the same rule to a renamed note", () => {

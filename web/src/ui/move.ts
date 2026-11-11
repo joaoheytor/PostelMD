@@ -58,7 +58,7 @@ export class MoveForm extends LightElement {
     const to = moveTarget(this.path, typed, this.kind);
     if (to === "" || to === this.path) return this.onDone();
     // A note's new name follows the new-note rule; it may still go into a folder like .github.
-    this.problem = this.kind === "file" ? nameProblem(to.slice(to.lastIndexOf("/") + 1)) : undefined;
+    this.problem = this.kind === "file" ? nameProblem(to) : undefined;
     if (this.problem) return this.input()?.focus();
     this.busy = true;
     try {
