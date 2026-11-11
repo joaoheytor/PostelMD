@@ -1,6 +1,6 @@
 import { html, nothing } from "lit";
 import * as api from "../core/history-api";
-import { type DiffLine, diffLines } from "../core/diff";
+import { type DiffLine, textDiff } from "../core/diff";
 import { History } from "../core/history";
 import type { Workspace } from "../core/workspace";
 import { LightElement, StoreController } from "./base";
@@ -26,7 +26,7 @@ export class HistoryDialog extends LightElement {
   private history: History | undefined;
   private readonly st = new StoreController(this, () => this.history?.state);
   /** The last diff, kept while its inputs don't change: rendering it again is free. */
-  private diff: { from: string; to: string; lines: DiffLine[] } | undefined;
+  private diff: { from: string; to: string; lines: DiffLine[] | "endings" } | undefined;
 
   constructor() {
     super();
@@ -49,12 +49,12 @@ export class HistoryDialog extends LightElement {
 
   private current(): string {
     const open = this.workspace.state.value.open;
-    return this.workspace.reader?.() ?? open?.initial ?? "";
+    return this.workspace.currentText() ?? open?.initial ?? "";
   }
 
-  private changes(from: string): DiffLine[] {
+  private changes(from: string): DiffLine[] | "endings" {
     const to = this.current();
-    if (this.diff?.from !== from || this.diff.to !== to) this.diff = { from, to, lines: diffLines(from, to) };
+    if (this.diff?.from !== from || this.diff.to !== to) this.diff = { from, to, lines: textDiff(from, to) };
     return this.diff.lines;
   }
 

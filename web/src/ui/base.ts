@@ -1,7 +1,7 @@
 import { LitElement, type ReactiveController, type ReactiveControllerHost } from "lit";
 import type { Disposable } from "../core/disposable";
 import type { Store } from "../core/store";
-import { isNote, parent } from "../core/tree";
+import { parent } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 
 /**
@@ -72,8 +72,8 @@ export async function refocus(host: LitElement, el: Element | null | undefined):
 }
 
 /**
- * Links in the preview never navigate away from the editor: a relative link to a note opens
- * it; other relative links do nothing. External links open in a new tab (sanitize.ts).
+ * Links in the preview never navigate away from the editor: a relative link to a file opens
+ * it (one the editor can't hold says why); a link to a folder does nothing. External links open in a new tab (sanitize.ts).
  */
 export function followLink(workspace: Workspace, e: MouseEvent, from: string): void {
   const href = (e.target as Element).closest("a")?.getAttribute("href");
@@ -81,11 +81,14 @@ export function followLink(workspace: Workspace, e: MouseEvent, from: string): v
   e.preventDefault();
   const url = new URL(href, `https://vault.invalid/${parent(from) ? `${parent(from)}/` : ""}`);
   const path = decodeURIComponent(url.pathname.slice(1));
-  if (url.host === "vault.invalid" && isNote(path)) void openNote(workspace, path);
+  if (url.host === "vault.invalid" && path !== "" && !path.endsWith("/")) void openNote(workspace, path);
 }
 
-/** Opens a note, after saving the open one; asks first if some of its edits can't be saved. */
-export async function openNote(workspace: Workspace, path: string): Promise<void> {
+/**
+ * Opens a note, after saving the open one; asks first if some of its edits can't be saved.
+ * convert: the user asked to convert its line endings to LF (Workspace.open).
+ */
+export async function openNote(workspace: Workspace, path: string, convert = false): Promise<void> {
   if (!(await workspace.saveOpen()) && !confirm("Some edits to the open note aren't saved. Leave them?")) return;
-  await workspace.open(path);
+  await workspace.open(path, convert);
 }

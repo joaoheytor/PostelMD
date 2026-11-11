@@ -2,7 +2,7 @@ import { html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import type { Entry } from "../core/api";
 import { nameProblem, noteFile } from "../core/names";
 import type { Template } from "../core/templates";
-import { isNote, join, parent } from "../core/tree";
+import { join, parent } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 import { LightElement, openNote, refocus, StoreController } from "./base";
 import "./move";
@@ -151,7 +151,8 @@ export class FileTree extends LightElement {
         ${open ? this.list(path) : nothing}
       </li>`;
     }
-    if (e.kind === "file" && isNote(e.name)) {
+    // Every file is a button: one the editor can't hold says why when opened (textfile.ts).
+    if (e.kind === "file") {
       const current = this.ws.value?.open?.doc.path === path;
       return html`<li>
         <button type="button" class="pm-tree-note" aria-current=${current ? "page" : "false"} @click=${() => this.open(path)}>${e.name}</button>

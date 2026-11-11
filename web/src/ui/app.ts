@@ -2,7 +2,7 @@ import { html, nothing } from "lit";
 import type { App } from "../core/app";
 import { DisposableStore } from "../core/disposable";
 import { parent } from "../core/tree";
-import { LightElement, listen, StoreController } from "./base";
+import { LightElement, listen, openNote, StoreController } from "./base";
 import "./commit";
 import "./drafts";
 import "./finder";
@@ -85,6 +85,7 @@ export class WorkspaceView extends LightElement {
   protected override render() {
     const w = this.app.workspace;
     const error = this.ws.value?.error;
+    const convert = this.ws.value?.convert; // a file refused for its line endings
     const notice = this.appState.value?.notice;
     return html`
       <header class="pm-top">
@@ -103,7 +104,9 @@ export class WorkspaceView extends LightElement {
       </header>
       ${error
         ? html`<p class="pm-error pm-top-error" role="alert">
-            ${error} <button type="button" @click=${() => w.dismissError()}>Dismiss</button>
+            ${error}
+            ${convert ? html`<button type="button" @click=${() => void openNote(w, convert, true)}>Convert to LF and open</button>` : nothing}
+            <button type="button" @click=${() => w.dismissError()}>Dismiss</button>
           </p>`
         : nothing}
       ${notice

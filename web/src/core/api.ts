@@ -2,6 +2,8 @@
  * The HTTP API (ADR-0020), as plain functions over fetch. Nothing here keeps state, except
  * the hook that tells the app when the session has expired.
  */
+import { modeOf } from "./filetype";
+import { decodeText, NotTextError } from "./textfile";
 
 export class ApiError extends Error {
   constructor(
@@ -145,9 +147,14 @@ export interface Note {
   etag: string;
 }
 
+/**
+ * A file's text, exactly as its bytes say (a byte order mark included). Throws NotTextError
+ * for a file the editor can't open: binary, not UTF-8, too large (textfile.ts).
+ */
 export async function readNote(path: string): Promise<Note> {
   const resp = await ok(await request("GET", `/api/v1/notes/${encodePath(path)}`));
-  return { content: await resp.text(), etag: resp.headers.get("ETag") ?? "" };
+  // Never resp.text(): it drops a byte order mark and replaces bytes that aren't UTF-8.
+  return { content: decodeText(new Uint8Array(await resp.arrayBuffer())), etag: resp.headers.get("ETag") ?? "" };
 }
 
 /**
@@ -156,7 +163,8 @@ export async function readNote(path: string): Promise<Note> {
  */
 export type SaveResult =
   | { kind: "saved"; etag: string }
-  | { kind: "conflict"; etag: string; content: string }
+  // binary: the other version isn't text (content is ""): nothing to compare or take.
+  | { kind: "conflict"; etag: string; content: string; binary?: true }
   | { kind: "gone" }
   | { kind: "unknown" }
   | { kind: "error"; message: string; next?: string; retryAfterMs: number; retry: boolean };
@@ -170,12 +178,12 @@ export async function saveNote(path: string, content: string, baseETag: string, 
   const signal = AbortSignal.timeout(timeoutMs);
   try {
     const resp = await request("PUT", `/api/v1/notes/${encodePath(path)}`, {
-      headers: { "If-Match": baseETag, "Content-Type": "text/markdown; charset=utf-8" },
+      headers: { "If-Match": baseETag, "Content-Type": contentType(path) },
       body: content,
       signal,
     });
     if (resp.status === 204) return { kind: "saved", etag: resp.headers.get("ETag") ?? "" };
-    if (resp.status === 412) return { kind: "conflict", etag: resp.headers.get("ETag") ?? "", content: await resp.text() };
+    if (resp.status === 412) return await conflictOf(resp); // awaited: a stalled body is caught below
     if (resp.status === 404) return { kind: "gone" };
     const e = await errorOf(resp);
     // Busy (503), an expired session (401) and server errors are retried; 413 and other client
@@ -185,6 +193,29 @@ export async function saveNote(path: string, content: string, baseETag: string, 
   } catch {
     if (signal.aborted) return { kind: "unknown" };
     return { kind: "error", message: "can't reach the server", next: "Retrying", retryAfterMs: 0, retry: true };
+  }
+}
+
+/**
+ * What a save sends its body as: Markdown for a note (the editor's rule, modeOf), and plain
+ * bytes for any other file. The server stores the body whatever it is (notes.go).
+ */
+function contentType(path: string): string {
+  return modeOf(path) === "markdown" ? "text/markdown; charset=utf-8" : "application/octet-stream";
+}
+
+/**
+ * A 412's other version, read like readNote reads a file. If it is no longer text, it is a
+ * conflict with nothing to compare or take (binary): the user can only keep their text
+ * elsewhere, and the other version stays on disk.
+ */
+async function conflictOf(resp: Response): Promise<SaveResult> {
+  const etag = resp.headers.get("ETag") ?? "";
+  try {
+    return { kind: "conflict", etag, content: decodeText(new Uint8Array(await resp.arrayBuffer())) };
+  } catch (err) {
+    if (!(err instanceof NotTextError)) throw err;
+    return { kind: "conflict", etag, content: "", binary: true };
   }
 }
 
@@ -204,7 +235,7 @@ function saveError(e: ApiError): { message: string; next?: string } {
 export async function createNote(path: string, content: string): Promise<string> {
   const resp = await ok(
     await request("PUT", `/api/v1/notes/${encodePath(path)}`, {
-      headers: { "If-None-Match": "*", "Content-Type": "text/markdown; charset=utf-8" },
+      headers: { "If-None-Match": "*", "Content-Type": contentType(path) },
       body: content,
     }),
   );

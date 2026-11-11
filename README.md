@@ -15,6 +15,10 @@ later: see the [roadmap](docs/roadmap.md).
 In v0.1:
 
 - **Plain files.** Your notes are `.md` files on disk and stay usable by git, vim and Syncthing.
+- **The whole repository, not just notes.** YAML and JSON manifests, shell scripts, config
+  files and code next to your notes open in the same editor, with syntax highlighting, and
+  save byte for byte (line endings and byte order mark kept). Binary files are listed but
+  don't open.
 - **Git-native.** The vault is a git repository: you commit from the app, and browse and
   restore each note's history.
 - **Safe by default.** Saves are conflict-aware: PostelMD clients never overwrite each other's

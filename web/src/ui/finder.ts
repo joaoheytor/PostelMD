@@ -1,7 +1,6 @@
 import { html, nothing } from "lit";
 import * as api from "../core/api";
 import { type Match, rank } from "../core/fuzzy";
-import { isNote } from "../core/tree";
 import { message, type Workspace } from "../core/workspace";
 import { LightElement, openNote } from "./base";
 
@@ -69,7 +68,7 @@ export class Finder extends LightElement {
   private async load(): Promise<void> {
     try {
       const { files, truncated } = await api.listFiles();
-      this.files = files.filter((f) => isNote(f.slice(f.lastIndexOf("/") + 1)));
+      this.files = files; // any file: one the editor can't hold says why when opened
       this.truncated = truncated;
     } catch (err) {
       this.error = `Couldn't list the notes: ${message(err)}`;

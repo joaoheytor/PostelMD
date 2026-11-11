@@ -7,6 +7,8 @@ import type { OpenNote, Workspace } from "../core/workspace";
 import { type Editor, mountEditor } from "../editor/editor";
 import { Preview } from "../preview/pane";
 import { ScrollSync } from "../preview/sync";
+import { modeOf } from "../core/filetype";
+import { goneBanner, secretWarning } from "./banners";
 import { followLink, LightElement, listen, StoreController } from "./base";
 import { conflictBanner } from "./conflict";
 import "./drafts";
@@ -143,7 +145,8 @@ export class NoteEditor extends LightElement {
     this.unmount();
     if (!note || !host) return;
     const editor = mountEditor(host.attachShadow({ mode: "open" }), {
-      doc: note.initial,
+      doc: note.shown,
+      mode: modeOf(note.doc.path),
       label: `Text of ${note.doc.path}`,
       onEdit: () => note.doc.edit(),
       onChange: () => this.preview?.pane.update(() => editor.text()),
@@ -185,22 +188,14 @@ export class NoteEditor extends LightElement {
     }
   }
 
-  /** ADR-0020: a warning only. It names each finding by rule, line and a short hint, never the secret. */
-  private secretWarning() {
-    const w = this.secrets.value;
-    if (!w || w.dismissed || w.findings.length === 0) return nothing;
-    return html`<section class="pm-banner" role="alert" aria-labelledby="pm-secret-title">
-      <h3 id="pm-secret-title">This note looks like it contains a secret</h3>
-      <ul>
-        ${w.findings.map((f) => html`<li>${f.rule} on line ${f.line} (<code>${f.hint}</code>)</li>`)}
-      </ul>
-      <p>It is saved in the note, and a commit would keep it in the git history. Remove it, and rotate it if it is real.</p>
-      <button type="button" @click=${() => this.workspace.secrets.dismiss()}>Dismiss</button>
-    </section>`;
+  /** A way out of a conflict was taken: its banner goes, and the focus goes to the text. */
+  private takeTheirs(convert: boolean): void {
+    if (this.workspace.takeTheirs((t) => this.editor?.replace(t), convert)) this.focusText();
   }
 
-  private takeTheirs(note: OpenNote): void {
-    this.editor?.replace(note.doc.takeTheirs());
+  private keepMine(doc: DocumentSession): void {
+    doc.keepMine();
+    this.focusText();
   }
 
   private async trash(path: string): Promise<void> {
@@ -241,13 +236,17 @@ export class NoteEditor extends LightElement {
     const note = this.ws.value?.open;
     if (!note) return html`<p class="pm-editor-empty">Open a note from the list, or create one.</p>`;
     const st = shownState(note.doc.state.value, this.keptLocally(note.doc));
+    // Only a Markdown note has a preview: other files have no rendering to show.
+    const previewing = this.previewing && modeOf(note.doc.path) === "markdown";
     return html`
       <header class="pm-editor-bar">
         <h2 class="pm-editor-path">${note.doc.path}</h2>
         <span class="pm-editor-status" data-status=${st.status} role="status" aria-label="Save status"
           >${statusText[st.status]}${st.message ? `: ${st.message}` : ""}</span
         >
-        <button type="button" aria-pressed=${this.previewing} @click=${this.togglePreview}>Preview</button>
+        ${modeOf(note.doc.path) === "markdown"
+          ? html`<button type="button" aria-pressed=${this.previewing} @click=${this.togglePreview}>Preview</button>`
+          : nothing}
         <button type="button" @click=${() => (this.browsing = true)}>History</button>
         <button type="button" class="pm-editor-move" @click=${this.startMove}>Rename or move</button>
         <button type="button" @click=${() => this.trash(note.doc.path)}>Delete</button>
@@ -264,26 +263,20 @@ export class NoteEditor extends LightElement {
           ></pm-move>`
         : nothing}
       ${st.status === "conflict" && st.conflict
-        ? conflictBanner(
-            st.conflict,
-            () => this.editor?.text() ?? note.initial,
-            () => note.doc.keepMine(),
-            () => this.takeTheirs(note),
-          )
+        ? conflictBanner(st.conflict, {
+            mine: () => this.workspace.currentText() ?? note.initial,
+            keep: () => this.keepMine(note.doc),
+            take: (convert) => this.takeTheirs(convert),
+            saveAsNew: () => void this.workspace.saveAsNew(),
+          })
         : nothing}
-      ${this.secretWarning()}
+      ${secretWarning(this.workspace)}
       <pm-draft-warning .doc=${note.doc}></pm-draft-warning>
       <pm-draft-banner .workspace=${this.workspace} .put=${(t: string) => this.editor?.replace(t)}></pm-draft-banner>
-      ${st.status === "gone"
-        ? html`<section class="pm-banner" role="alert" aria-labelledby="pm-gone-title">
-            <h3 id="pm-gone-title">This note was deleted or moved outside this editor</h3>
-            <p>Your text is still here, but it isn't saved anywhere.</p>
-            <button type="button" @click=${() => this.workspace.saveAsNew()}>Save it as a new note</button>
-          </section>`
-        : nothing}
+      ${st.status === "gone" ? goneBanner(this.workspace) : nothing}
       <div class="pm-editor-panes">
         ${keyed(note, html`<div class="pm-editor-host" @focusout=${() => void note.doc.flush()}></div>`)}
-        ${this.previewing
+        ${previewing
           ? keyed(
               note,
               html`<section

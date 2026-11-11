@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DiffLine, diffLines } from "./diff";
+import { type DiffLine, diffLines, textDiff } from "./diff";
 
 /** A compact form: " a", "+b", "-c". */
 function show(lines: DiffLine[]): string[] {
@@ -47,5 +47,25 @@ describe("diffLines", () => {
     const d = diffLines(a, b, 1000);
     expect(d.filter((l) => l.kind === "removed")).toHaveLength(3000);
     expect(d.filter((l) => l.kind === "added")).toHaveLength(3000);
+  });
+});
+
+describe("textDiff: two file texts, compared as the editor shows them", () => {
+  const bom = String.fromCharCode(0xfeff);
+
+  it("says so when only the line endings differ, instead of -/+ pairs that look the same", () => {
+    expect(textDiff("a\r\nb\r\n", "a\nb\n")).toBe("endings");
+  });
+
+  it("says so when only a byte order mark differs", () => {
+    expect(textDiff(`${bom}a\nb\n`, "a\nb\n")).toBe("endings");
+  });
+
+  it("shows the real change without the endings noise", () => {
+    expect(show(textDiff("a\r\nb\r\n", `${bom}a\nc\n`) as DiffLine[])).toEqual([" a", "-b", "+c", " "]);
+  });
+
+  it("identical texts are an ordinary diff with nothing changed", () => {
+    expect(show(textDiff("a\r\n", "a\r\n") as DiffLine[])).toEqual([" a", " "]);
   });
 });
