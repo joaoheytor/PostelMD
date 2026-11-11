@@ -16,7 +16,8 @@ export async function history(path: string): Promise<Version[]> {
   return ((await resp.json()) as { versions: Version[] }).versions;
 }
 
-/** The note's text in a commit. */
+/** The note's text in a commit, a byte order mark kept: the diff compares it with the file's text. */
 export async function version(commit: string, path: string): Promise<string> {
-  return (await ok(await request("GET", `/api/v1/versions/${encodeURIComponent(commit)}/${encodePath(path)}`))).text();
+  const resp = await ok(await request("GET", `/api/v1/versions/${encodeURIComponent(commit)}/${encodePath(path)}`));
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(await resp.arrayBuffer());
 }

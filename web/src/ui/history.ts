@@ -49,7 +49,7 @@ export class HistoryDialog extends LightElement {
 
   private current(): string {
     const open = this.workspace.state.value.open;
-    return this.workspace.reader?.() ?? open?.initial ?? "";
+    return this.workspace.currentText() ?? open?.initial ?? "";
   }
 
   private changes(from: string): DiffLine[] {

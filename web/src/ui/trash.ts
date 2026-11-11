@@ -1,7 +1,6 @@
 import { html, nothing, type PropertyValues } from "lit";
 import { Trash } from "../core/trash";
 import { listTrash, restoreTrashed, type TrashItem } from "../core/trash-api";
-import { isNote } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 import { fields, LightElement, openNote, StoreController } from "./base";
 
@@ -81,7 +80,7 @@ export class TrashDialog extends LightElement {
       return;
     }
     this.close();
-    if (item.kind === "file" && isNote(path)) await openNote(this.workspace, path);
+    if (item.kind === "file") await openNote(this.workspace, path);
   }
 
   private form(item: TrashItem) {

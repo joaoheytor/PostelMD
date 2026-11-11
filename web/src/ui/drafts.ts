@@ -77,7 +77,7 @@ export class DraftBanner extends LightElement {
         )}
       </ul>
       ${this.comparing
-        ? diffView(diffLines(this.workspace.reader?.() ?? open.initial, this.comparing.text), "Changes from the current text to the draft")
+        ? diffView(diffLines(this.workspace.currentText() ?? open.initial, this.comparing.text), "Changes from the current text to the draft")
         : nothing}
     </section>`;
   }

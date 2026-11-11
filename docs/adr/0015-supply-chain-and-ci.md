@@ -283,3 +283,25 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   already in the lockfile as a dependency of `@codemirror/lang-markdown`, and becoming
   direct didn't change its version (6.4.12) or its integrity hash; the lockfile only gains
   the line in `package.json`'s dependencies.
+- **2026-11-11, CodeMirror language modes for files that aren't Markdown**, under the same
+  CodeMirror 6 (`@codemirror/*`) row. The editor opens any UTF-8 text file in the vault and
+  highlights its syntax; each mode is a dynamic import, so the Markdown editor's bundle
+  doesn't carry them. The stdlib has no parsers for these languages, and the official
+  CodeMirror packages share `@codemirror/language`'s highlighting with the rest of the
+  editor. Exact versions, each published more than two weeks before 2026-11-11:
+  - `@codemirror/lang-yaml` 6.1.3 (2026-03-24), with `@lezer/yaml`: YAML manifests and
+    compose files;
+  - `@codemirror/lang-json` 6.0.2 (2025-06-19), with `@lezer/json`: JSON;
+  - `@codemirror/lang-python` 6.2.1 (2025-05-14), with `@lezer/python`: Python;
+  - `@codemirror/lang-go` 6.0.1 (2024-05-29), with `@lezer/go`: Go;
+  - `@codemirror/lang-javascript` 6.2.5 (2026-03-02): JavaScript and TypeScript. It was
+    already in the lockfile as a dependency of `@codemirror/lang-html`, at the same version
+    and integrity hash; it becomes direct;
+  - `@codemirror/legacy-modes` 6.5.5 (2026-10-07): one package for shell, Dockerfile, TOML
+    and INI/properties, through `StreamLanguage`. Its one dependency,
+    `@codemirror/streamparser`, was already in the lockfile.
+
+  The lockfile gains these five packages and the four `@lezer/*` parsers named above,
+  nothing else.
+  HCL/Terraform has no maintained official mode, so `.tf` files open as plain text.
+  `npm audit --omit=dev` reports no vulnerability with them.

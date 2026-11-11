@@ -75,6 +75,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - A "Delete folder" button in the file tree, named after the selected folder: after you
   confirm, the folder and everything in it go to the trash, from where they can be restored.
   An open note inside it is saved first, and the tree says when the folder has gone.
+- Open and edit text files that aren't Markdown (YAML, JSON, shell scripts, config files,
+  code) with syntax highlighting; binary files show why they can't open.
 
 ### Changed
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note
@@ -99,6 +101,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   for secrets before you push the repository anywhere.
 
 ### Fixed
+- The editor's cursor is visible in dark mode.
+- Saving a file keeps its CRLF line endings and its UTF-8 byte order mark; saves used to
+  turn CRLF into LF and drop the byte order mark. A file that mixes CRLF and LF line
+  endings, or has a lone CR, doesn't open, since the editor can't save it back unchanged.
 - A save retried after its response was lost (a dropped connection, a timeout) no longer
   shows a conflict between two identical texts: if the note already holds what was sent,
   the retry succeeds.

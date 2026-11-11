@@ -2,6 +2,7 @@
  * The HTTP API (ADR-0020), as plain functions over fetch. Nothing here keeps state, except
  * the hook that tells the app when the session has expired.
  */
+import { decodeText, NotTextError } from "./textfile";
 
 export class ApiError extends Error {
   constructor(
@@ -145,9 +146,14 @@ export interface Note {
   etag: string;
 }
 
+/**
+ * A file's text, exactly as its bytes say (a byte order mark included). Throws NotTextError
+ * for a file the editor can't open: binary, not UTF-8, too large (textfile.ts).
+ */
 export async function readNote(path: string): Promise<Note> {
   const resp = await ok(await request("GET", `/api/v1/notes/${encodePath(path)}`));
-  return { content: await resp.text(), etag: resp.headers.get("ETag") ?? "" };
+  // Never resp.text(): it drops a byte order mark and replaces bytes that aren't UTF-8.
+  return { content: decodeText(new Uint8Array(await resp.arrayBuffer())), etag: resp.headers.get("ETag") ?? "" };
 }
 
 /**
@@ -175,7 +181,7 @@ export async function saveNote(path: string, content: string, baseETag: string, 
       signal,
     });
     if (resp.status === 204) return { kind: "saved", etag: resp.headers.get("ETag") ?? "" };
-    if (resp.status === 412) return { kind: "conflict", etag: resp.headers.get("ETag") ?? "", content: await resp.text() };
+    if (resp.status === 412) return await conflictOf(resp); // awaited: a stalled body is caught below
     if (resp.status === 404) return { kind: "gone" };
     const e = await errorOf(resp);
     // Busy (503), an expired session (401) and server errors are retried; 413 and other client
@@ -185,6 +191,20 @@ export async function saveNote(path: string, content: string, baseETag: string, 
   } catch {
     if (signal.aborted) return { kind: "unknown" };
     return { kind: "error", message: "can't reach the server", next: "Retrying", retryAfterMs: 0, retry: true };
+  }
+}
+
+/**
+ * A 412's other version, read like readNote reads a file. If it is no longer text the editor
+ * can hold, there is nothing to compare or take: the save fails, and the edits stay.
+ */
+async function conflictOf(resp: Response): Promise<SaveResult> {
+  const etag = resp.headers.get("ETag") ?? "";
+  try {
+    return { kind: "conflict", etag, content: decodeText(new Uint8Array(await resp.arrayBuffer())) };
+  } catch (err) {
+    if (!(err instanceof NotTextError)) throw err;
+    return { kind: "error", message: `it changed outside this editor, and ${err.message}`, retryAfterMs: 0, retry: false };
   }
 }
 

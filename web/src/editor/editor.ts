@@ -2,10 +2,12 @@ import { defaultKeymap, history, historyKeymap, insertNewlineKeepIndent } from "
 import { html } from "@codemirror/lang-html";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { Annotation, EditorState } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { type Disposable, toDisposable } from "../core/disposable";
+import type { Mode } from "../core/filetype";
+import { loadLanguage } from "./languages";
 
 /** Marks a change the app made (loading the server's copy), so it isn't an edit to save. */
 const external = Annotation.define<boolean>();
@@ -27,6 +29,8 @@ export interface Editor extends Disposable {
 
 export interface EditorOptions {
   doc: string;
+  /** How the file is edited: a Markdown note, or another file with its syntax highlighted. */
+  mode: Mode;
   /** The text area's accessible name. */
   label: string;
   /** The user edited the text: it needs saving. */
@@ -45,7 +49,9 @@ const theme = EditorView.theme({
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "var(--selection)" },
   ".cm-activeLine": { backgroundColor: "transparent" },
   ".cm-scroller": { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", lineHeight: "1.6" },
-  ".cm-content": { padding: "16px 0", maxWidth: "80ch" },
+  // The browser draws the caret (no drawSelection): CodeMirror's base theme makes it black
+  // unless the editor theme is dark, which this one never says it is.
+  ".cm-content": { padding: "16px 0", maxWidth: "80ch", caretColor: "var(--fg)" },
   ".cm-line": { padding: "0 24px" },
   "&.cm-focused": { outline: "none" },
 });
@@ -62,14 +68,31 @@ const highlight = HighlightStyle.define([
   { tag: [t.keyword, t.atom, t.bool], color: "var(--accent)" },
   { tag: [t.string, t.number], color: "var(--code)" },
   { tag: t.comment, color: "var(--muted)" },
+  { tag: [t.propertyName, t.typeName], color: "var(--link)" }, // YAML and JSON keys, code types
 ]);
+
+/** A note's Markdown support; raw HTML is highlighted, but no tag is completed or closed for the writer. */
+const markdownSupport = () =>
+  markdown({ htmlTagLanguage: html({ autoCloseTags: false, matchClosingTags: false }), completeHTMLTags: false });
+
+/**
+ * The file's language: Markdown at once; another mode once its chunk loads (the text shows
+ * meanwhile, unhighlighted). Nothing happens after the editor is gone.
+ */
+function language(view: () => EditorView | undefined, mode: Mode): Extension {
+  if (mode === "markdown") return markdownSupport();
+  const slot = new Compartment();
+  void loadLanguage(mode).then((ext) => view()?.dispatch({ effects: slot.reconfigure(ext) }));
+  return slot.of([]);
+}
 
 /**
  * Mounts CodeMirror 6 in root, a shadow root: there its styles use constructable
  * stylesheets, which the CSP's style-src 'self' allows (ADR-0019).
  */
-export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange, onPaste }: EditorOptions): Editor {
-  const view = new EditorView({
+export function mountEditor(root: ShadowRoot, { doc, mode, label, onEdit, onChange, onPaste }: EditorOptions): Editor {
+  let live = true;
+  const view: EditorView = new EditorView({
     root,
     parent: root,
     state: EditorState.create({
@@ -79,8 +102,7 @@ export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange, on
         // Enter keeps the line's own indent: HTML's indent rules would push a <details> body
         // four spaces in, which Markdown reads as a code block. Lists still continue (markdown()).
         keymap.of([{ key: "Enter", run: insertNewlineKeepIndent }, ...defaultKeymap, ...historyKeymap]),
-        // Raw HTML is highlighted, but no tag is completed or closed for the writer.
-        markdown({ htmlTagLanguage: html({ autoCloseTags: false, matchClosingTags: false }), completeHTMLTags: false }),
+        language(() => (live ? view : undefined), mode),
         syntaxHighlighting(highlight),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ "aria-label": label }),
@@ -116,6 +138,9 @@ export function mountEditor(root: ShadowRoot, { doc, label, onEdit, onChange, on
       view.scrollDOM.addEventListener("scroll", fn, { passive: true });
       return toDisposable(() => view.scrollDOM.removeEventListener("scroll", fn));
     },
-    dispose: () => view.destroy(),
+    dispose() {
+      live = false; // a language still loading is dropped
+      view.destroy();
+    },
   };
 }

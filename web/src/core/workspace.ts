@@ -6,12 +6,12 @@ import { Store } from "./store";
 import { SecretWatch } from "./secretwatch";
 import { join, parent, rebase, Tree } from "./tree";
 import { fill, localDate, type Template } from "./templates";
+import { fileText, type OpenNote, openFile, takeTheirs } from "./open-file";
+import { normalize, textFormat } from "./textfile";
+import { message, moveError, openError, recoveredPath } from "./workspace-errors";
 
-/** The note open in the editor, with the text it was loaded with. */
-export interface OpenNote {
-  doc: DocumentSession;
-  initial: string;
-}
+export type { OpenNote } from "./open-file";
+export { message } from "./workspace-errors";
 
 export interface WorkspaceState {
   open?: OpenNote | undefined;
@@ -81,10 +81,15 @@ export class Workspace {
     try {
       const note = await api.readNote(path);
       if (seq !== this.opens) return;
+      const format = textFormat(note.content); // refuses a file a save would change
       const offered = (await this.drafts?.offered(path)) ?? [];
       if (seq !== this.opens) return;
       // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
-      const read = () => this.reader?.();
+      // Saves and drafts hold the file's text: its byte order mark and line endings put back.
+      const read = () => {
+        const text = this.reader?.();
+        return text === undefined ? undefined : fileText(opened, text);
+      };
       const draft = this.drafts?.forNote(path);
       // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
       const save = (p: string, content: string, base: string) => {
@@ -92,12 +97,13 @@ export class Workspace {
         return api.saveNote(p, content, base);
       };
       const doc = new DocumentSession(path, note.etag, { save, read, ...(draft && { draft }) });
+      const opened = openFile(doc, note.content, format);
       this.noteDrafts.set(offered);
-      this.state.set({ open: { doc, initial: note.content } });
+      this.state.set({ open: opened });
       await this.refreshOffered(); // the note closed to open this one may have left a draft
       await this.tree.reveal(path); // the tree shows it, however it was opened
     } catch (err) {
-      if (seq === this.opens) this.state.set({ error: `Couldn't open ${path}: ${message(err)}` });
+      if (seq === this.opens) this.state.set({ error: openError(path, err) });
     }
   }
 
@@ -246,7 +252,7 @@ export class Workspace {
     if (!open) return;
     const path = recoveredPath(open.doc.path);
     try {
-      await api.createNote(path, this.reader?.() ?? open.initial);
+      await api.createNote(path, this.currentText() ?? open.initial);
     } catch (err) {
       this.state.update((s) => ({ ...s, error: `Couldn't create ${path}: ${message(err)}` }));
       return;
@@ -275,7 +281,7 @@ export class Workspace {
       await open.doc.flush(); // no save in flight may move the base past the draft's
       if (this.state.value.open !== open) return;
     }
-    put(d.text);
+    put(normalize(d.text)); // drafts hold the file's text
     open.doc.rebase(d.base);
     open.doc.edit();
     if (!(await open.doc.writeDraft())) return; // no other copy yet: the old draft stays
@@ -305,6 +311,26 @@ export class Workspace {
     if (await this.saveOpen()) await this.open(path);
   }
 
+  /** The open file's text as a save would write it; undefined with no editor. */
+  currentText(): string | undefined {
+    const open = this.state.value.open;
+    const text = this.reader?.();
+    return open && text !== undefined ? fileText(open, text) : undefined;
+  }
+
+  /** The conflict's other version for the editor (open-file.ts); undefined, with why, if it can't be. */
+  takeTheirs(): string | undefined {
+    const open = this.state.value.open;
+    const theirs = open?.doc.state.value.conflict?.content;
+    if (!open || theirs === undefined) return undefined;
+    try {
+      return takeTheirs(open, theirs);
+    } catch (err) {
+      this.state.update((s) => ({ ...s, error: `Couldn't use the other version: ${message(err)}.` }));
+      return undefined;
+    }
+  }
+
   /** Something was pasted into the open note: scan it now, not at the next save. */
   pasted(): void {
     if (this.state.value.open && this.reader) this.secrets.check(this.reader());
@@ -313,20 +339,4 @@ export class Workspace {
   dismissError(): void {
     this.state.update((s) => ({ ...s, error: undefined }));
   }
-}
-
-/** Why a move failed, in words: the server's 404 doesn't say which side is missing. */
-function moveError(err: unknown, from: string, to: string): string {
-  if (!(err instanceof api.ApiError)) return message(err);
-  if (err.status === 409) return `${to} already exists`;
-  if (err.status === 404) return `${from} or the folder ${parent(to) || "it goes into"} doesn't exist any more`;
-  return message(err);
-}
-
-function recoveredPath(path: string): string {
-  return path.replace(/(\.[a-z]+)?$/i, (ext) => `-recovered${ext || ".md"}`);
-}
-
-export function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
