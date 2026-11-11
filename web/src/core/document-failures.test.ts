@@ -1,0 +1,150 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SaveResult } from "./api";
+import { DocumentSession } from "./document";
+import type { NoteDrafts } from "./drafts";
+
+/**
+ * What a session does when the world misbehaves: a save that never answers, an editor that is
+ * gone, a draft store that refuses writes. Each must keep the edit, never claim it is safe.
+ */
+describe("DocumentSession failures", () => {
+  let saves: { content: string; base: string; answer: (r: SaveResult) => void }[];
+  let writes: [string, number][];
+  let failWrites: boolean;
+  let text: string | undefined;
+  let doc: DocumentSession;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    saves = [];
+    writes = [];
+    failWrites = false;
+    const draft: NoteDrafts = {
+      write: (t, _base, gen) => {
+        if (failWrites) return Promise.reject(new DOMException("quota", "QuotaExceededError"));
+        writes.push([t, gen]);
+        return Promise.resolve();
+      },
+      saved: () => {},
+      drop: () => {},
+      close: () => {},
+    };
+    text = "v0";
+    doc = new DocumentSession("a.md", '"e0"', {
+      save: (_p, content, base) => new Promise((answer) => saves.push({ content, base, answer })),
+      read: () => text,
+      debounceMs: 1000,
+      draftMs: 300,
+      draft,
+    });
+  });
+  afterEach(() => {
+    doc.dispose();
+    vi.useRealTimers();
+  });
+
+  const type = (t: string) => {
+    text = t;
+    doc.edit();
+  };
+
+  describe("a save that times out (its outcome is unknown)", () => {
+    it("keeps the note dirty, says it is retrying, never 'clean', and retries the same base", async () => {
+      type("v1");
+      void doc.flush();
+      saves[0]?.answer({ kind: "unknown" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(doc.dirty).toBe(true);
+      expect(doc.state.value.status).toBe("stalled");
+      await vi.advanceTimersByTimeAsync(1000); // the backoff
+      expect(saves).toHaveLength(2);
+      // The bytes may have landed: the retry sends them again over the same base, and the
+      // server answers an identical retry with 204 (ADR-0027).
+      expect(saves[1]).toMatchObject({ content: "v1", base: '"e0"' });
+      saves[1]?.answer({ kind: "saved", etag: '"e1"' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(doc.state.value.status).toBe("clean");
+      expect(doc.dirty).toBe(false);
+    });
+
+    it("an edit made while stalled is in the retry, and only the retry's generation clears it", async () => {
+      type("v1");
+      void doc.flush();
+      saves[0]?.answer({ kind: "unknown" });
+      await vi.advanceTimersByTimeAsync(0);
+      type("v2");
+      expect(doc.state.value.status).toBe("dirty");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(saves.at(-1)?.content).toBe("v2");
+      type("v3"); // during the retry
+      saves.at(-1)?.answer({ kind: "saved", etag: '"e1"' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(doc.dirty).toBe(true);
+      expect(doc.state.value.status).toBe("dirty");
+    });
+
+    it("flush reports the edit as not saved", async () => {
+      type("v1");
+      const flushed = doc.flush();
+      saves[0]?.answer({ kind: "unknown" });
+      await flushed;
+      expect(doc.dirty).toBe(true);
+    });
+  });
+
+  describe("with the editor gone (no text to read)", () => {
+    it("never saves or drafts: there is no text to fall back on", async () => {
+      type("v1");
+      text = undefined; // the editor was unmounted
+      await vi.advanceTimersByTimeAsync(5000);
+      void doc.flush();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(saves).toEqual([]);
+      expect(await doc.writeDraft()).toBe(false);
+      expect(writes).toEqual([]);
+      expect(doc.dirty).toBe(true);
+    });
+  });
+
+  describe("a draft write that fails (quota, private mode)", () => {
+    it("isn't counted as a draft: writeDraft says so, and the next write tries again", async () => {
+      failWrites = true;
+      type("v1");
+      expect(await doc.writeDraft()).toBe(false);
+      failWrites = false;
+      expect(await doc.writeDraft()).toBe(true); // the same generation, now kept
+      expect(writes).toEqual([["v1", 1]]);
+    });
+
+    it("is retried on the next edit's draft", async () => {
+      failWrites = true;
+      type("v1");
+      await vi.advanceTimersByTimeAsync(300);
+      failWrites = false;
+      type("v2");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(writes).toEqual([["v2", 2]]);
+    });
+
+    it("raises the warning once, and clears it when a draft is written again", async () => {
+      const seen: boolean[] = [];
+      doc.draftFailed.subscribe((v) => seen.push(v));
+      failWrites = true;
+      type("v1");
+      await vi.advanceTimersByTimeAsync(300);
+      type("v2");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(doc.draftFailed.value).toBe(true);
+      failWrites = false;
+      type("v3");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(doc.draftFailed.value).toBe(false);
+      expect(seen.filter((v) => v)).toHaveLength(1);
+    });
+
+    it("says true when there is nothing to keep (a clean note)", async () => {
+      failWrites = true;
+      expect(await doc.writeDraft()).toBe(true);
+    });
+  });
+});

@@ -17,6 +17,7 @@ const statusText: Record<DocState["status"], string> = {
   clean: "Saved",
   dirty: "Edited",
   saving: "Saving…",
+  stalled: "Saving is taking too long; retrying",
   error: "Not saved",
   conflict: "Not saved: conflict",
   gone: "Not saved: the note is gone",
@@ -271,6 +272,7 @@ export class NoteEditor extends LightElement {
           )
         : nothing}
       ${this.secretWarning()}
+      <pm-draft-warning .doc=${note.doc}></pm-draft-warning>
       <pm-draft-banner .workspace=${this.workspace} .put=${(t: string) => this.editor?.replace(t)}></pm-draft-banner>
       ${st.status === "gone"
         ? html`<section class="pm-banner" role="alert" aria-labelledby="pm-gone-title">

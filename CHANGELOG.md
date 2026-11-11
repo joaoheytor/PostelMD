@@ -150,6 +150,16 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   message instead of an internal error.
 - The notice after setup counts exactly the files the first commit holds, and says how many
   files over 50 MB were left out of git instead of implying the whole folder was imported.
+- Logging out no longer loses edits that couldn't be saved. It now stops and asks: stay, or
+  log out and keep the edits in this browser as a draft, offered when you open the note
+  again. Logging out also closes the open note, so nothing can later save the text it was
+  loaded with over your edits.
+- A save that gets no answer within 15 seconds no longer leaves the note saying "Saving…"
+  forever: the status says "Saving is taking too long; retrying", and the save is retried
+  until it lands.
+- When the browser refuses to keep a local copy of your edits (storage full, some private
+  modes), the editor now says so instead of acting as if the copy existed, and tries again on
+  your next edit.
 
 ### Security
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library

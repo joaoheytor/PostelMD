@@ -1,4 +1,5 @@
 import * as api from "./api";
+import type { DocState } from "./document";
 import type { Drafts } from "./drafts";
 import { Git } from "./git";
 import { Store } from "./store";
@@ -13,6 +14,16 @@ export interface AppState {
   error?: string | undefined;
   /** Said once, until dismissed: what setup imported. */
   notice?: string | undefined;
+  /** Logging out found edits it couldn't save: the user chooses to stay or keep a draft. */
+  leaving?: Leaving | undefined;
+}
+
+export interface Leaving {
+  path: string;
+  /** Why the edits aren't saved. */
+  why: string;
+  /** Keeping them as a local draft failed too: the only safe choice is to stay. */
+  draftFailed: boolean;
 }
 
 const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
@@ -80,9 +91,53 @@ export class App {
     this.state.update((s) => ({ ...s, notice: undefined }));
   }
 
+  /**
+   * Logs out once the open note is saved. If its edits can't be saved, nothing happens yet:
+   * leaving asks the user to stay or to log out keeping them as a local draft.
+   */
   async logout(): Promise<void> {
-    await this.workspace.saveOpen();
+    if (!(await this.workspace.saveOpen())) {
+      const doc = this.workspace.state.value.open?.doc;
+      if (doc) this.state.update((s) => ({ ...s, leaving: { path: doc.path, why: unsavedWhy(doc.state.value), draftFailed: false } }));
+      return;
+    }
+    await this.leave();
+  }
+
+  /** The user chose to log out with unsaved edits: only once a local draft holds them. */
+  async logoutKeepingDraft(): Promise<void> {
+    const doc = this.workspace.state.value.open?.doc;
+    if (doc && !(await doc.writeDraft())) {
+      this.state.update((s) => (s.leaving ? { ...s, leaving: { ...s.leaving, draftFailed: true } } : s));
+      return;
+    }
+    await this.leave();
+  }
+
+  /** The user chose to stay with the unsaved edits. */
+  stay(): void {
+    this.state.update((s) => ({ ...s, leaving: undefined }));
+  }
+
+  /** Closes the open note first, so no save or draft outlives its editor. */
+  private async leave(): Promise<void> {
+    this.workspace.close();
     await api.logout();
     this.state.set({ phase: "login", reauth: false });
+  }
+}
+
+/** Why the open note's edits aren't saved, in words, for the logout question. */
+export function unsavedWhy(st: DocState): string {
+  switch (st.status) {
+    case "conflict":
+      return "the note was changed somewhere else too";
+    case "gone":
+      return "the note was deleted or moved outside this editor";
+    case "stalled":
+      return "saving is taking too long";
+    default:
+      // The status line's reason, without what it adds ("Retrying; …"): the question says that.
+      return (st.message ?? "the server didn't take them").split(/\.(?:\s|$)/)[0] ?? "";
   }
 }

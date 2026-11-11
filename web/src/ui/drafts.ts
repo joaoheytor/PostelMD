@@ -137,3 +137,39 @@ export class DraftsDialog extends LightElement {
   }
 }
 customElements.define("pm-drafts", DraftsDialog);
+
+/**
+ * Says, without blocking, that the browser refused the open note's draft (quota, private
+ * mode): until a save lands, its edits are only in this tab. Gone once a draft is written.
+ */
+export class DraftWarning extends LightElement {
+  static override properties = { doc: { attribute: false } };
+  declare doc: DocumentSession | undefined;
+  private watched: { doc: DocumentSession; sub: Disposable } | undefined;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.requestUpdate(); // subscribes again after a reconnect
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.watched?.sub.dispose();
+    this.watched = undefined;
+  }
+
+  protected override willUpdate(): void {
+    if (this.watched?.doc === this.doc) return;
+    this.watched?.sub.dispose();
+    this.watched = this.doc && { doc: this.doc, sub: this.doc.draftFailed.subscribe(() => this.requestUpdate()) };
+  }
+
+  protected override render() {
+    return this.doc?.draftFailed.value
+      ? html`<p class="pm-draft-failed" role="status">
+          Couldn't keep a local copy of your edits in this browser; until they save, they are only in this tab.
+        </p>`
+      : nothing;
+  }
+}
+customElements.define("pm-draft-warning", DraftWarning);

@@ -32,6 +32,7 @@ describe("Workspace.move", () => {
     });
     ws = new Workspace();
     await ws.open("ops/a.md");
+    ws.reader = () => "edited"; // the editor: saves read their text from it
   });
 
   it("saves the open note first, then reopens it at its new path", async () => {
@@ -95,6 +96,7 @@ describe("Workspace.restore", () => {
     });
     ws = new Workspace();
     await ws.open("a.md");
+    ws.reader = () => "edited"; // the editor: saves read their text from it
   });
 
   it("saves first, restores over the saved version, and reopens the note", async () => {

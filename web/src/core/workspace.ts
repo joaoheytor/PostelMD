@@ -38,7 +38,7 @@ export class Workspace {
   readonly noteDrafts = new Store<Draft[]>([]);
   /** What the last scan of the open note found: it runs on every save and on paste. */
   readonly secrets = new SecretWatch();
-  /** Counts open() calls, so a slower, earlier one can tell it was superseded. */
+  /** Counts open() and close() calls, so a slower, earlier open can tell it was superseded. */
   private opens = 0;
 
   useDrafts(drafts: Drafts): void {
@@ -57,21 +57,31 @@ export class Workspace {
   }
 
   /**
-   * Closes the open note, whatever it holds (call saveOpen first), and opens path. When opens
-   * overlap, the last one wins: an earlier one that finishes later changes nothing.
+   * Closes the open note (call saveOpen first): its session stops saving, and an edit not in a
+   * draft yet goes into one while the editor is still there. A loading open() opens nothing.
    */
-  async open(path: string): Promise<void> {
-    const seq = ++this.opens;
+  close(): void {
+    this.opens++;
     this.state.value.open?.doc.dispose();
     this.state.set({});
     this.noteDrafts.set([]);
     this.secrets.clear();
+  }
+
+  /**
+   * Closes the open note, whatever it holds (call saveOpen first), and opens path. When opens
+   * overlap, the last one wins: an earlier one that finishes later changes nothing.
+   */
+  async open(path: string): Promise<void> {
+    this.close();
+    const seq = this.opens;
     try {
       const note = await api.readNote(path);
       if (seq !== this.opens) return;
       const offered = (await this.drafts?.offered(path)) ?? [];
       if (seq !== this.opens) return;
-      const read = () => this.reader?.() ?? note.content;
+      // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
+      const read = () => this.reader?.();
       const draft = this.drafts?.forNote(path);
       // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
       const save = (p: string, content: string, base: string) => {
@@ -241,7 +251,7 @@ export class Workspace {
     put(d.text);
     open.doc.rebase(d.base);
     open.doc.edit();
-    await open.doc.writeDraft();
+    if (!(await open.doc.writeDraft())) return; // no other copy yet: the old draft stays
     await this.discardDraft(d);
   }
 

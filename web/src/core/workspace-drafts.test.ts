@@ -110,6 +110,18 @@ describe("Workspace drafts (ADR-0003 §7)", () => {
     expect(ws.noteDrafts.value).toEqual([]);
   });
 
+  it("restoring a draft keeps the old one when this tab's draft can't be written (quota)", async () => {
+    await ws.open("a.md");
+    let editor = "# a.md";
+    ws.reader = () => editor;
+    const d = ws.noteDrafts.value[0];
+    if (!d) throw new Error("no draft offered");
+    vi.spyOn(backend, "put").mockRejectedValue(new DOMException("quota", "QuotaExceededError"));
+    await ws.recoverDraft(d, (t) => (editor = t));
+    expect(editor).toBe("lost edit");
+    expect(await rows()).toContain("a.md closed-tab lost edit"); // still the edit's only other copy
+  });
+
   it("discards only the draft the user picked", async () => {
     await ws.open("a.md");
     const d = ws.noteDrafts.value[0];

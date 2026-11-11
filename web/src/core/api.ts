@@ -150,32 +150,42 @@ export async function readNote(path: string): Promise<Note> {
   return { content: await resp.text(), etag: resp.headers.get("ETag") ?? "" };
 }
 
-/** The outcome of a save; saveNote never throws. */
+/**
+ * The outcome of a save; saveNote never throws. "unknown": no answer in time, so the save may
+ * or may not have landed.
+ */
 export type SaveResult =
   | { kind: "saved"; etag: string }
   | { kind: "conflict"; etag: string; content: string }
   | { kind: "gone" }
+  | { kind: "unknown" }
   | { kind: "error"; message: string; retryAfterMs: number; retry: boolean };
 
-/** Saves over baseETag (If-Match). It never creates a note (ADR-0003 §7). */
-export async function saveNote(path: string, content: string, baseETag: string): Promise<SaveResult> {
-  let resp: Response;
+/**
+ * Saves over baseETag (If-Match). It never creates a note (ADR-0003 §7). After timeoutMs
+ * (15 s), answer included, its outcome is unknown.
+ */
+export async function saveNote(path: string, content: string, baseETag: string, timeoutMs = 15_000): Promise<SaveResult> {
+  // The browser owns the timer: it aborts the request and the reading of its answer.
+  const signal = AbortSignal.timeout(timeoutMs);
   try {
-    resp = await request("PUT", `/api/v1/notes/${encodePath(path)}`, {
+    const resp = await request("PUT", `/api/v1/notes/${encodePath(path)}`, {
       headers: { "If-Match": baseETag, "Content-Type": "text/markdown; charset=utf-8" },
       body: content,
+      signal,
     });
+    if (resp.status === 204) return { kind: "saved", etag: resp.headers.get("ETag") ?? "" };
+    if (resp.status === 412) return { kind: "conflict", etag: resp.headers.get("ETag") ?? "", content: await resp.text() };
+    if (resp.status === 404) return { kind: "gone" };
+    const e = await errorOf(resp);
+    // Busy (503), an expired session (401) and server errors are retried; 413 and other client
+    // errors won't get better by themselves.
+    const retry = e.status === 401 || e.status === 503 || e.status >= 500;
+    return { kind: "error", message: saveError(e), retryAfterMs: e.retryAfterMs, retry };
   } catch {
+    if (signal.aborted) return { kind: "unknown" };
     return { kind: "error", message: `can't reach the server. ${kept}`, retryAfterMs: 0, retry: true };
   }
-  if (resp.status === 204) return { kind: "saved", etag: resp.headers.get("ETag") ?? "" };
-  if (resp.status === 412) return { kind: "conflict", etag: resp.headers.get("ETag") ?? "", content: await resp.text() };
-  if (resp.status === 404) return { kind: "gone" };
-  const e = await errorOf(resp);
-  // Busy (503), an expired session (401) and server errors are retried; 413 and other client
-  // errors won't get better by themselves.
-  const retry = e.status === 401 || e.status === 503 || e.status >= 500;
-  return { kind: "error", message: saveError(e), retryAfterMs: e.retryAfterMs, retry };
 }
 
 const kept = "Retrying; your edits are kept in this browser.";
