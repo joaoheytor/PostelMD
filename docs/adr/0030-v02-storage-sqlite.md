@@ -147,9 +147,11 @@ generation bumps, suspects, tombstones).
   4. write the vault marker with the UUID and format 2 (ADR-0031);
   5. write `2` into `format` (ADR-0025's atomic write).
 
-  **The identity check** used below: at least 90% of up to 1,000 live `files` rows, chosen at
-  random, are found at their path with the same inode and size. A database with no live rows
-  passes (no ID can be misattributed).
+  **The identity check** used below: at least 90% of up to 1,000 live `files` rows are found
+  at their path with the same inode and size. The sample is deterministic: rows ordered by a
+  hash of their ID seeded with the stored vault UUID, the first 1,000 taken, so a test gets
+  the same answer on every run (tests also use vaults where every row, or no row, matches).
+  A database with no live rows passes (no ID can be misattributed).
 
   | `format` | `app.db` | Vault marker | Action |
   |---|---|---|---|
@@ -160,13 +162,18 @@ generation bumps, suspects, tombstones).
   | Any | Flag set, or present at `2` | Another UUID | Refuse: another vault is mounted. Fix in the message: mount the vault this state belongs to, or `db rebuild` to adopt this one with new IDs |
   | `2` | Present | Same UUID | Go on |
   | `2` | Present, with live rows | Absent | Refuse, changing nothing (no tombstone): the message names both fixes, mount the right folder, or, if this is the vault, `postelmd vault claim` |
+  | `2` | Present, with no live rows | Absent | Nothing can be misattributed (the identity check passes): rewrite the marker with the stored UUID, log a warning, go on |
+  | Any | Any | Present but unparseable (not the three lines of ADR-0031, a symlink, or not a regular file) | Refuse, changing nothing; the message names `postelmd vault claim` |
   | `2` | Present | Empty | ADR-0027's printed fix recreated it, or another v0.1 folder is mounted. If the identity check passes, rewrite it with the stored UUID, log a warning, go on; else refuse as for an absent marker |
   | `2` | Absent | Any | Refuse: database lost; fix `postelmd db rebuild` |
   | Higher, damaged, symlink | | | ADR-0025's rows |
 
 - **`postelmd vault claim`** (offline, under the instance lock): prints the vault's path, its
   file count and how many live rows match by path, inode and size, asks for confirmation
-  (`--yes` for scripts), then writes the marker with the stored UUID and format 2.
+  (`--yes` for scripts), then writes the marker with the stored UUID and format 2. When the
+  identity check fails (for example no row matches), `--yes` alone refuses: it takes an
+  explicit `--force`, or typing the vault's path at the interactive prompt, since the next
+  scan will then tombstone every row that doesn't match.
 - **Rollback to v0.1** (runbook, no command), with v0.2 stopped after one clean start and
   stop (so no intent is open):
   1. move `app.db`, `-wal` and `-shm` together into `rolled-back-<time>/`;
@@ -174,6 +181,11 @@ generation bumps, suspects, tombstones).
   3. empty the marker in place, `: > "$vault/.postelmd-tmp/.created-by-postelmd"` (never
      delete it: v0.1 would refuse a vault whose trash isn't empty, ADR-0027);
   4. write `1` into `format`.
+
+  On a named volume (no host shell on the data), steps 1–4 run in a helper container with
+  the volumes mounted, e.g. `busybox`, **as the data's owner** (`--user 65532:65532`, the
+  image's user, or the operator's ID used with `--user`), and steps 3 and 4 truncate and
+  write the existing files rather than replacing them, so their owner and mode don't change.
 
   v0.1 then sees v0.2's edits as files, and the trash layout is the same (ADR-0022). Lost:
   file identity. The next v0.2 start runs a normal first upgrade, with a fresh
