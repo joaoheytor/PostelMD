@@ -111,7 +111,8 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 
 // installGitTransports leaves go-git only the https transport, through the egress client,
 // before any vault is opened (threat model I13, #40). go-git's transports are process-wide,
-// so it runs once per process, however many times serve runs (tests).
+// so it runs once per process, however many times serve runs (tests). After any serve, a
+// test binary's go-git is https-only too.
 var installGitTransports = sync.OnceFunc(func() {
 	git.InstallTransports(egress.New(egress.Options{}))
 })

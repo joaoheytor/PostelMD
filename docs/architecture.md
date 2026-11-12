@@ -53,7 +53,7 @@ Everything else consumes their interfaces.
 | `keys` | Key ring: purposes, versions, rotation, envelope encryption (ADR-0005) |
 | `setup` | First-run lock and setup token |
 | `audit` | The only way to record a security-relevant action (CLAUDE.md rule 15): writes the event to the DB (through `store/sql`) **and** to the external sink: `stdout` via `slog`, `file:` via `store/auditfile`, `webhook` via `egress`. Never receives note content or secret values. |
-| `egress` | The single outbound HTTP client (§11, CLAUDE.md rule 13): IP policy with pinned DNS, approved exceptions per purpose, re-checked redirects, timeouts and size caps. Installed as go-git's `http`/`https` transport (#40). Network I/O only, so it isn't under `store`. |
+| `egress` | The single outbound HTTP client (§11, CLAUDE.md rule 13): IP policy with pinned DNS, approved exceptions per purpose, re-checked redirects, timeouts and size caps. Installed as go-git's only transport, `https`; `file`, `git`, `http` and `ssh` are uninstalled (#40). Network I/O only, so it isn't under `store`. |
 | `plugins` | Manifests, signature and integrity checks, approvals bound to capabilities, revocation list |
 | `config` | Flags > env (`_FILE`) > `config.yaml` > defaults. **The single documented exception to the boundary rule:** it reads `config.yaml` and `_FILE` secrets during bootstrap, before the store exists. |
 

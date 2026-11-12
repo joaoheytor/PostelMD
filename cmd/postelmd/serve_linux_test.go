@@ -192,6 +192,7 @@ func TestSetupURL(t *testing.T) {
 
 // TestServeInstallsHTTPSOnlyGitTransport: once serve has started, go-git knows only the
 // https transport, and that transport is the egress client (threat model I13, #40, #143).
+// After any serve, this test binary's go-git stays https-only: no test here may need another.
 func TestServeInstallsHTTPSOnlyGitTransport(t *testing.T) {
 	start(t, t.TempDir())
 	if len(client.Protocols) != 1 || client.Protocols["https"] == nil {
