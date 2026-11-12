@@ -1,6 +1,6 @@
 # ADR-0026: Nested repositories in the vault are left out of commits
 
-- **Status:** Accepted
+- **Status:** Accepted; its nested-repository match (`.git` compared exactly) is superseded by [ADR-0028](0028-dot-git-when-git-folds-case.md)
 - **Date:** 2026-11-10
 
 ## Context

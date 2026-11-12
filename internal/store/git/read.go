@@ -48,6 +48,13 @@ func (g *Repo) Head() (branch string, commit Hash, err error) {
 
 // Files lists the regular files in commit's tree, path -> blob ID. Symlinks and submodules
 // are left out: commits never touch them. A zero commit has no files.
+//
+// The names are unvalidated: they may be ".git/…", "git~1/…", "..", or hold a backslash.
+// Callers never use one for filesystem access, nor in a tree or index, without checking it
+// with fs.IsReserved first. Listing them is a choice to stay lenient (ADR-0028): a branch
+// holding such an entry (committed on the host, or a crafted push) keeps working, and
+// commits carry the entry through unchanged; refusing would break status and commits until
+// the user rewrites the history on the host.
 func (g *Repo) Files(commit Hash) (map[string]Hash, error) {
 	out := map[string]Hash{}
 	if commit.IsZero() {
@@ -61,16 +68,24 @@ func (g *Repo) Files(commit Hash) (map[string]Hash, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store/git: tree: %w", err)
 	}
-	err = t.Files().ForEach(func(f *object.File) error {
-		if f.Mode == filemode.Regular || f.Mode == filemode.Executable {
-			out[f.Name] = f.Hash
+	// Every name is listed, including ones go-git's walker refuses (a git~1 committed on the
+	// host with core.protectNTFS off): the list only names paths, which callers check with
+	// fs.IsReserved before any filesystem access, and a commit carries such files through.
+	w := object.NewTreeWalker(t, true, nil)
+	defer w.Close()
+	w.SkipPathValidation()
+	for {
+		name, e, err := w.Next()
+		if errors.Is(err, io.EOF) {
+			return out, nil
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store/git: files: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("store/git: files: %w", err)
+		}
+		if e.Mode == filemode.Regular || e.Mode == filemode.Executable {
+			out[name] = e.Hash
+		}
 	}
-	return out, nil
 }
 
 // Version is one commit that changed a file.
@@ -90,17 +105,37 @@ func (g *Repo) Log(head Hash, path string, limit int) ([]Version, error) {
 	if err := checkPath(path); err != nil {
 		return nil, fmt.Errorf("%w: %q", err, path)
 	}
-	iter, err := g.r.Log(&gogit.LogOptions{From: head, FileName: &path})
+	// go-git's FileName filter diffs whole trees, with path validation: one name it refuses
+	// anywhere in the tree (a git~1 committed on the host) would break every note's history.
+	// Instead each commit's entry at path is compared with its first parent's; FindEntry
+	// only walks path's own components.
+	iter, err := g.r.Log(&gogit.LogOptions{From: head})
 	if err != nil {
 		return nil, fmt.Errorf("store/git: log: %w", err)
 	}
 	defer iter.Close()
 	var out []Version
 	err = iter.ForEach(func(c *object.Commit) error {
-		_, ferr := c.File(path)
+		cur, err := fileAt(c, path)
+		if err != nil {
+			return err
+		}
+		var parent Hash
+		if c.NumParents() > 0 {
+			p, err := c.Parent(0)
+			if err != nil {
+				return err
+			}
+			if parent, err = fileAt(p, path); err != nil {
+				return err
+			}
+		}
+		if cur == parent {
+			return nil
+		}
 		out = append(out, Version{
 			Commit: c.Hash.String(), Message: strings.TrimSpace(c.Message), Author: c.Author.Name,
-			When: c.Author.When, Deleted: errors.Is(ferr, object.ErrFileNotFound),
+			When: c.Author.When, Deleted: cur.IsZero(),
 		})
 		if len(out) >= limit {
 			return storer.ErrStop
@@ -111,6 +146,26 @@ func (g *Repo) Log(head Hash, path string, limit int) ([]Version, error) {
 		return nil, fmt.Errorf("store/git: log: %w", err)
 	}
 	return out, nil
+}
+
+// fileAt returns the blob ID of the regular file at path in c's tree, or a zero hash when
+// there is none (missing, a folder, a symlink or a submodule).
+func fileAt(c *object.Commit, path string) (Hash, error) {
+	t, err := c.Tree()
+	if err != nil {
+		return Hash{}, err
+	}
+	e, err := t.FindEntry(path)
+	if errors.Is(err, object.ErrEntryNotFound) || errors.Is(err, object.ErrDirectoryNotFound) {
+		return Hash{}, nil
+	}
+	if err != nil {
+		return Hash{}, err
+	}
+	if e.Mode != filemode.Regular && e.Mode != filemode.Executable {
+		return Hash{}, nil
+	}
+	return e.Hash, nil
 }
 
 // File returns path's content in commit, reading at most max bytes (more is an error).

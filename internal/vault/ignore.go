@@ -32,6 +32,7 @@ type commitWalk struct {
 	tracked map[string]bool // directories holding committed files
 	fn      func(p string, size int64, ignored bool) error
 	nested  func(p string, ignored bool)
+	fold    bool // core.ignorecase: git folds case, as on a case-insensitive filesystem
 }
 
 func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, size int64, ignored bool) error,
@@ -49,7 +50,7 @@ func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, s
 	if err != nil {
 		return err
 	}
-	w := &commitWalk{v: v, tracked: map[string]bool{}, fn: fn, nested: nested}
+	w := &commitWalk{v: v, tracked: map[string]bool{}, fn: fn, nested: nested, fold: fold}
 	for p := range committed {
 		for d := p; strings.Contains(d, "/"); {
 			d = d[:strings.LastIndex(d, "/")]
@@ -64,11 +65,14 @@ func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, s
 }
 
 // hasGit reports whether a folder's entries include a .git of any kind (a folder in a clone,
-// a file in a submodule). The name is matched exactly, as git on Linux does: ".GIT" doesn't
-// make a repository.
-func hasGit(entries []iofs.DirEntry) bool {
+// a file in a submodule). Git opens "<folder>/.git", so the name is matched exactly on a
+// case-sensitive filesystem (".GIT" doesn't make a repository), and as a case-folding one
+// may find it when git folds case (fold, core.ignorecase): any letter case, ignorable code
+// points dropped (fs.FoldsToDotGit). Other look-alikes, such as ".git ", are reserved but
+// never make a repository: Linux keeps their spaces and dots.
+func hasGit(entries []iofs.DirEntry, fold bool) bool {
 	for _, e := range entries {
-		if e.Name() == ".git" {
+		if e.Name() == ".git" || fold && fs.FoldsToDotGit(e.Name()) {
 			return true
 		}
 	}
@@ -102,7 +106,7 @@ func (w *commitWalk) walk(dir string, entries []iofs.DirEntry, ign *git.Ignore, 
 			if err != nil {
 				return err
 			}
-			if hasGit(sub) {
+			if hasGit(sub, w.fold) {
 				w.nested(p, isIgnored)
 				continue
 			}

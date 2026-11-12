@@ -83,6 +83,25 @@ func TestOnlyDotGitMakesARepository(t *testing.T) {
 	}
 }
 
+// TestDotGitInAnyCaseMakesARepositoryWhenGitFoldsCase: with core.ignorecase=true (git sets
+// it on a case-insensitive filesystem), git opens "odd/.git" and finds "odd/.GIT", so odd is
+// a repository: its notes aren't committed and it is named among the repositories (#119).
+// Casefold on older Linux kernels also ignored default-ignorable code points, so "zw"'s
+// ".G<U+200B>it" counts too; "dots"' ".git." doesn't: Linux keeps trailing dots.
+func TestDotGitInAnyCaseMakesARepositoryWhenGitFoldsCase(t *testing.T) {
+	v, dir := newVault(t)
+	writeFiles(t, dir, map[string]string{"odd/.GIT": "gitdir: ../.git/modules/odd\n", "odd/n.md": "n",
+		"zw/.G" + string(rune(0x200b)) + "it/config": "x", "zw/n.md": "n", "dots/.git./config": "x", "dots/n.md": "n"})
+	_, err := v.EnableGit()
+	must(t, err)
+	gitCLI(t, dir, "config", "core.ignorecase", "true")
+	st, err := v.Status(ctx)
+	must(t, err)
+	if got := paths(st.Changes); !reflect.DeepEqual(got, []string{"dots/n.md", "notes/a.md"}) || !reflect.DeepEqual(st.Repositories, []string{"odd", "zw"}) {
+		t.Fatalf("Status = %+v; want dots/n.md and notes/a.md added, and odd and zw named", st)
+	}
+}
+
 // TestIgnoredRepositoryIsNotNamed: a repository the user's .gitignore covers is neither a
 // change nor named among the repositories, as git add -A wouldn't record it. "vendor" holds a
 // committed file, so the walk does reach it (an ignored folder with nothing tracked is never

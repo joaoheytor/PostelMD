@@ -40,9 +40,17 @@ func Init(vault *fs.Root, tmpDir string) (bool, error) {
 			return false, fmt.Errorf("store/git: init: %w", err)
 		}
 	}
+	fold, err := foldsCase(vault, tmp)
+	if err != nil {
+		return false, fmt.Errorf("store/git: init: probe case folding: %w", err)
+	}
+	config := "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n"
+	if fold {
+		config += "\tignorecase = true\n"
+	}
 	files := map[string]string{
 		"/HEAD":   "ref: refs/heads/" + DefaultBranch + "\n",
-		"/config": "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n",
+		"/config": config,
 		// The user's own git shouldn't list PostelMD's reserved folders as untracked.
 		"/info/exclude": "/.postelmd-trash/\n/.postelmd-tmp/\n",
 	}
@@ -68,4 +76,25 @@ func Init(vault *fs.Root, tmpDir string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// foldsCase is probeCaseFold, replaced in tests: the test machine's filesystem doesn't fold.
+var foldsCase = probeCaseFold
+
+// probeCaseFold reports whether the filesystem under dir folds case, as git init finds out
+// for core.ignorecase: it creates a file and looks it up in another letter case, then
+// removes it. dir is the repository being built, inside the vault's temp directory.
+func probeCaseFold(vault *fs.Root, dir string) (bool, error) {
+	probe := dir + "/case-probe"
+	if err := vault.CreateFile(probe, nil, 0o600); err != nil {
+		return false, err
+	}
+	_, err := vault.Perm(dir + "/CASE-PROBE")
+	if rmErr := vault.Remove(probe); rmErr != nil {
+		return false, rmErr
+	}
+	if errors.Is(err, iofs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }
