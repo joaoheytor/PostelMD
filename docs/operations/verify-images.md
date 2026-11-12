@@ -14,7 +14,7 @@ and `actions/attest-build-provenance`, a wrapper over `actions/attest`).
 | Release signature | `https://github.com/joaoheytor/PostelMD/.github/workflows/release.yaml@refs/tags/vX.Y.Z` | Docker Hub and GHCR |
 | Build provenance (on the index digest) and SBOMs (one per platform digest) of a release | `https://github.com/joaoheytor/PostelMD/.github/workflows/prerelease.yaml@refs/tags/vX.Y.Z-rc.N` (the RC that was promoted) | Docker Hub, GHCR and GitHub's attestation API |
 | Release candidate: signature, provenance, SBOMs | `prerelease.yaml@refs/tags/vX.Y.Z-rc.N` | GHCR and GitHub's attestation API |
-| Candidate from `main` (for testers, never for production): signature, provenance, SBOMs | `https://github.com/joaoheytor/PostelMD/.github/workflows/candidate.yaml@refs/heads/main` | GHCR and GitHub's attestation API |
+| Candidate from `main` (for testers until the first release candidate, never for production): signature, provenance, SBOMs | `https://github.com/joaoheytor/PostelMD/.github/workflows/candidate.yaml@refs/heads/main` | GHCR and GitHub's attestation API |
 
 **A released image** is one that passes **both** the release-signature check and the
 provenance check below. A release signature alone doesn't say how the image was built;
