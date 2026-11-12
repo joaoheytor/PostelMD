@@ -20,6 +20,8 @@ export interface GitStatus {
   changes: GitChange[];
   /** Files over the commit size limit: never committed. */
   skipped?: string[];
+  /** Folders that are git repositories of their own (a clone, a submodule): never committed (ADR-0026). */
+  repositories?: string[];
   /** Lock files blocking commits (a crash's leftover, or git running on the host). */
   locks: { path: string; modified: string }[];
 }

@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
-import type { GitStatus } from "./git-api";
-import { changedNotice, Git, type GitDeps } from "./git";
+import { gitStatus, type GitStatus } from "./git-api";
+import { changedNotice, Git, type GitDeps, leftOut } from "./git";
 
 // Fake secrets, built at run time so no scanner flags this public file.
 const awsKey = `AKIA${"Q7".repeat(8)}`;
@@ -156,5 +156,42 @@ describe("Git", () => {
     await git.refresh();
     expect(git.state.value.status).toBe(edited);
     expect(git.state.value.error).toBe("Couldn't read the changes: 503");
+  });
+});
+
+describe("leftOut (ADR-0026: what commits leave out)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Only repositories can be committed elsewhere: a file over 50 MB is listed even if tracked.
+  const tooLarge = {
+    hint: "PostelMD doesn't commit files over 50 MB. Add them to .gitignore to hide them here.",
+  };
+  const repositories = {
+    hint: "PostelMD doesn't commit files in these folders. Commit them with their own git, or add them to .gitignore to hide them here.",
+  };
+
+  it("names the files too large to commit and the folders that are repositories of their own, how many, and what to do", () => {
+    expect(leftOut({ ...clean, skipped: ["big.iso", "dump.tar"], repositories: ["clone", "infra/sub", "x"] })).toEqual([
+      { ...tooLarge, label: "Over 50 MB (2):", paths: ["big.iso", "dump.tar"] },
+      { ...repositories, label: "Git repositories of their own (3):", paths: ["clone", "infra/sub", "x"] },
+    ]);
+  });
+
+  const answering = (body: object) =>
+    vi.stubGlobal("fetch", (() => Promise.resolve(Response.json(body))) as typeof fetch);
+
+  it("says nothing when the server lists neither, as it omits empty lists", async () => {
+    answering({ branch: "main", changes: [], locks: [] });
+    expect(leftOut(await gitStatus())).toEqual([]);
+  });
+
+  it("says nothing for empty lists, should the server send them", async () => {
+    answering({ branch: "main", changes: [], locks: [], skipped: [], repositories: [] });
+    expect(leftOut(await gitStatus())).toEqual([]);
+  });
+
+  it("reads the repositories from the server's status", async () => {
+    answering({ branch: "main", changes: [], locks: [], repositories: ["clone"] });
+    expect(leftOut(await gitStatus())).toEqual([{ ...repositories, label: "Git repositories of their own (1):", paths: ["clone"] }]);
   });
 });

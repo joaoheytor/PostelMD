@@ -30,6 +30,39 @@ export interface GitDeps {
 
 export const changedNotice = "The changes were updated since you opened this dialog; review them again.";
 
+/** One kind of path commits leave out, and what the user can do about it. */
+export interface LeftOut {
+  label: string;
+  paths: string[];
+  hint: string;
+}
+
+/**
+ * What commits leave out, by kind: files over the size limit (ADR-0020) and folders that are
+ * git repositories of their own (ADR-0026), each with how many. The server lists neither
+ * kind when .gitignore ignores it and git doesn't track it (vault/history.go); a tracked file
+ * over 50 MB stays listed, so only repositories get "commit them" advice. The server omits
+ * empty lists.
+ */
+export function leftOut(status: GitStatus): LeftOut[] {
+  const out: LeftOut[] = [];
+  if (status.skipped?.length) {
+    out.push({
+      label: `Over 50 MB (${status.skipped.length}):`,
+      paths: status.skipped,
+      hint: "PostelMD doesn't commit files over 50 MB. Add them to .gitignore to hide them here.",
+    });
+  }
+  if (status.repositories?.length) {
+    out.push({
+      label: `Git repositories of their own (${status.repositories.length}):`,
+      paths: status.repositories,
+      hint: "PostelMD doesn't commit files in these folders. Commit them with their own git, or add them to .gitignore to hide them here.",
+    });
+  }
+  return out;
+}
+
 /** How many times a refresh lists the changes again when a file changes while it reads. */
 const maxRelists = 3;
 
