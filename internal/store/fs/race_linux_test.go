@@ -4,6 +4,7 @@ package fs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -68,7 +69,7 @@ func TestReadFileSymlinkSwapRace(t *testing.T) {
 		if string(b) == "SECRET" {
 			t.Fatalf("read outside the vault after %d reads", n+1)
 		}
-		return err != nil
+		return errors.Is(err, ErrSymlink) // "dir" was the swapped-in symlink
 	})
 	t.Logf("%d reads during swaps, %d refused (the swap was visible), 0 escaped", reads, refused)
 }
@@ -105,7 +106,7 @@ func TestRenameNoReplaceSymlinkSwapRace(t *testing.T) {
 		// The vault directory is "dir" or "swap" depending on the last exchange.
 		_ = os.Remove(filepath.Join(vault, "dir", "victim.md"))
 		_ = os.Remove(filepath.Join(vault, "swap", "victim.md"))
-		return err != nil
+		return errors.Is(err, ErrSymlink) // "dir" was the swapped-in symlink
 	})
 	t.Logf("%d renames during swaps, %d refused (the swap was visible), none escaped", attempts, refused)
 }

@@ -192,8 +192,9 @@ Planned, with the code that needs it: `make dev` (go run + Vite dev server).
 - Timing tests measure growth, never a wall-clock bound (PR #102 failed CI on a 200 ms
   bound): warm up, take the median of several runs at n and 4n, assert their ratio under a
   threshold, and keep only a generous hang guard as an absolute limit.
-- Frontend: Vitest for `core/` (no DOM needed). Playwright uses role- and label-based
-  locators only; no CSS or structure selectors.
+- Frontend: Vitest for `core/` (no DOM needed). Playwright uses user-facing locators only
+  (role, label, or text/title scoped inside a role-located element); no CSS or structure
+  selectors.
 - Prove each new test can fail: break or disable the behaviour, see the test fail, restore
   it. Say so in the PR.
 - Fake secrets in tests are built at run time (e.g. `"AKIA" + "Q7".repeat(8)`), so the guard

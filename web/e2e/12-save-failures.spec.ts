@@ -104,7 +104,7 @@ async function stallFirstSave(page: Page, landed: boolean): Promise<{ saves: () 
 /**
  * Makes the save timeout 3 s instead of 15 s in page, from the test side only: the app is the
  * production build, and the 15 s value is the unit test's (api-save.test.ts). Returns how many
- * timers it shortened, so a test can check it touched the save's.
+ * timers it shortened, so a test can check it touched every save's.
  */
 async function shortSaveTimeout(page: Page): Promise<() => Promise<number>> {
   await page.addInitScript(() => {
@@ -142,11 +142,12 @@ for (const { name, landed, more, what } of stalls) {
       await expect(status).toHaveText("Saving…");
       if (more) await page.keyboard.type(more);
       await expect(status).toHaveText("Saving is taking too long; retrying", { timeout: 10_000 });
-      expect(await shortened()).toBeGreaterThan(0);
       if (!landed) expect(readFileSync(vault(name), "utf8")).toBe("# Stuck\n");
       await expect.poll(() => readFileSync(vault(name), "utf8")).toBe(`# Stuck\nscale the deployment${more}`);
       await expect(status).toHaveText("Saved");
       expect(stall.saves()).toBe(more ? 3 : 2);
+      // Every save the server saw ran under the shortened timer, not the production one.
+      expect(await shortened()).toBeGreaterThanOrEqual(stall.saves());
       await expect(page.getByRole("button", { name: "Keep my version" })).toHaveCount(0);
     } finally {
       await stall?.release();
