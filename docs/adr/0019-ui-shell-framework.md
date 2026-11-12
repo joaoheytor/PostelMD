@@ -98,3 +98,9 @@ uses constructable stylesheets (`adoptedStyleSheets`) instead. CSP allows those,
 | Lit with shadow DOM for every component | ARIA id references can't cross shadow roots, which breaks tree, tab and listbox patterns. Global styles would need re-adopting in each component. |
 | Keep CodeMirror in the light DOM and add a per-response style nonce (`EditorView.cspNonce`) | The server would have to template `index.html` on every request, which stops it being a static, cacheable asset. It also widens `style-src`, which the shadow root avoids. |
 | React, Vue, Solid | Not shortlisted. React and Vue are heavier for a small shell; Solid is close to Svelte's trade-offs with a smaller community. None improves on the constraints above. |
+
+## Clarifications
+- **2026-11-12, locator convention.** The Context's "role- and label-based locators only"
+  described the convention when this ADR was written; it is not part of the Decision. The
+  convention now lives in the Testing conventions of [CLAUDE.md](../../CLAUDE.md#testing-conventions):
+  user-facing locators only (role, label, text or title), never CSS or structure selectors.

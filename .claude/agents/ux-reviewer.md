@@ -26,7 +26,9 @@ push, comment on PRs, or create tags.
 - **Rule 3:** UI components subscribe to `web/src/core` stores; no ad-hoc DOM events between
   components. **Rule 8:** listeners and timers disposed. **Rule 9:** no work while the
   preview is hidden.
-- **Tests:** Playwright uses role- and label-based locators only; asserts saved content on
+- **Tests:** Playwright uses user-facing locators only (role, label, text or title; text and
+  title scoped inside a role-located element where one exists), never CSS or structure
+  selectors; asserts saved content on
   disk, not the "Saved" status; covers the keyboard path.
 - Unsaved work is never lost silently (close, reload, conflict).
 
