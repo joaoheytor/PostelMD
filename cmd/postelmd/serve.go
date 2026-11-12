@@ -66,44 +66,20 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = svc.Close() }()
-	v, err := vault.Open(paths.Vault)
+	v, err := openVault(paths.Vault, log)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = v.Close() }()
-	v.SetLogger(log)
-	created, err := v.EnableGit()
-	if err != nil {
-		return err
-	}
-	if created {
-		log.Info("created a git repository for the vault", "vault", paths.Vault)
-	}
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
 	}
-	if svc.NeedsSetup() {
-		tok, err := svc.NewSetupToken()
-		if err != nil {
-			return err
-		}
-		// Printed, never logged as a record: the one place a token reaches stdout (ADR-0009).
-		// The token stays out of the URL, so it isn't kept in the browser's history.
-		_, _ = fmt.Fprintf(stdout, "\nPostelMD isn't set up yet. Open %s in your browser (with docker -p, use\n"+
-			"the host port you published) and use this one-time token\n(valid %s): %s\n\n",
-			setupURL(cfg.Listen, ln.Addr().String()), auth.SetupTokenTTL, tok)
+	if err := announceSetup(svc, cfg.Listen, ln.Addr().String(), stdout); err != nil {
+		return err
 	}
-	srv := &http.Server{
-		Handler:           pmhttp.AllowHosts(cfg.AllowedHosts, log, pmhttp.NewRouter(svc, v, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log)),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-		MaxHeaderBytes:    64 << 10,
-		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
-	}
+	srv := newHTTPServer(cfg, svc, v, log)
 	errs := make(chan error, 1)
 	go func() { errs <- srv.Serve(ln) }()
 	log.Info("listening", "addr", ln.Addr().String(), "vault", paths.Vault, "version", version, "commit", commit)
@@ -126,4 +102,53 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	return nil
+}
+
+// openVault opens the vault at dir and its git repository (adopted, or created empty).
+func openVault(dir string, log *slog.Logger) (*vault.Vault, error) {
+	v, err := vault.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	v.SetLogger(log)
+	created, err := v.EnableGit()
+	if err != nil {
+		_ = v.Close()
+		return nil, err
+	}
+	if created {
+		log.Info("created a git repository for the vault", "vault", dir)
+	}
+	return v, nil
+}
+
+// announceSetup prints the setup page's address and a fresh one-time token when no password
+// is set yet. Printed, never logged as a record: the one place a token reaches stdout
+// (ADR-0009). The token stays out of the URL, so it isn't kept in the browser's history.
+func announceSetup(svc *auth.Service, listen, actual string, stdout io.Writer) error {
+	if !svc.NeedsSetup() {
+		return nil
+	}
+	tok, err := svc.NewSetupToken()
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "\nPostelMD isn't set up yet. Open %s in your browser (with docker -p, use\n"+
+		"the host port you published) and use this one-time token\n(valid %s): %s\n\n",
+		setupURL(listen, actual), auth.SetupTokenTTL, tok)
+	return nil
+}
+
+// newHTTPServer is the HTTP server with its timeouts and limits, and the host check in front
+// of the router.
+func newHTTPServer(cfg config.Config, svc *auth.Service, v *vault.Vault, log *slog.Logger) *http.Server {
+	return &http.Server{
+		Handler:           pmhttp.AllowHosts(cfg.AllowedHosts, log, pmhttp.NewRouter(svc, v, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+	}
 }

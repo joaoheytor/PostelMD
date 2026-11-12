@@ -30,6 +30,8 @@ var (
 	// probes for it at startup and refuses such a filesystem (ADR-0020); the fallback
 	// mechanisms of ADR-0003 and ADR-0006 are deferred.
 	ErrNoReplaceUnsupported = errors.New("store/fs: filesystem does not support RENAME_NOREPLACE")
+	// ErrTooLarge: ReadFile refused a file over MaxFileSize.
+	ErrTooLarge = errors.New("store/fs: file larger than the read limit")
 )
 
 // MaxFileSize bounds ReadFile (ADR-0003 §8 limits are enforced above this layer; this is a

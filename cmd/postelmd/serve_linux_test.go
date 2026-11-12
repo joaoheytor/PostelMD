@@ -149,10 +149,15 @@ func TestServeEndToEnd(t *testing.T) {
 	}
 	_, _ = w.WriteString("a reset password here\n")
 	_ = w.Close()
-	if err := resetPassword(r.cfg, in, &syncBuffer{}); err != nil {
+	resetOut := &syncBuffer{}
+	if err := resetPassword(r.cfg, in, resetOut); err != nil {
 		t.Fatalf("reset-password: %v", err)
 	}
 	_ = in.Close()
+	// An offline reset is audited like a change through the API (rule 15, #144).
+	if out := resetOut.String(); !strings.Contains(out, `"msg":"audit","event":"password.reset"`) || strings.Contains(out, "a reset password here") {
+		t.Fatalf("reset-password's audit record is missing or holds the password:\n%s", out)
+	}
 
 	again := start(t, data)
 	if strings.Contains(again.out.String(), "one-time token") {

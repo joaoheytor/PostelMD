@@ -155,6 +155,11 @@ func star(p string, pi int, t string, ti int, fold bool) (wmResult, bool, int) {
 
 // class matches the bracket expression at p[pi] against tc (already folded when fold). It
 // returns the index of the closing `]` and wmMatch, or the failure.
+//
+// It is over 60 lines on purpose (CLAUDE.md rule 2): it follows the bracket branch of git's
+// own dowild() in wildmatch.c case for case, so the two can be compared line by line, and
+// splitting the escape, range and [:class:] cases apart would hide how they share pi, pc
+// and prev.
 func class(p string, pi int, tc byte, fold bool) (int, wmResult) {
 	pi++
 	pc := at(p, pi)

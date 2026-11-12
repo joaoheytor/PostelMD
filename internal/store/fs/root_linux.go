@@ -92,7 +92,7 @@ func (r *Root) ReadFile(rel string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %s", ErrNotRegular, rel)
 	}
 	if st.Size > MaxFileSize {
-		return nil, fmt.Errorf("store/fs: %s is larger than %d bytes", rel, MaxFileSize)
+		return nil, fmt.Errorf("%w: %s is larger than %d bytes", ErrTooLarge, rel, MaxFileSize)
 	}
 	return io.ReadAll(io.LimitReader(f, MaxFileSize+1))
 }

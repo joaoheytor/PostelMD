@@ -145,6 +145,33 @@ func TestNotesAPITooLarge(t *testing.T) {
 	}
 }
 
+// TestReadTooLargeFile: a vault file over the store's read limit is 413, worded like the web
+// app's own refusal, and isn't logged as a server error (#144).
+func TestReadTooLargeFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "big.log"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(filepath.Join(dir, "big.log"), 64<<20+1); err != nil { // sparse: no 64 MiB written
+		t.Fatal(err)
+	}
+	v, err := vault.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = v.Close() })
+	logs := &lockedBuffer{}
+	srv := httptest.NewServer(logWrites(slog.New(slog.NewJSONHandler(logs, nil)), NewNotesAPI(v, slog.New(slog.NewJSONHandler(logs, nil)))))
+	t.Cleanup(srv.Close)
+	resp, body := do(t, srv, call{method: "GET", path: "/api/v1/notes/big.log"})
+	if resp.StatusCode != 413 || !strings.Contains(body, "it's larger than 64 MiB, the most PostelMD opens") {
+		t.Fatalf("GET a 64 MiB file = %d %s, want 413", resp.StatusCode, body)
+	}
+	if strings.Contains(logs.String(), `"level":"ERROR"`) {
+		t.Fatalf("a too-large file was logged as an error:\n%s", logs.String())
+	}
+}
+
 func TestListShape(t *testing.T) {
 	srv, _ := newAPI(t)
 	_, body := do(t, srv, call{method: "GET", path: "/api/v1/folders/notes"})

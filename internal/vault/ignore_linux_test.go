@@ -195,6 +195,10 @@ func TestUnwritableOrOddExcludeDoesntStopGit(t *testing.T) {
 			if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "info/exclude") || strings.Contains(out, dir) {
 				t.Fatalf("want a warning naming only info/exclude, got %q", out)
 			}
+			// The error is logged with the pathless attributes, never its text (rule 15, #144).
+			if !strings.Contains(out, "err.kind=") || strings.Contains(out, "exclude:") {
+				t.Fatalf("the warning logs the error's text: %q", out)
+			}
 		})
 	}
 }

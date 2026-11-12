@@ -78,6 +78,28 @@ func TestUnexpectedErrorsLogNoPaths(t *testing.T) {
 	}
 }
 
+// cancelledSave is Notes whose save sees the client go away.
+type cancelledSave struct{ Notes }
+
+func (cancelledSave) Save(context.Context, string, vault.Rev, []byte) (vault.Rev, error) {
+	return "", context.Canceled
+}
+
+// TestCancelledWriteIsLoggedAs499: a save whose client went away is logged with nginx's
+// 499, never as the 200 net/http would assume, so the write log counts it apart from
+// successes (#144).
+func TestCancelledWriteIsLoggedAs499(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(slog.NewJSONHandler(&buf, nil))
+	h := logWrites(l, routed(NewNotesAPI(cancelledSave{}, l)))
+	r := httptest.NewRequest("PUT", "/api/v1/notes/a.md", strings.NewReader("x"))
+	r.Header.Set("If-Match", etag(vault.RevOf([]byte("old"))))
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if !strings.Contains(buf.String(), `"level":"WARN","msg":"request","method":"PUT","route":"PUT /api/v1/notes/{path...}","status":499`) {
+		t.Fatalf("logged %s, want one 499 request line", buf.String())
+	}
+}
+
 // TestPathlessTellsFailuresApart: the log still tells an operator what failed: a system error
 // is named, a store `stat` is known, and an error without a path (a damaged auth state file
 // fails to decode) is told apart by its type.

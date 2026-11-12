@@ -3,7 +3,7 @@
  * the hook that tells the app when the session has expired.
  */
 import { modeOf } from "./filetype";
-import { decodeText, NotTextError } from "./textfile";
+import { decodeText, NotTextError, TooLargeError } from "./textfile";
 
 export class ApiError extends Error {
   constructor(
@@ -152,7 +152,9 @@ export interface Note {
  * for a file the editor can't open: binary, not UTF-8, too large (textfile.ts).
  */
 export async function readNote(path: string): Promise<Note> {
-  const resp = await ok(await request("GET", `/api/v1/notes/${encodePath(path)}`));
+  const got = await request("GET", `/api/v1/notes/${encodePath(path)}`);
+  if (got.status === 413) throw new TooLargeError(); // over the server's read limit
+  const resp = await ok(got);
   // Never resp.text(): it drops a byte order mark and replaces bytes that aren't UTF-8.
   return { content: decodeText(new Uint8Array(await resp.arrayBuffer())), etag: resp.headers.get("ETag") ?? "" };
 }

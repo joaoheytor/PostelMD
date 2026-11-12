@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/joaoheytor/PostelMD/internal/audit"
 	"github.com/joaoheytor/PostelMD/internal/auth"
 	"github.com/joaoheytor/PostelMD/internal/config"
 	"github.com/joaoheytor/PostelMD/internal/egress"
@@ -39,7 +42,9 @@ func resetPassword(cfg config.Config, stdin *os.File, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := auth.ResetPassword(paths.State, pw); err != nil {
+	// The audit record goes to stdout, the sink serve uses (ADR-0020).
+	a := audit.New(slog.New(slog.NewJSONHandler(stdout, nil)))
+	if err := auth.ResetPassword(context.Background(), paths.State, pw, a); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(stdout, "Password changed. Every session has been logged out.")

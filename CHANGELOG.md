@@ -209,6 +209,12 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   another note's text into its file.
 - Opening another note while a move, delete or history restore was in progress could reopen
   the old note over it.
+- Opening a file over 64 MiB now says it's too large to open, instead of a server error
+  (the API answers 413, and the server no longer logs it as an error).
+- The write log records a save whose browser went away as status 499, no longer as a
+  successful 200.
+- `postelmd reset-password` now writes a `password.reset` audit record. Two vault warnings
+  no longer log an error's text, which could quote a path.
 
 ### Security
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library
