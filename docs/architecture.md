@@ -321,7 +321,7 @@ each one; a change updates both.
 | Limit | Default | Configurable | Defined in |
 |---|---|---|---|
 | Note size | 5 MB (`413` above) | no | ADR-0003 §8 |
-| File read (`GET` of a note or file) | 64 MiB (`413` above; the app says the file is too large to open) | no | store read limit (#144) |
+| File read (`GET` of a note or file) | 64 MiB (`413` above; the app shows its own "larger than 5 MiB" refusal) | no | store read limit (#144) |
 | Request body for notes | 6 MB | no | ADR-0003 §8 |
 | Upload size | 25 MB | `POSTELMD_MAX_UPLOAD_MB` | ADR-0009 |
 | Save timeout (server) | 10 s | no | ADR-0003 §8 |
