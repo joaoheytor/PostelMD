@@ -1,5 +1,5 @@
 import * as api from "./api";
-import type { Draft, Drafts, NoteDrafts } from "./drafts";
+import type { Draft, Drafts } from "./drafts";
 import { nameProblem, noteFile, noteTitle } from "./names";
 import { Store } from "./store";
 import { SecretWatch } from "./secretwatch";
@@ -9,7 +9,7 @@ import { moveItem } from "./move";
 import { checkOpens, fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
 import { restoreVersion } from "./restore";
 import * as recovery from "./workspace-drafts";
-import { draftsUnchecked, message, openFailure } from "./workspace-errors";
+import { draftsUnchecked, message, openFailure, unsavedMeanwhile } from "./workspace-errors";
 
 export type { OpenNote } from "./open-file";
 export { message } from "./workspace-errors";
@@ -80,53 +80,65 @@ export class Workspace {
 
   /**
    * Opens path in place of the open note, whatever it holds (call saveOpen first); convert (the
-   * user's click only) makes its line endings LF (open-file.ts). The open note closes only once
-   * path is read and can open: if it can't, the note stays open and saving, and the error shows
-   * (#134). When opens overlap, the last one wins: an earlier one that finishes later changes nothing.
+   * user's click only) makes its line endings LF (open-file.ts). When opens overlap, the last
+   * one wins: an earlier one that finishes later changes nothing.
+   *
+   * The open note closes only once path is read and can open: if it can't, the note stays open
+   * and saving, and only the error shows (#134). Edits typed while path loads are saved first;
+   * if one can't be, the note stays and the error says so. So continuous typing holds the open
+   * back until a save catches up, and a close() meanwhile (a trash, move or restore of the open
+   * note, a logout) cancels it. The open note itself, saved, is kept as it is: a read of it could
+   * be older than a save landing meanwhile. Reloaded (converted, or edits the user agreed to
+   * leave, which go to a draft offered again), it is read again if a save landed meanwhile.
    */
   async open(path: string, convert = false): Promise<void> {
     const seq = ++this.opens;
     let current = () => seq === this.opens;
     const prev = this.state.value.open;
+    this.fail(undefined); // a refusal again is announced again, and no old one shows meanwhile
     const wasClean = !prev?.doc.dirty; // an unsaved edit already there, the user agreed to leave
-    let draft: NoteDrafts | undefined;
+    if (prev?.doc.path === path && wasClean && !convert) return; // nothing to reload: kept as it is
+    const etag = prev?.doc.etag;
     try {
       const note = await api.readNote(path);
       checkOpens(note, convert);
       if (!current()) return;
       if (prev && wasClean && prev.doc.dirty) {
-        await prev.doc.flush(); // edits typed while path loaded: saved before the note goes
+        await prev.doc.flush(); // saves again for edits made during a save: dirty only if one failed
         if (!current()) return;
-        if (prev.doc.dirty) return this.fail(`Didn't open ${path}: edits to ${prev.doc.path} made while it loaded aren't saved.`);
+        if (prev.doc.dirty) return this.fail(unsavedMeanwhile(path, prev.doc.path));
       }
-      // In the same task as the check above: no edit comes in between. The editor goes with it.
+      if (prev?.doc.path === path && prev.doc.etag !== etag) return await this.open(path, convert); // read before a save
+      // In the same task as the checks above: no edit comes in between. The editor goes with it.
       current = this.close();
       const offered = (await this.drafts?.offered(path)) ?? [];
       if (!current()) return;
-      draft = this.drafts?.forNote(path);
-      const opened = openSession(path, note, convert, {
-        // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
-        reader: () => this.reader?.(),
-        current: (o) => this.state.value.open === o,
-        // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
-        save: (p, content, base) => {
-          this.secrets.check(content);
-          return api.saveNote(p, content, base);
-        },
-        draft,
-      });
       this.noteDrafts.set(offered);
-      this.state.set({ open: opened });
+      this.state.set({ open: this.session(path, note, convert) });
     } catch (err) {
-      draft?.close(); // no session took its draft key (openSession threw): don't leave it live
-      // Before close(), the open note stays: only the error is added.
-      if (current()) this.state.update((s) => ({ ...s, convert: undefined, ...openFailure(path, err) }));
+      // Before close(), the open note stays: only the error is added (fail cleared convert).
+      if (current()) this.state.update((s) => ({ ...s, ...openFailure(path, err) }));
       return;
     }
     // The session is published and closes with the note: nothing from here may replace it.
     // The note closed to open this one may have left a draft; the tree shows this one.
     await this.refreshOffered().catch(() => current() && this.fail(draftsUnchecked));
     await this.tree.reveal(path);
+  }
+
+  /** The session of path, read as note: checkOpens passed, so nothing here throws. */
+  private session(path: string, note: api.Note, convert: boolean): OpenNote {
+    return openSession(path, note, convert, {
+      // Only the editor holds the edits: with it gone, the session neither saves nor drafts.
+      reader: () => this.reader?.(),
+      current: (o) => this.state.value.open === o,
+      // The save scans the exact text it sends; it warns and never blocks (ADR-0020).
+      save: (p, content, base) => {
+        this.secrets.check(content);
+        return api.saveNote(p, content, base);
+      },
+      draft: this.drafts?.forNote(path),
+    });
   }
 
   /**

@@ -20,6 +20,15 @@ function slowRead(): { resolve: (n: api.Note) => void; reject: (e: unknown) => v
   return out;
 }
 
+/** The next save, answered by the test. */
+function slowSave(): { resolve: (r: api.SaveResult) => void } {
+  let out: { resolve: (r: api.SaveResult) => void } | undefined;
+  const promise = new Promise<api.SaveResult>((resolve) => (out = { resolve }));
+  vi.mocked(api.saveNote).mockImplementationOnce(() => promise);
+  if (!out) throw new Error("the promise's executor runs at once");
+  return out;
+}
+
 // #134: a file that can't be opened leaves the open note as it was: open, editable and saving.
 describe("Workspace: a file that can't be opened keeps the open note", () => {
   let ws: Workspace;
@@ -116,7 +125,107 @@ describe("Workspace: a file that can't be opened keeps the open note", () => {
 
     expect(ws.state.value.open).toBe(before);
     expect(before?.doc.state.value.status).toBe("conflict");
-    expect(ws.state.value.error).toBe("Didn't open b.md: edits to a.md made while it loaded aren't saved.");
+    expect(ws.state.value.error).toBe(
+      "Couldn't open b.md: your latest edits to a.md aren't saved yet, so it stays open. Open b.md again once they save.",
+    );
+  });
+
+  it("typing again while those edits save still opens the next file, with every edit saved", async () => {
+    const save = slowSave();
+    const read = slowRead();
+    const opening = ws.open("b.md");
+    await vi.advanceTimersByTimeAsync(0);
+    type("one\n");
+    read.resolve({ content: "# b.md\n", etag: '"b.md"' });
+    await vi.advanceTimersByTimeAsync(0); // the flush's first save is in flight
+    type("two\n");
+    save.resolve({ kind: "saved", etag: '"e1"' });
+    await opening;
+
+    expect(api.saveNote).toHaveBeenLastCalledWith("a.md", "# a.md\none\ntwo\n", '"e1"');
+    expect(ws.state.value.open?.doc.path).toBe("b.md");
+    expect(ws.state.value.error).toBeUndefined();
+  });
+
+  it("a note closed while its edits save, before the next file opens, stays closed", async () => {
+    const save = slowSave();
+    const read = slowRead();
+    const opening = ws.open("b.md");
+    await vi.advanceTimersByTimeAsync(0);
+    type("one\n");
+    read.resolve({ content: "# b.md\n", etag: '"b.md"' });
+    await vi.advanceTimersByTimeAsync(0);
+    ws.close(); // a logout, or a trash of the note
+    save.resolve({ kind: "saved", etag: '"e1"' });
+    await opening;
+    expect(ws.state.value).toEqual({}); // no b.md, and no error about a note no longer open
+  });
+
+  it("another note opened while those edits save stays open", async () => {
+    const save = slowSave();
+    const read = slowRead();
+    const opening = ws.open("b.md");
+    await vi.advanceTimersByTimeAsync(0);
+    type("one\n");
+    read.resolve({ content: "# b.md\n", etag: '"b.md"' });
+    await vi.advanceTimersByTimeAsync(0);
+    await ws.open("c.md");
+    const c = ws.state.value.open;
+    save.resolve({ kind: "saved", etag: '"e1"' });
+    await opening;
+    expect(c?.doc.path).toBe("c.md");
+    expect(ws.state.value).toEqual({ open: c }); // and no error from b.md's open, cancelled
+  });
+
+  it("opening the open note again keeps its session: an edit typed meanwhile stays, and saves over its own last save", async () => {
+    const before = ws.state.value.open;
+    type("one\n");
+    await ws.saveOpen(); // saved as "e2"
+    const opening = ws.open("a.md");
+    type("two\n");
+    await opening;
+    expect(ws.state.value.open).toBe(before);
+    expect(api.readNote).toHaveBeenCalledTimes(1); // a.md's first open only: a read now would be stale
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.saveNote).toHaveBeenLastCalledWith("a.md", "# a.md\none\ntwo\n", '"e2"');
+  });
+
+  it("converting the open note reads it again if a save landed while it loaded", async () => {
+    const read = slowRead();
+    const opening = ws.open("a.md", true);
+    await vi.advanceTimersByTimeAsync(0);
+    type("one\n");
+    read.resolve({ content: "# a.md\n", etag: '"a.md"' }); // read before the save below
+    vi.mocked(api.readNote).mockResolvedValueOnce({ content: "# a.md\none\n", etag: '"e2"' });
+    await opening;
+    expect(api.saveNote).toHaveBeenCalledWith("a.md", "# a.md\none\n", '"a.md"');
+    expect(ws.state.value.open?.doc.etag).toBe('"e2"');
+    expect(ws.state.value.open?.shown).toBe("# a.md\none\n");
+  });
+
+  it("a file refused again is announced again: the error goes while it loads", async () => {
+    vi.mocked(api.readNote).mockRejectedValueOnce(new BinaryError());
+    await ws.open("logo.png");
+    const first = ws.state.value.error;
+    expect(first).toBeDefined();
+    const read = slowRead();
+    const again = ws.open("logo.png");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.state.value.error).toBeUndefined();
+    expect(ws.state.value.open?.doc.path).toBe("a.md");
+    read.reject(new BinaryError());
+    await again;
+    expect(ws.state.value.error).toBe(first);
+  });
+
+  it("a file refused for its line endings, then a binary one: the offer to convert goes", async () => {
+    vi.mocked(api.readNote).mockResolvedValueOnce({ content: "a\r\nb\n", etag: '"m"' });
+    await ws.open("mixed.conf");
+    expect(ws.state.value.convert).toBe("mixed.conf");
+    vi.mocked(api.readNote).mockRejectedValueOnce(new BinaryError());
+    await ws.open("logo.png");
+    expect(ws.state.value.convert).toBeUndefined();
+    expect(ws.state.value.error).toBe("PostelMD opens only UTF-8 text files, and logo.png isn't one.");
   });
 
   it("a refused file that answers after another note opened changes nothing", async () => {

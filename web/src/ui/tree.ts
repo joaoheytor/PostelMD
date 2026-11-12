@@ -77,9 +77,10 @@ export class FileTree extends LightElement {
     else this.creating = what;
   }
 
+  /** Opens a file; its folder is selected only once it opened: a refused one leaves the selection (#134). */
   private async open(path: string): Promise<void> {
-    this.select(parent(path));
     await openNote(this.workspace, path);
+    if (this.workspace.state.value.open?.doc.path === path) this.select(parent(path));
   }
 
   private async toggle(path: string): Promise<void> {
