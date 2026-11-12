@@ -49,12 +49,13 @@ ID + generation ETag flips it.
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
 | [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Accepted |
-| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022; draft keys: see 0023; nested repositories: see 0026; save mismatch and temp sweep: see 0027) |
+| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022; draft keys: see 0023; nested repositories: see 0026; save mismatch and temp sweep: see 0027; `412` over a file too large to read: see 0029) |
 | [0021](0021-mermaid-in-a-sandboxed-frame.md) | Mermaid renders in a sandboxed frame, shown as images | Accepted |
 | [0022](0022-mvp-trash-layout.md) | The MVP trash keeps each item's name in a folder of its own | Accepted |
 | [0023](0023-a-draft-key-per-note-session.md) | A draft key per note session | Accepted |
 | [0024](0024-restore-from-the-trash.md) | Restore from the trash | Accepted |
 | [0025](0025-data-format-version.md) | A data format number in /data | Accepted |
 | [0026](0026-nested-repositories-in-the-vault.md) | Nested repositories in the vault are left out of commits | Accepted (`.git` match: see 0028) |
-| [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted |
+| [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted (`412` over a file too large to read: see 0029) |
 | [0028](0028-dot-git-when-git-folds-case.md) | A nested repository's .git in any letter case when git folds case | Accepted |
+| [0029](0029-a-save-over-a-file-too-large-to-read.md) | A save over a file too large to read | Accepted |

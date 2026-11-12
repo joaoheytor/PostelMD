@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { env, expect, login, noSeriousA11yViolations, test } from "./helpers";
@@ -203,6 +203,35 @@ test("another version that isn't text leaves one way out: my text as a new file,
       '{"turn": 1}\nmine',
     );
     expect(readFileSync(vault("turns.json")).equals(png)).toBe(true);
+  });
+});
+
+test("a file grown past 64 MiB outside PostelMD is a conflict, not retried; my text saves as a new file", async ({ page }) => {
+  await withFiles(["grown.log", "grown-recovered.log"], async () => {
+    writeFileSync(vault("grown.log"), "start\n");
+    await login(page);
+    await page.getByRole("button", { name: "grown.log" }).click();
+    await expect(page.getByRole("textbox", { name: "Text of grown.log" })).toContainText("start");
+
+    truncateSync(vault("grown.log"), 64 * 1024 * 1024 + 1); // sparse: no 64 MiB written (#157)
+    let puts = 0;
+    page.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().endsWith("/api/v1/notes/grown.log")) puts++;
+    });
+    await typeAtEnd(page, "grown.log", "mine");
+    const banner = page
+      .getByRole("alert")
+      .filter({ has: page.getByRole("heading", { name: "This file changed outside this editor into something PostelMD can't open" }) });
+    await expect(banner).toBeVisible();
+    await expect(page.getByText("too large to save")).toHaveCount(0);
+    await page.waitForTimeout(3000); // a retry would come within 1 s (the first backoff)
+    expect(puts).toBe(1);
+
+    await banner.getByRole("button", { name: "Save my version as a new file" }).click();
+    await expect
+      .poll(() => (existsSync(vault("grown-recovered.log")) ? readFileSync(vault("grown-recovered.log"), "utf8") : ""))
+      .toBe("start\nmine");
+    expect(statSync(vault("grown.log")).size).toBe(64 * 1024 * 1024 + 1);
   });
 });
 

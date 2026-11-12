@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
 
 // TestRetryOfALandedSave: the first save's rename landed but its response was lost, so the
@@ -31,7 +33,32 @@ func TestRetryOfALandedSave(t *testing.T) {
 	}
 }
 
-// TestSaveKeepsTheNotesMode: a save replaces the note with a temp file that took the note's
+// TestSaveOverAFileTooLargeToRead: something outside PostelMD grew the note past the store's
+// read limit. The client can't have based its edit on a file it could never read, so the save
+// is a conflict, with no current note to send (ADR-0029), never an internal error (#157). The
+// file is left as it is. Create, Move and Delete never read it: they work as for any file.
+func TestSaveOverAFileTooLargeToRead(t *testing.T) {
+	v, dir := newVault(t)
+	big := filepath.Join(dir, "notes", "a.md")
+	must(t, os.Truncate(big, fs.MaxFileSize+1)) // sparse: no 64 MiB written
+	_, err := v.Save(ctx, "notes/a.md", RevOf([]byte("A")), []byte("B"))
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || !errors.Is(err, ErrTooLargeToRead) || conflict.Current != nil || conflict.Rev != "" {
+		t.Fatalf("save over a file too large to read = %#v, want a ConflictError with no current note", err)
+	}
+	if fi, err := os.Stat(big); err != nil || fi.Size() != fs.MaxFileSize+1 {
+		t.Fatalf("the large file after the save: %v, %v", fi, err)
+	}
+	if _, err := v.Create(ctx, "notes/a.md", []byte("B")); !errors.Is(err, ErrExists) {
+		t.Fatalf("create over it = %v, want ErrExists", err)
+	}
+	must(t, v.Move(ctx, "notes/a.md", "notes/b.md"))
+	if _, err := v.Delete(ctx, "notes/b.md"); err != nil {
+		t.Fatalf("delete it = %v", err)
+	}
+}
+
+// TestSaveKeepsTheNotesMode:a save replaces the note with a temp file that took the note's
 // own permission bits first (ADR-0003 §5), so a 0644 note stays readable by the host's other
 // tools and a 0755 script stays executable. Bits the umask would clear (0664) survive too.
 func TestSaveKeepsTheNotesMode(t *testing.T) {

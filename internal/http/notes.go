@@ -96,6 +96,18 @@ func writeNote(w stdhttp.ResponseWriter, status int, p string, b []byte, rev vau
 	_, _ = w.Write(b) //nolint:gosec // G705: user content served as inert data; see the headers above
 }
 
+// writeConflict answers a failed If-Match with 412 and the current note, so the client can
+// show the conflict view without another read. A note grown past the read limit has none:
+// its 412 has no ETag and a JSON body with the code "too-large-to-read" (ADR-0029).
+func writeConflict(w stdhttp.ResponseWriter, p string, c *vault.ConflictError) {
+	if errors.Is(c, vault.ErrTooLargeToRead) {
+		writeJSON(w, stdhttp.StatusPreconditionFailed, map[string]string{"code": "too-large-to-read",
+			"error": "the file changed on disk and is now larger than 64 MiB, the most PostelMD opens; nothing was saved"})
+		return
+	}
+	writeNote(w, stdhttp.StatusPreconditionFailed, p, c.Current, c.Rev)
+}
+
 // write saves (If-Match) or creates (If-None-Match: *). Exactly one is required, so a
 // client can't create a note by accident: an autosave always sends If-Match (ADR-0003 §7).
 func (a *NotesAPI) write(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -209,8 +221,7 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 	var conflict *vault.ConflictError
 	switch {
 	case errors.As(err, &conflict):
-		// The current note, so the client can show the conflict view without another read.
-		writeNote(w, stdhttp.StatusPreconditionFailed, r.PathValue("path"), conflict.Current, conflict.Rev)
+		writeConflict(w, r.PathValue("path"), conflict)
 	case errors.Is(err, vault.ErrNotFound):
 		writeError(w, stdhttp.StatusNotFound, "not found")
 	case errors.Is(err, vault.ErrExists):

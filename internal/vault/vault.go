@@ -51,15 +51,20 @@ var (
 // MaxNameBytes is the longest file or folder name the filesystem takes (Linux NAME_MAX).
 const MaxNameBytes = 255
 
-// ConflictError is a failed save precondition. It carries the current note for the
-// conflict view.
+// ConflictError is a failed save precondition, with the current note for the conflict view;
+// with none (Rev "") when the file is over the read limit: ErrTooLargeToRead too (ADR-0029).
 type ConflictError struct {
 	Current []byte
 	Rev     Rev
 }
 
 func (e *ConflictError) Error() string { return ErrConflict.Error() }
-func (e *ConflictError) Unwrap() error { return ErrConflict }
+func (e *ConflictError) Unwrap() []error {
+	if e.Rev == "" {
+		return []error{ErrConflict, ErrTooLargeToRead}
+	}
+	return []error{ErrConflict}
+}
 
 // Rev identifies a note's content: the hex SHA-256 of its bytes (the ETag; ADR-0020).
 type Rev string
