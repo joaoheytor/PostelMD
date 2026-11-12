@@ -49,7 +49,7 @@ func newLoggingServer(t *testing.T, tls bool, log *slog.Logger) (*httptest.Serve
 	if _, err := v.EnableGit(); err != nil {
 		t.Fatal(err)
 	}
-	h := NewRouter(svc, v, testUI, log)
+	h := NewRouter(svc, v, testUI, testBuild, log)
 	srv := httptest.NewUnstartedServer(h)
 	if tls {
 		srv.StartTLS()

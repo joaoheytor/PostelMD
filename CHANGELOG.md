@@ -77,6 +77,8 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   An open note inside it is saved first, and the tree says when the folder has gone.
 - Open and edit text files that aren't Markdown (YAML, JSON, shell scripts, config files,
   code) with syntax highlighting; binary files show why they can't open.
+- The app shows the server's version beside its name once you log in, and the server logs
+  it when it starts (#152). Nothing shown before login names it.
 
 ### Changed
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note

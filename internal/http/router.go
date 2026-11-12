@@ -16,8 +16,9 @@ import (
 //     so a site the user visits can't drive the API with their cookie;
 //   - the pre-setup gate (ADR-0009): until setup, only setup and health are served.
 //
-// ui is the built web app, served outside /api/ (nil when the binary has no UI).
-func NewRouter(a Auth, v Vault, ui fs.FS, log *slog.Logger) stdhttp.Handler {
+// ui is the built web app, served outside /api/ (nil when the binary has no UI); build is
+// what /api/v1/about tells a logged-in user.
+func NewRouter(a Auth, v Vault, ui fs.FS, build Build, log *slog.Logger) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", ok)
@@ -31,8 +32,9 @@ func NewRouter(a Auth, v Vault, ui fs.FS, log *slog.Logger) stdhttp.Handler {
 	errs := &NotesAPI{notes: v, log: log}
 	(&GitAPI{git: v, author: a, notes: errs, log: log}).register(private)
 	(&TrashAPI{trash: v, notes: errs, log: log}).register(private)
+	private.HandleFunc("GET /api/v1/about", about(build))
 	for _, prefix := range []string{"/api/v1/notes/", "/api/v1/folders/", "/api/v1/move", "/api/v1/files", "/api/v1/git/",
-		"/api/v1/history/", "/api/v1/versions/", "/api/v1/restore", "/api/v1/trash", "/api/v1/trash/"} {
+		"/api/v1/history/", "/api/v1/versions/", "/api/v1/restore", "/api/v1/trash", "/api/v1/trash/", "/api/v1/about"} {
 		mux.Handle(prefix, RequireSession(a, routed(private)))
 	}
 	mux.HandleFunc("/api/", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
