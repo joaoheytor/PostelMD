@@ -196,23 +196,28 @@ export class Workspace {
 
   // Drafts and recovered copies (ADR-0003 §7): each is documented in workspace-drafts.ts.
 
+  /** Saves the open note's text as "x-recovered.md" next to it, and opens that (workspace-drafts.ts). */
   async saveAsNew(): Promise<void> {
     const why = await recovery.saveAsNew(this);
     if (why) this.fail(why);
   }
 
+  /** Reads the drafts to offer again (workspace-drafts.ts). */
   async refreshOffered(): Promise<void> {
     await recovery.refreshOffered(this);
   }
 
+  /** Puts a draft of the open note in the editor as an edit; an older one gets the conflict view (workspace-drafts.ts). */
   async recoverDraft(d: Draft, put: (text: string) => void): Promise<void> {
     await recovery.recoverDraft(this, d, put);
   }
 
+  /** Deletes a draft the user chose to discard (workspace-drafts.ts). */
   async discardDraft(d: Draft): Promise<void> {
     await recovery.discardDraft(this, d);
   }
 
+  /** Saves a draft as "x-recovered.md"; the draft goes only once saved (workspace-drafts.ts). */
   async saveDraftAsNew(d: Draft): Promise<void> {
     const why = await recovery.saveDraftAsNew(this, d);
     if (why) this.fail(why);
