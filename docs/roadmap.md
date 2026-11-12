@@ -179,7 +179,8 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
 - SQLite (ADR-0002): file IDs, generations, save and structural intents, outbox (the full
   ADR-0003). Designed in ADR-0030 (storage, driver, migrations, data format 2), ADR-0031
   (identity), ADR-0032 (ETag and API) and ADR-0033 (intents), built in this order:
-  `store/sql`; IDs, the startup scan and format 2 (with its runbook and the image-level
+  `store/sql`; wiring, snapshot-before-migrate, IDs, the startup scan and format 2 (with
+  its runbook and the image-level
   upgrade smoke test); intents; the ETag switch and `/api/v1/files/{id}`; outbox and SSE;
   the watcher and reconciler. The ETag switch is a breaking API change: v0.2.0. Deleted
   items leave the trash automatically after 7 days (ADR-0033).
@@ -227,6 +228,10 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
     or failing `quick_check`, refuses and changes nothing;
   - a migration crashed mid-transaction runs again; an edited migration, and a database
     newer than the binary, are refused;
+  - the pre-migration snapshot and `migrate.intent`, crashed at each row of their recovery
+    table (ADR-0030, ADR-0015), reach that row's outcome;
+  - with `POSTELMD_ALLOW_NETWORK_FS` overriding a refused filesystem for the state
+    directory, a start refuses to create `app.db`, and creates nothing;
   - an outside `mv` of one of several identical files keeps its ID at once; a unique
     copy-and-delete keeps it after the second pass (pending until then); a `cp` over a freed
     inode, and a rename plus an edit, give new IDs; a path missing for one pass only keeps

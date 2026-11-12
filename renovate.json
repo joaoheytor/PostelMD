@@ -27,6 +27,17 @@
       "description": "Minor and major updates always get a human review.",
       "matchUpdateTypes": ["minor", "major"],
       "automerge": false
+    },
+    {
+      "description": "modernc.org/sqlite: two weeks old at least, as ADR-0015 picks versions, and a human review. Its go get brings exactly the modernc.org/libc it requires.",
+      "matchPackageNames": ["modernc.org/sqlite"],
+      "minimumReleaseAge": "14 days",
+      "automerge": false
+    },
+    {
+      "description": "modernc.org/libc moves only with modernc.org/sqlite, to the version sqlite's go.mod names (ADR-0015; scripts/check-sqlite-libc.sh).",
+      "matchPackageNames": ["modernc.org/libc"],
+      "enabled": false
     }
   ]
 }

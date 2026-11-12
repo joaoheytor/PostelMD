@@ -109,6 +109,7 @@ lint-web: web-deps
 
 lint-repo:
 	scripts/check-file-size.sh
+	scripts/check-sqlite-libc.sh
 	@command -v docker >/dev/null 2>&1 || { echo 'lint-repo: docker not found. actionlint and shellcheck run from pinned images: install Docker (or Podman with its docker command).' >&2; exit 1; }
 	$(LINT_RUN) $(ACTIONLINT_IMAGE)
 	$(LINT_RUN) $(SHELLCHECK_IMAGE) scripts/*.sh .githooks/*

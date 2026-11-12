@@ -322,3 +322,19 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 - **2026-11-12, `sqlc` waits for v0.3** ([ADR-0030](0030-v02-storage-sqlite.md)), under its
   existing row: v0.2's few tables use hand-written, parameterized queries in `store/sql`;
   `sqlc` comes with v0.3's account and membership tables.
+- **2026-11-12, `modernc.org/sqlite` is in use**, under its existing row (whose status cell
+  still reads *planned*): the `store/sql` slice adds it to `go.mod` at v1.61.0, with
+  `modernc.org/libc` v1.79.0 as a direct `require` (`store/sql` imports it, so `go mod tidy`
+  keeps it direct). Renovate proposes `modernc.org/sqlite` only (at least 14 days old, with a
+  human review), and never `modernc.org/libc` on its own, so the `go get` of a new sqlite
+  brings exactly the libc it requires; `make lint` fails when the selected libc differs from
+  that one (`scripts/check-sqlite-libc.sh`). The driver adds about 3.8 MB to the stripped
+  static binary.
+- **2026-11-12, how a `modernc.org/libc` fix arrives, and migration transactions**: with
+  Renovate's libc rule disabled, a libc security fix reaches us only through a
+  `modernc.org/sqlite` release that requires it. `govulncheck` in CI (`make vuln`, and on
+  every PR) is the alarm for a libc advisory: it fails the build, and the fix is the sqlite
+  release that moves libc, or a pin bump with the check above. The "single transaction" of
+  the migrations bullet above: [ADR-0030](0030-v02-storage-sqlite.md#migrations) gives a new
+  database all its migrations in one 0 → N transaction; each migration is still atomic, and
+  an existing database still migrates one migration per transaction.
