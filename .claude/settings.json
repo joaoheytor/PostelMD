@@ -84,7 +84,9 @@
       "Edit(**/.githooks/**)",
       "Edit(**/.gitleaks.toml)",
       "Edit(**/.github/workflows/**)",
-      "Edit(**/LICENSE)"
+      "Edit(**/LICENSE)",
+      "Edit(**/.git/**)",
+      "Write(**/.git/**)"
     ],
     "deny": [
       "Bash(printenv*)",

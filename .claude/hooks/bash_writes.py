@@ -173,6 +173,8 @@ def repo_write_targets(cmd, cwd):
         if "$" in t or "`" in t:
             continue  # unexpanded variable or substitution: unknown before it runs
         path = os.path.normpath(os.path.join(cwd, os.path.expanduser(t)))
-        if not scratch(path, (project,)) and git_tracks(path):
+        if ".git" in path.split(os.sep) or os.path.basename(path) == "config.worktree":
+            found.append(t)  # git config and hooks: core.fsmonitor, hooksPath, diff.external...
+        elif not scratch(path, (project,)) and git_tracks(path):
             found.append(t)
     return found

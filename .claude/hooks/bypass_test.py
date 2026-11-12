@@ -165,6 +165,51 @@ class Bypasses(unittest.TestCase):
             "git push origin HEAD:feature",
         ], None)
 
+    def test_third_pass_bypasses_ask(self):
+        """Still silent at dc3c146 (third pass on #170)."""
+        self.assert_cases([
+            # git takes any unambiguous prefix of a long option
+            "git grep --op='sh -c x' hello",
+            "git grep --open='sh -c x' hello",
+            "git grep --o=vi hello",
+            "git log --outp=CLAUDE.md",
+            "git diff --out CLAUDE.md",
+            "git show --ext-diff HEAD",
+            "git rebase --exe=true origin/main",
+            "git rebase --ex true origin/main",
+            "git commit -s --templ=x -m 'chore: x'",
+            "git add --interactive",
+            "git status --unknown-option",
+            # config that makes later git commands run programs
+            "git -c core.fsmonitor='touch x' status",
+            "git -c diff.external=x diff",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=x git status",
+            "GIT_CONFIG_PARAMETERS=\"'core.fsmonitor'='x'\" git status",
+            "export GIT_CONFIG_GLOBAL=/tmp/evil; git status",
+            "env GIT_SSH_COMMAND=x git fetch origin",
+            "echo '[core] fsmonitor = x' >> .git/config",
+            "printf x > .git/hooks/pre-commit",
+            "echo x | tee -a .git/config",
+            "sed -i s/a/b/ .git/config",
+            "echo x >> .git/worktrees/w/config.worktree",
+            # go writing profiles over a git hook
+            "go test -coverprofile=.githooks/pre-commit ./...",
+            "go test -cpuprofile .git/hooks/pre-push ./x",
+            "go test -outputdir=.githooks ./x",
+            "go test -test.trace=.githooks/x ./x",
+        ], "ask")
+        self.assert_cases([
+            "git grep -n --heading pat",
+            "git log --oneline --graph -5",
+            "git status --short",
+            "git add --all",
+            "git commit -s -m 'chore: x'",
+            "git rebase --continue",
+            "go test -coverprofile=/tmp/c.out ./...",
+            "go test -coverprofile=bin/c.out ./...",
+            "echo x > /tmp/scratch-not-in-project.txt",
+        ], None)
+
     def test_routine_forms_still_pass(self):
         self.assert_cases([
             "git push -u origin feature",
