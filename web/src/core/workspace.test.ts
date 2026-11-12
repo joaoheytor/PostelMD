@@ -73,6 +73,14 @@ describe("Workspace.move", () => {
     expect(ws.state.value.error).toBe("Couldn't move ops/a.md: ops/a.md or the folder archive doesn't exist any more");
   });
 
+  it("clears an earlier move's error once a move succeeds", async () => {
+    vi.mocked(api.move).mockRejectedValueOnce(new api.ApiError(409, "already exists"));
+    expect(await ws.move("ops-old", "archive")).toBe(false);
+    expect(ws.state.value.error).toBe("Couldn't move ops-old: archive already exists");
+    expect(await ws.move("ops-old", "archive/ops-old")).toBe(true);
+    expect(ws.state.value.error).toBeUndefined();
+  });
+
   it("leaves an open note outside the moved folder alone", async () => {
     const doc = ws.state.value.open?.doc;
     expect(await ws.move("ops-old", "archive")).toBe(true);

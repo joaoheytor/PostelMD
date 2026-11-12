@@ -100,6 +100,10 @@ describe("Tree", () => {
     expect(s.status).toBe("Moved ops to archive/ops."); // for the "File tree status" region
     tree.announce("");
     expect(tree.state.value.status).toBe("");
+    await tree.moved("archive/ops", "ops");
+    expect(tree.state.value.status).toBe("Moved archive/ops to the vault."); // one name for the top level
+    await tree.moved("ops", "ops-2");
+    expect(tree.state.value.status).toBe("Moved ops to ops-2."); // a rename at the top level
     calls.length = 0;
     await tree.moved("ops-old", "ops-2020");
     expect(calls).toEqual([""]); // a rename reloads its folder once

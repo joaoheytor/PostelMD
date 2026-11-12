@@ -147,6 +147,9 @@ pm-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .pm-move { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--line); }
 .pm-move label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 12rem; font-size: 0.85rem; color: var(--muted); }
 pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
+.pm-move select { font: inherit; }
+.pm-move-folder { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 12rem; font-size: 0.85rem; color: var(--muted); }
+.pm-move-help { flex-basis: 100%; margin: 0; font-size: 0.8rem; color: var(--muted); }
 .pm-dialog { width: min(36rem, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); padding: 0; }
 .pm-dialog .pm-card { margin: 0; border: 0; max-width: none; }
 .pm-dialog .pm-banner { margin: 0; }

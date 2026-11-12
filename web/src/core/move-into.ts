@@ -1,4 +1,4 @@
-import { join, parent, rebase, type TreeState } from "./tree";
+import { join, moveTarget, parent, rebase, type TreeState } from "./tree";
 import type { Workspace } from "./workspace";
 
 export type ItemKind = "file" | "folder";
@@ -24,18 +24,30 @@ export function destination(from: string, kind: ItemKind, folder: string): { to:
 
 /**
  * The folders the tree has seen (every folder in a loaded listing, and the vault) that from can
- * move into, sorted, the vault ("") first. Folders in listings never loaded aren't known.
+ * be in: its own, and those it can move into. Sorted, the vault ("") first. Folders in listings
+ * never loaded aren't known: the Rename or move form says so, and a typed path reaches them.
  */
 export function folderChoices(s: TreeState, from: string, kind: ItemKind): string[] {
-  const known = new Set([""]);
+  const known = new Set(["", parent(from)]);
   for (const [folder, entries] of s.folders) {
     for (const e of entries) if (e.kind === "folder") known.add(join(folder, e.name));
   }
   const fits = (f: string) => {
     const d = destination(from, kind, f);
-    return d !== undefined && "to" in d;
+    return d === undefined || "to" in d;
   };
   return [...known].filter(fits).sort();
+}
+
+/** The folder a typed move target puts from in, read as the move reads it (moveTarget). */
+export function folderOf(from: string, typed: string, kind: ItemKind): string {
+  return parent(moveTarget(from, typed, kind));
+}
+
+/** The typed path's last part (its name) in folder: what picking a folder in the form types. */
+export function intoFolder(typed: string, folder: string): string {
+  const path = typed.trim().replace(/^\/+|\/+$/g, "");
+  return join(folder, path.slice(path.lastIndexOf("/") + 1));
 }
 
 /**

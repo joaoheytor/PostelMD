@@ -129,7 +129,8 @@ export class Tree {
     const gone = (p: string) => rebase(p, from, to) !== undefined;
     this.state.update((s) => ({
       ...s,
-      status: `Moved ${from} to ${to}.`,
+      // Into the top level under its own name: "the vault", as the tree's Vault button says.
+      status: `Moved ${from} to ${parent(to) === "" && from.endsWith(`/${to}`) ? "the vault" : to}.`,
       folders: new Map([...s.folders].filter(([p]) => !gone(p))),
       expanded: new Set([...s.expanded].filter((p) => !gone(p))),
     }));

@@ -7,7 +7,6 @@ import type { Workspace } from "../core/workspace";
 import { LightElement, openNote, refocus, StoreController } from "./base";
 import { destination, dragType, type ItemKind, moveInto } from "../core/move-into";
 import "./move";
-import "./move-to";
 import { chosen, templateFields, values } from "./template-fields";
 
 type Creating = "note" | "folder" | undefined;
@@ -244,13 +243,6 @@ export class FileTree extends LightElement {
           ${this.folder === ""
             ? nothing
             : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>
-                <pm-move-to
-                  .workspace=${this.workspace}
-                  .path=${this.folder}
-                  .kind=${"folder"}
-                  .label=${"Move folder to…"}
-                  .onDone=${(to: string) => (this.folder = to)}
-                ></pm-move-to>
                 <button type="button" @click=${() => this.trashFolder()}>Delete folder ${this.folder}</button>`}
         </div>
         <p class="pm-tree-status" role="status" aria-label="File tree status">${this.tree.value?.status ?? ""}</p>
