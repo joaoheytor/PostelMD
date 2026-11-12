@@ -85,7 +85,10 @@ pm-login, pm-setup { display: block; }
 pm-app, pm-workspace { display: flex; flex-direction: column; height: 100%; }
 .pm-top { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
 /* The page's one h1 (the note path is its h2), at the size of the bar's text. */
-.pm-top-name { flex: 1; margin: 0; font-size: inherit; font-weight: 700; }
+.pm-top-brand { flex: 1; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.pm-top-name { margin: 0; font-size: inherit; font-weight: 700; }
+/* Quiet: for bug reports and checking an upgrade, never in the way (#152). */
+.pm-top-version { margin: 0; color: var(--muted); font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm-top-error, .pm-top-notice { margin: 0; padding: 6px 12px; }
 .pm-main { display: flex; flex: 1; min-height: 0; }
 .pm-side { width: 280px; flex-shrink: 0; overflow: auto; padding: 8px; background: var(--side); border-right: 1px solid var(--line); }

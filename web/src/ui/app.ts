@@ -38,6 +38,7 @@ export class WorkspaceView extends LightElement {
   private readonly ws = new StoreController(this, () => this.app?.workspace.state);
   private readonly offered = new StoreController(this, () => this.app?.workspace.offered);
   private readonly appState = new StoreController(this, () => this.app?.state);
+  private readonly version = new StoreController(this, () => this.app?.version);
 
   constructor() {
     super();
@@ -70,6 +71,7 @@ export class WorkspaceView extends LightElement {
     const w = this.app.workspace;
     void w.tree.load("");
     void w.refreshOffered();
+    void this.app.loadVersion();
     // A reload keeps the open note: its path is in the URL.
     const m = /^\/notes\/(.+)$/.exec(location.pathname);
     if (m?.[1]) void w.open(m[1].split("/").map(decodeURIComponent).join("/"));
@@ -89,7 +91,10 @@ export class WorkspaceView extends LightElement {
     const notice = this.appState.value?.notice;
     return html`
       <header class="pm-top">
-        <h1 class="pm-top-name">PostelMD</h1>
+        <div class="pm-top-brand">
+          <h1 class="pm-top-name">PostelMD</h1>
+          ${this.version.value ? html`<p class="pm-top-version">Version ${this.version.value}</p>` : nothing}
+        </div>
         <button type="button" aria-keyshortcuts="Control+P" @click=${() => (this.finding = true)}>Find a note</button>
         ${this.offered.value?.length
           ? html`<button type="button" @click=${() => (this.listingDrafts = true)}>Unsaved drafts (${this.offered.value.length})</button>`

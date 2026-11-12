@@ -108,6 +108,10 @@ func TestServeEndToEnd(t *testing.T) {
 	if !strings.Contains(r.out.String(), " "+r.origin+"/setup ") || strings.Contains(r.out.String(), "/setup?") {
 		t.Fatalf("the setup page's full URL, without the token, wasn't printed:\n%s", r.out.String())
 	}
+	// The operator's own log says which build runs (#152).
+	if !regexp.MustCompile(`"msg":"listening",.*"version":"` + version + `","commit":"` + commit + `"`).MatchString(r.out.String()) {
+		t.Fatalf("the listening line doesn't name the build:\n%s", r.out.String())
+	}
 	if resp := post(t, r.origin+"/api/v1/setup", `{"token":"`+m[1]+`","password":"correct horse battery","name":"Ada","email":"ada@example.invalid"}`); resp.StatusCode != 201 {
 		t.Fatalf("setup = %d", resp.StatusCode)
 	}

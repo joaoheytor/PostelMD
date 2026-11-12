@@ -1,3 +1,4 @@
+import { about, versionLabel } from "./about";
 import * as api from "./api";
 import type { DocState } from "./document";
 import type { Drafts } from "./drafts";
@@ -51,6 +52,8 @@ export function importNotice({ imported, skipped }: api.SetupResult): string | u
 /** The app's top-level state: which screen shows, and the workspace once logged in. */
 export class App {
   readonly state = new Store<AppState>({ phase: "loading", reauth: false });
+  /** The server's version, once logged in ("0.1.0-rc.1 (e3fd8bb)"); unknown until then. */
+  readonly version = new Store<string | undefined>(undefined);
   readonly workspace = new Workspace();
   readonly git = new Git({
     status: api.gitStatus,
@@ -90,6 +93,15 @@ export class App {
     const result = await api.setup(form);
     this.state.set({ phase: "ready", reauth: false, notice: importNotice(result) });
     return result.imported;
+  }
+
+  /** Asks the server its version; on failure it stays unknown: it's only shown, never needed. */
+  async loadVersion(): Promise<void> {
+    try {
+      this.version.set(versionLabel(await about()));
+    } catch {
+      // Nothing to tell the user: the header just shows no version.
+    }
   }
 
   dismissNotice(): void {

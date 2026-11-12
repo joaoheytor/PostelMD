@@ -96,7 +96,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 			setupURL(cfg.Listen, ln.Addr().String()), auth.SetupTokenTTL, tok)
 	}
 	srv := &http.Server{
-		Handler:           pmhttp.AllowHosts(cfg.AllowedHosts, log, pmhttp.NewRouter(svc, v, web.Dist(), log)),
+		Handler:           pmhttp.AllowHosts(cfg.AllowedHosts, log, pmhttp.NewRouter(svc, v, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -106,7 +106,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 	}
 	errs := make(chan error, 1)
 	go func() { errs <- srv.Serve(ln) }()
-	log.Info("listening", "addr", ln.Addr().String(), "vault", paths.Vault)
+	log.Info("listening", "addr", ln.Addr().String(), "vault", paths.Vault, "version", version, "commit", commit)
 	if ready != nil {
 		ready(ln.Addr().String())
 	}

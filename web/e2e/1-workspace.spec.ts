@@ -41,6 +41,15 @@ test("a wrong password is refused", async ({ page }) => {
   await expect(page.getByRole("alert")).toHaveText("Wrong password.");
 });
 
+test("the server's version shows only once logged in", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
+  await expect(page.getByText(/^Version /)).toHaveCount(0);
+  await login(page);
+  // `make build` stamps `git describe` and the short commit.
+  await expect(page.getByRole("banner").getByText(/^Version \S+/)).toBeVisible();
+});
+
 test("create a note, edit it, and the edit is on disk after a reload", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "New note" }).click();
