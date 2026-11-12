@@ -24,6 +24,12 @@ var reservedCases = []struct{ name, dir, file string }{
 	// next runs git in it on the host.
 	{"git, a clone's hooks", "clone/.git/hooks", "clone/.git/hooks/post-checkout"},
 	{"git, a clone's config, other case", "clone/.Git", "clone/.Git/config"},
+	// Names git refuses because Windows or macOS would treat them as .git (#119).
+	{"git, trailing space", "notes/.git ", "notes/.git /config"},
+	{"git, trailing dots", ".git..", ".git../config"},
+	{"git, NTFS short name", "GIT~1", "GIT~1/config"},
+	{"git, NTFS stream", ".git::$INDEX_ALLOCATION", ".git::$INDEX_ALLOCATION/config"},
+	{"git, HFS+ ignorable", ".g" + string(rune(0x200c)) + "it", ".g" + string(rune(0x200c)) + "it/config"},
 	{"app state", ".postelmd", ".postelmd/state.json"},
 	{"trash", vault.TrashDir, vault.TrashDir + "/old.md"},
 	{"temp", vault.TmpDir, vault.TmpDir + "/inflight"},

@@ -47,5 +47,6 @@ All others are **Proposed** until the code that depends on them is merged.
 | [0023](0023-a-draft-key-per-note-session.md) | A draft key per note session | Accepted |
 | [0024](0024-restore-from-the-trash.md) | Restore from the trash | Accepted |
 | [0025](0025-data-format-version.md) | A data format number in /data | Accepted |
-| [0026](0026-nested-repositories-in-the-vault.md) | Nested repositories in the vault are left out of commits | Accepted |
+| [0026](0026-nested-repositories-in-the-vault.md) | Nested repositories in the vault are left out of commits | Accepted (`.git` match: see 0028) |
 | [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted |
+| [0028](0028-dot-git-when-git-folds-case.md) | A nested repository's .git in any letter case when git folds case | Proposed |
