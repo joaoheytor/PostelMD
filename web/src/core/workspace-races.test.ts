@@ -89,7 +89,9 @@ describe("Workspace: a session that isn't the open note never saves", () => {
   it("a file refused for its line endings leaves no draft key live", async () => {
     await ws.open("a.txt"); // not converted: refused
     expect(ws.state.value.convert).toBe("a.txt");
-    expect(released).toEqual(["a.txt"]);
+    // Refused before any session starts (#134): no draft key was even taken.
+    expect(drafts.forNote).not.toHaveBeenCalled();
+    expect(released).toEqual([]);
   });
 
   it("a session that isn't the current one never reads the editor, and its timer stops", async () => {

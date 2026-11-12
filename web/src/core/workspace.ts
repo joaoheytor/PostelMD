@@ -6,7 +6,7 @@ import { SecretWatch } from "./secretwatch";
 import { join, Tree } from "./tree";
 import { fill, localDate, type Template } from "./templates";
 import { moveItem } from "./move";
-import { fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
+import { checkOpens, fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
 import { restoreVersion } from "./restore";
 import * as recovery from "./workspace-drafts";
 import { draftsUnchecked, message, openFailure } from "./workspace-errors";
@@ -79,16 +79,28 @@ export class Workspace {
   }
 
   /**
-   * Closes the open note, whatever it holds (call saveOpen first), and opens path; convert
-   * (the user's click only) makes its line endings LF (open-file.ts). When opens overlap, the
-   * last one wins: an earlier one that finishes later changes nothing.
+   * Opens path in place of the open note, whatever it holds (call saveOpen first); convert (the
+   * user's click only) makes its line endings LF (open-file.ts). The open note closes only once
+   * path is read and can open: if it can't, the note stays open and saving, and the error shows
+   * (#134). When opens overlap, the last one wins: an earlier one that finishes later changes nothing.
    */
   async open(path: string, convert = false): Promise<void> {
-    const current = this.close();
+    const seq = ++this.opens;
+    let current = () => seq === this.opens;
+    const prev = this.state.value.open;
+    const wasClean = !prev?.doc.dirty; // an unsaved edit already there, the user agreed to leave
     let draft: NoteDrafts | undefined;
     try {
       const note = await api.readNote(path);
+      checkOpens(note, convert);
       if (!current()) return;
+      if (prev && wasClean && prev.doc.dirty) {
+        await prev.doc.flush(); // edits typed while path loaded: saved before the note goes
+        if (!current()) return;
+        if (prev.doc.dirty) return this.fail(`Didn't open ${path}: edits to ${prev.doc.path} made while it loaded aren't saved.`);
+      }
+      // In the same task as the check above: no edit comes in between. The editor goes with it.
+      current = this.close();
       const offered = (await this.drafts?.offered(path)) ?? [];
       if (!current()) return;
       draft = this.drafts?.forNote(path);
@@ -107,7 +119,8 @@ export class Workspace {
       this.state.set({ open: opened });
     } catch (err) {
       draft?.close(); // no session took its draft key (openSession threw): don't leave it live
-      if (current()) this.state.set(openFailure(path, err));
+      // Before close(), the open note stays: only the error is added.
+      if (current()) this.state.update((s) => ({ ...s, convert: undefined, ...openFailure(path, err) }));
       return;
     }
     // The session is published and closes with the note: nothing from here may replace it.

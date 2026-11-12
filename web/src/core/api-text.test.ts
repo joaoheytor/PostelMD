@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createNote, readNote, saveNote } from "./api";
+import { createNote, type OtherVersion, readNote, saveNote } from "./api";
 import { bomChar, NotTextError, TooLargeError } from "./textfile";
 
 const answer = (status: number, body: Uint8Array<ArrayBuffer>) =>
@@ -33,7 +33,16 @@ describe("reading a file's text", () => {
 
   it("a conflict whose other version is binary is a conflict with nothing to take or compare", async () => {
     vi.stubGlobal("fetch", answer(412, png));
-    expect(await saveNote("a.ini", "x", '"e0"')).toEqual({ kind: "conflict", etag: '"e9"', content: "", binary: true });
+    // No content at all: a "" would compare equal to an empty text.
+    expect(await saveNote("a.ini", "x", '"e0"')).toEqual({ kind: "conflict", etag: '"e9"', binary: true });
+  });
+
+  it("a binary other version has no content to read: code that compares it doesn't compile (tsc)", () => {
+    const other = (binary: boolean): OtherVersion => (binary ? { etag: '"e9"', binary: true } : { etag: '"e9"', content: "" });
+    const c = other(true);
+    // @ts-expect-error: content exists only once binary is ruled out (#139)
+    expect(c.content).toBeUndefined();
+    if (!c.binary) expect(c.content).toBe(""); // narrowed: compiles
   });
 });
 

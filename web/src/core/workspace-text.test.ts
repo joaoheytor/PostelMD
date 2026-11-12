@@ -187,7 +187,7 @@ describe("Workspace: files that aren't Markdown", () => {
   });
 
   it("an other version that isn't text is never taken; my text saves as a new file, the other stays", async () => {
-    await conflictWith({ kind: "conflict", etag: '"e3"', content: "", binary: true });
+    await conflictWith({ kind: "conflict", etag: '"e3"', binary: true });
     expect(ws.takeTheirs(vi.fn(), true)).toBe(false);
     vi.mocked(api.saveNote).mockClear();
     await ws.saveAsNew();

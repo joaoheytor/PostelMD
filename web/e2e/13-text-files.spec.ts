@@ -59,19 +59,27 @@ test("a shell script stays executable after a save", async ({ page }) => {
   });
 });
 
-test("a binary file stays listed, and clicking it says why it doesn't open", async ({ page }) => {
+test("a binary file stays listed, and clicking it says why it doesn't open; the open note stays open and saving", async ({ page }) => {
   await withFiles(["logo.png", "readme.md"], async () => {
     // A PNG's signature and the start of its header, built here: no binary fixture in the repository.
     writeFileSync(vault("logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]));
     writeFileSync(vault("readme.md"), "# Readme\n");
     await login(page);
     await page.getByRole("button", { name: "readme.md" }).click();
+    await typeAtEnd(page, "readme.md", "first");
     await page.getByRole("button", { name: "logo.png" }).click();
     const alert = page.getByRole("alert").filter({ hasText: "PostelMD opens only UTF-8 text files, and logo.png isn't one." });
     await expect(alert).toBeVisible();
     await expect(alert.getByRole("button", { name: "Convert to LF and open" })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Text of logo.png" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "logo.png" })).toBeVisible();
+
+    // #134: readme.md is still open, with its edit, and what is typed in it now saves.
+    const readme = page.getByRole("textbox", { name: "Text of readme.md" });
+    await expect(readme).toContainText("first");
+    await typeAtEnd(page, "readme.md", " second");
+    await expect.poll(() => readFileSync(vault("readme.md"), "utf8")).toBe("# Readme\nfirst second");
+    await expect(alert).toBeVisible();
   });
 });
 

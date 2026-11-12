@@ -103,6 +103,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   for secrets before you push the repository anywhere.
 
 ### Fixed
+- Clicking a file PostelMD can't open (binary, not UTF-8, over 5 MiB, or with mixed line
+  endings) no longer closes the note you have open: it stays open, with its cursor and
+  unsaved edits, and keeps saving, and only the message saying why the file didn't open
+  appears. The note now closes only once the new file is read and can open.
 - The editor's cursor is visible in dark mode.
 - Saving a file keeps its CRLF line endings and its UTF-8 byte order mark; saves used to
   turn CRLF into LF and drop the byte order mark. A file that mixes CRLF and LF line

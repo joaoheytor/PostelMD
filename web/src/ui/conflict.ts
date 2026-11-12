@@ -1,10 +1,11 @@
 import { html } from "lit";
 import { type DiffLine, textDiff } from "../core/diff";
-import type { DocState } from "../core/document";
+import type { OtherVersion } from "../core/api";
 import { LineEndingsError, textFormat } from "../core/textfile";
 import { diffView } from "./diff";
 
-type Conflict = NonNullable<DocState["conflict"]>;
+/** A conflict whose other version is text: the only kind with a diff. */
+type Conflict = Extract<OtherVersion, { content: string }>;
 
 /** The ways out of a conflict: the workspace's and the document session's, unchanged. */
 export interface ConflictActions {
@@ -35,7 +36,7 @@ function needsConvert(content: string): boolean {
  * text and the other version, and what each way out does. Another version that isn't text has
  * nothing to compare or take: the user's text can only go to a new file.
  */
-export function conflictBanner(conflict: Conflict, act: ConflictActions) {
+export function conflictBanner(conflict: OtherVersion, act: ConflictActions) {
   if (conflict.binary) return binaryBanner(act);
   let lines = diffs.get(conflict);
   if (!lines) diffs.set(conflict, (lines = textDiff(act.mine(), conflict.content)));

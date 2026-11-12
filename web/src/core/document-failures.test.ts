@@ -143,10 +143,12 @@ describe("DocumentSession failures", () => {
         await vi.advanceTimersByTimeAsync(0);
         type("");
         await vi.advanceTimersByTimeAsync(1000);
-        // A binary body has no text to compare: content "" must not match the stalled "".
-        saves[1]?.answer({ kind: "conflict", etag: '"e1"', content: "", binary: true });
+        // A binary body has no text, so nothing a stalled save sent can match it.
+        saves[1]?.answer({ kind: "conflict", etag: '"e1"', binary: true });
         await vi.advanceTimersByTimeAsync(0);
-        expect(doc.state.value).toMatchObject({ status: "conflict", conflict: { etag: '"e1"', binary: true } });
+        expect(doc.state.value).toEqual({ status: "conflict", conflict: { etag: '"e1"', binary: true } });
+        expect(() => doc.takeTheirs()).toThrow("the other version isn't text: there is nothing to take");
+        expect(doc.state.value.status).toBe("conflict");
       });
 
       it("after two stalls in a row, a 412 with the first one's bytes is no conflict either", async () => {
