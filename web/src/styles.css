@@ -123,6 +123,8 @@ pm-tree li button:hover, .pm-tree-root:hover { background: var(--line); }
 .pm-tree-folder::before { content: "▸ "; color: var(--muted); }
 .pm-tree-folder[aria-expanded="true"]::before { content: "▾ "; }
 .pm-tree-note[aria-current="page"] { background: var(--selection); }
+/* A folder a dragged item would drop into (#130): an outline, not a colour alone. */
+pm-tree .pm-tree-drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--selection); }
 .pm-tree-other { display: block; padding: 3px 6px; color: var(--muted); }
 .pm-tree-loading, .pm-tree-empty { margin: 2px 6px; color: var(--muted); font-size: 0.85rem; }
 

@@ -5,7 +5,9 @@ import type { Template } from "../core/templates";
 import { join, parent } from "../core/tree";
 import type { Workspace } from "../core/workspace";
 import { LightElement, openNote, refocus, StoreController } from "./base";
+import { destination, dragType, type ItemKind, moveInto } from "../core/move-into";
 import "./move";
+import "./move-to";
 import { chosen, templateFields, values } from "./template-fields";
 
 type Creating = "note" | "folder" | undefined;
@@ -23,7 +25,7 @@ export class FileTree extends LightElement {
     folder: { state: true },
     template: { state: true },
     problem: { state: true },
-    done: { state: true },
+    over: { state: true },
   };
   declare workspace: Workspace;
   declare creating: Creating;
@@ -35,8 +37,8 @@ export class FileTree extends LightElement {
   declare template: Template | undefined;
   /** Why the typed note name can't be used, shown in the form. */
   declare problem: string | undefined;
-  /** What the last delete did, for the status region (empty until one completes). */
-  declare done: string;
+  /** The folder a dragged item would drop into, highlighted; undefined for none. */
+  declare over: string | undefined;
 
   private readonly tree = new StoreController(this, () => this.workspace?.tree.state);
   private readonly ws = new StoreController(this, () => this.workspace?.state);
@@ -44,12 +46,13 @@ export class FileTree extends LightElement {
   private opener: Element | null = null;
   /** The open note last scrolled into view. */
   private shown: string | undefined;
+  /** The item being dragged, if the drag started in this tree: no other drag moves anything. */
+  private dragging: { path: string; kind: ItemKind } | undefined;
 
   constructor() {
     super();
     this.folder = "";
     this.moving = false;
-    this.done = "";
   }
 
   /** Selects folder and focuses its entry (the Vault button for the root), e.g. after a delete. */
@@ -72,7 +75,7 @@ export class FileTree extends LightElement {
 
   private start(what: "note" | "folder" | "move", e: Event): void {
     this.opener = e.currentTarget as Element;
-    this.done = ""; // the last delete's status is old news once the tree is used again
+    this.workspace.tree.announce(""); // the last status is old news once the tree is used again
     if (what === "move") this.moving = true;
     else this.creating = what;
   }
@@ -88,10 +91,10 @@ export class FileTree extends LightElement {
     await this.workspace.tree.toggle(path);
   }
 
-  /** The user picks a folder (or a note in it): the last delete's status is cleared. */
+  /** The user picks a folder (or a note in it): the last status is cleared. */
   private select(folder: string): void {
     this.folder = folder;
-    this.done = "";
+    this.workspace.tree.announce("");
   }
 
   private async create(e: SubmitEvent): Promise<void> {
@@ -130,23 +133,75 @@ export class FileTree extends LightElement {
    */
   private async trashFolder(): Promise<void> {
     const folder = this.folder;
-    this.done = "";
+    this.workspace.tree.announce("");
     if (!confirm(`Move the folder ${folder} and everything in it to the trash? You can restore it from the Trash.`)) return;
     const open = this.workspace.state.value.open?.doc.path;
     if (open?.startsWith(`${folder}/`) && !(await this.workspace.saveOpen()) && !confirm(`Some edits to ${open} aren't saved. Delete the folder anyway?`)) {
       return;
     }
     if (!(await this.workspace.trash(folder, "folder"))) return;
-    this.done = `Moved the folder ${folder} to the trash.`;
+    this.workspace.tree.announce(`Moved the folder ${folder} to the trash.`);
     await this.focusFolder(parent(folder));
+  }
+
+  // Drag and drop (#130): an item dragged from this tree onto a folder, or onto Vault, moves into
+  // it (moveInto). Lit binds these handlers to the nav and removes them with it (rule 8).
+
+  private dragStart(e: DragEvent): void {
+    const item = (e.target as Element).closest<HTMLElement>("li[data-path]");
+    const path = item?.dataset["path"];
+    if (!item || path === undefined || !e.dataTransfer) return;
+    this.dragging = { path, kind: item.dataset["kind"] === "folder" ? "folder" : "file" };
+    e.dataTransfer.setData(dragType, path);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  /** The folder under a drag from this tree that its item can move into; undefined for none. */
+  private dropTarget(e: DragEvent): string | undefined {
+    if (!this.dragging || !e.dataTransfer?.types.includes(dragType)) return undefined; // e.g. a file from the desktop
+    const folder = (e.target as Element).closest<HTMLElement>("[data-folder]")?.dataset["folder"];
+    if (folder === undefined) return undefined;
+    const d = destination(this.dragging.path, this.dragging.kind, folder);
+    return d && "to" in d ? folder : undefined;
+  }
+
+  private dragOver(e: DragEvent): void {
+    const folder = this.dropTarget(e);
+    this.over = folder;
+    if (folder === undefined || !e.dataTransfer) return; // not a drop target: the browser shows so
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  private async drop(e: DragEvent): Promise<void> {
+    const folder = this.dropTarget(e);
+    const item = this.dragging;
+    this.dragEnd();
+    if (folder === undefined || !item) return;
+    e.preventDefault();
+    const to = await moveInto(this.workspace, item.path, item.kind, folder);
+    if (to !== undefined && item.kind === "folder") this.folder = to;
+  }
+
+  private dragLeave(e: DragEvent): void {
+    if (!(e.relatedTarget instanceof Node && this.contains(e.relatedTarget))) this.over = undefined;
+  }
+
+  private dragEnd(): void {
+    this.dragging = this.over = undefined;
+  }
+
+  /** A drop target's class, highlighted while a drag is over it. */
+  private dropClass(base: string, folder: string): string {
+    return this.over === folder ? `${base} pm-tree-drop` : base;
   }
 
   private entry(folder: string, e: Entry): TemplateResult {
     const path = join(folder, e.name);
     if (e.kind === "folder") {
       const open = this.tree.value?.expanded.has(path) ?? false;
-      return html`<li>
-        <button type="button" class="pm-tree-folder" data-folder=${path} aria-expanded=${open} @click=${() => this.toggle(path)}>
+      return html`<li draggable="true" data-path=${path} data-kind="folder">
+        <button type="button" class=${this.dropClass("pm-tree-folder", path)} data-folder=${path} aria-expanded=${open} @click=${() => this.toggle(path)}>
           ${e.name}
         </button>
         ${open ? this.list(path) : nothing}
@@ -155,7 +210,7 @@ export class FileTree extends LightElement {
     // Every file is a button: one the editor can't hold says why when opened (textfile.ts).
     if (e.kind === "file") {
       const current = this.ws.value?.open?.doc.path === path;
-      return html`<li>
+      return html`<li draggable="true" data-path=${path} data-kind="file">
         <button type="button" class="pm-tree-note" aria-current=${current ? "page" : "false"} @click=${() => this.open(path)}>${e.name}</button>
       </li>`;
     }
@@ -175,16 +230,30 @@ export class FileTree extends LightElement {
     const error = this.tree.value?.error;
     const where = this.folder === "" ? "the vault" : this.folder;
     return html`
-      <nav aria-label="Notes">
+      <nav
+        aria-label="Notes"
+        @dragstart=${this.dragStart}
+        @dragover=${this.dragOver}
+        @dragleave=${this.dragLeave}
+        @drop=${this.drop}
+        @dragend=${this.dragEnd}
+      >
         <div class="pm-tree-actions">
           <button type="button" @click=${(e: Event) => this.start("note", e)}>New note</button>
           <button type="button" @click=${(e: Event) => this.start("folder", e)}>New folder</button>
           ${this.folder === ""
             ? nothing
             : html`<button type="button" @click=${(e: Event) => this.start("move", e)}>Rename or move folder</button>
+                <pm-move-to
+                  .workspace=${this.workspace}
+                  .path=${this.folder}
+                  .kind=${"folder"}
+                  .label=${"Move folder to…"}
+                  .onDone=${(to: string) => (this.folder = to)}
+                ></pm-move-to>
                 <button type="button" @click=${() => this.trashFolder()}>Delete folder ${this.folder}</button>`}
         </div>
-        <p class="pm-tree-status" role="status" aria-label="File tree status">${this.done}</p>
+        <p class="pm-tree-status" role="status" aria-label="File tree status">${this.tree.value?.status ?? ""}</p>
         ${this.moving && this.folder !== ""
           ? html`<pm-move
               .workspace=${this.workspace}
@@ -218,7 +287,9 @@ export class FileTree extends LightElement {
             </form>`
           : nothing}
         ${error ? html`<p class="pm-error" role="alert">${error}</p>` : nothing}
-        <button type="button" class="pm-tree-root" aria-pressed=${this.folder === ""} @click=${() => this.select("")}>Vault</button>
+        <button type="button" class=${this.dropClass("pm-tree-root", "")} data-folder="" aria-pressed=${this.folder === ""} @click=${() => this.select("")}>
+          Vault
+        </button>
         ${this.list("")}
       </nav>
     `;
