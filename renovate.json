@@ -29,10 +29,15 @@
       "automerge": false
     },
     {
-      "description": "modernc.org/sqlite needs modernc.org/libc at exactly the version its go.mod names: one PR bumps both, with a human review (ADR-0015).",
-      "matchPackageNames": ["modernc.org/sqlite", "modernc.org/libc"],
-      "groupName": "modernc.org/sqlite and libc",
+      "description": "modernc.org/sqlite: two weeks old at least, as ADR-0015 picks versions, and a human review. Its go get brings exactly the modernc.org/libc it requires.",
+      "matchPackageNames": ["modernc.org/sqlite"],
+      "minimumReleaseAge": "14 days",
       "automerge": false
+    },
+    {
+      "description": "modernc.org/libc moves only with modernc.org/sqlite, to the version sqlite's go.mod names (ADR-0015; scripts/check-sqlite-libc.sh).",
+      "matchPackageNames": ["modernc.org/libc"],
+      "enabled": false
     }
   ]
 }

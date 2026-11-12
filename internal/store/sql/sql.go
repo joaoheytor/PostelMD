@@ -4,6 +4,9 @@
 // /data/.postelmd/app.db with ADR-0030's pragmas and connections (one writer, a read pool, a
 // snapshot connection opened per copy), creates every database file 0600 with O_EXCL before
 // SQLite opens it, checks it with quick_check, and runs the embedded, forward-only migrations.
+// Every connection denies ATTACH and DETACH.
+//
+// Linux only, like the server: the other build targets don't compile it.
 //
 // Callers hold the instance lock and have passed the data format check (CLAUDE.md rule 12).
 package sql
@@ -15,17 +18,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
-
-	// The driver needs modernc.org/libc at exactly the version its go.mod names. Imported
-	// here (it is linked anyway) so our go.mod requires it directly, and `go mod tidy` or a
-	// bump of another module can't move it on its own (ADR-0015, clarification of
-	// 2026-11-12).
-	_ "modernc.org/libc"
-	sqlite "modernc.org/sqlite"
 
 	"github.com/joaoheytor/PostelMD/internal/errattr"
 )
@@ -33,31 +28,15 @@ import (
 // AppDB is the identity database's file name in the state directory (ADR-0030).
 const AppDB = "app.db"
 
-// The DSN query parts are compile-time constants (ADR-0030); only the path is added at run
-// time, escaped into a file: URI (with a plain name the driver strips the query, so mode=ro
-// would silently open read-write). Every connection gets the same pragmas.
-const (
-	pragmas = "_defensive=1" +
-		"&_pragma=busy_timeout(5000)" +
-		"&_pragma=cell_size_check(ON)" +
-		"&_pragma=foreign_keys(ON)" +
-		"&_pragma=journal_mode(WAL)" +
-		"&_pragma=journal_size_limit(67108864)" +
-		"&_pragma=synchronous(FULL)" +
-		"&_pragma=trusted_schema(OFF)"
-	writerQuery   = pragmas + "&_txlock=immediate"
-	readerQuery   = pragmas + "&mode=ro&_pragma=query_only(1)"
-	snapshotQuery = pragmas + "&mode=ro" // VACUUM INTO fails under query_only
-	readPoolSize  = 4
-)
-
 // writerWait bounds the wait for the writer connection (ADR-0030: never unbounded).
 var writerWait = 5 * time.Second
 
-// ErrDamaged: quick_check found a problem. Startup refuses and changes nothing; the fix is
-// `postelmd db rebuild` (ADR-0030).
-var ErrDamaged = errors.New("sql: the database failed its integrity check; " +
-	"run `postelmd db rebuild` with the server stopped (ADR-0030)")
+var (
+	// ErrReplaced: the database file changed identity while it was being opened.
+	ErrReplaced = errors.New("sql: the database file was replaced while it was being opened")
+	// ErrCheckpointBusy: the WAL couldn't be checkpointed at close (a reader held it).
+	ErrCheckpointBusy = errors.New("sql: the WAL checkpoint at close was blocked by a reader")
+)
 
 // DB is an open database: the writer and the read pool.
 type DB struct {
@@ -74,21 +53,38 @@ func Open(ctx context.Context, stateDir string, log *slog.Logger) (*DB, error) {
 
 // open is Open with the migrations in fsys (tests use their own).
 func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*DB, error) {
-	sqlite.StrictPragmas(true) // process-wide: a _pragma holding two statements fails to open
 	path := filepath.Join(stateDir, AppDB)
-	if err := createExclusive(path); err != nil && !errors.Is(err, os.ErrExist) {
+	f, err := createExclusive(path)
+	if err == nil {
+		err = f.Close()
+	}
+	if err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
 	killPoint("created")
-	if err := checkRegular(path); err != nil {
+	before, err := checkRegular(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := fixSidecars(path); err != nil {
 		return nil, err
 	}
 	warnLooseModes(log, stateDir, path)
+	if err := checkForeign(ctx, path); err != nil {
+		log.Error("database refused before opening", "reason", refusal(err), "damaged", errors.Is(err, ErrDamaged),
+			errattr.Pathless(err))
+		return nil, err
+	}
+	killPoint("checked")
 	db := &DB{path: path}
-	var err error
 	if db.w, err = openPool(path, writerQuery, 1); err != nil {
 		return nil, err
 	}
+	if after, err := os.Stat(path); err != nil || !os.SameFile(before, after) {
+		_ = db.w.Close()
+		return nil, errors.Join(ErrReplaced, err)
+	}
+	killPoint("opened")
 	if err := db.start(ctx, log, fsys); err != nil {
 		_ = db.w.Close()
 		return nil, err
@@ -107,8 +103,8 @@ func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*
 func (db *DB) start(ctx context.Context, log *slog.Logger, fsys fs.FS) error {
 	t := time.Now()
 	if err := quickCheck(ctx, db.w); err != nil {
-		log.Error("database check failed", "check", "quick_check", "duration_ms", time.Since(t).Milliseconds(),
-			errattr.Pathless(err))
+		log.Error("database check failed", "check", "quick_check", "damaged", errors.Is(err, ErrDamaged),
+			"duration_ms", time.Since(t).Milliseconds(), errattr.Pathless(err))
 		return err
 	}
 	log.Info("database checked", "check", "quick_check", "result", "ok", "duration_ms", time.Since(t).Milliseconds())
@@ -123,46 +119,16 @@ func (db *DB) start(ctx context.Context, log *slog.Logger, fsys fs.FS) error {
 	return nil
 }
 
-// Close checkpoints the WAL into the database (TRUNCATE, ADR-0030's clean stop) and closes
-// every connection.
+// Close closes the read pool, checkpoints the WAL into the database (TRUNCATE, ADR-0030's
+// clean stop; a checkpoint a reader blocked is ErrCheckpointBusy) and closes the writer.
 func (db *DB) Close() error {
-	_, cerr := db.w.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
-	return errors.Join(cerr, db.r.Close(), db.w.Close())
-}
-
-// fileURI is path as a file: URI with query q.
-func fileURI(path, q string) string {
-	u := url.URL{Scheme: "file", Path: path, RawQuery: q}
-	return u.String()
-}
-
-// openPool opens a database/sql pool of at most n connections on path, and opens its first
-// connection so a bad DSN or file fails here.
-func openPool(path, q string, n int) (*sql.DB, error) {
-	p, err := sql.Open("sqlite", fileURI(path, q))
-	if err != nil {
-		return nil, fmt.Errorf("sql: open: %w", err)
+	rerr := db.r.Close()
+	var busy, logFrames, done int
+	cerr := db.w.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &done)
+	if cerr == nil && busy != 0 {
+		cerr = ErrCheckpointBusy
 	}
-	p.SetMaxOpenConns(n)
-	p.SetMaxIdleConns(n)
-	p.SetConnMaxLifetime(0)
-	if err := p.Ping(); err != nil {
-		_ = p.Close()
-		return nil, fmt.Errorf("sql: open: %w", err)
-	}
-	return p, nil
-}
-
-// quickCheck runs PRAGMA quick_check(1): "ok", or ErrDamaged.
-func quickCheck(ctx context.Context, p *sql.DB) error {
-	var res string
-	if err := p.QueryRowContext(ctx, "PRAGMA quick_check(1)").Scan(&res); err != nil {
-		return errors.Join(ErrDamaged, err)
-	}
-	if res != "ok" {
-		return ErrDamaged
-	}
-	return nil
+	return errors.Join(rerr, cerr, db.w.Close())
 }
 
 // writeTx runs fn in one write transaction (BEGIN IMMEDIATE). The writer connection is taken

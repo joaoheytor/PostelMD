@@ -58,6 +58,9 @@ func TestCrashHelper(t *testing.T) {
 //	| Killed at                          | On disk                       | Next open            |
 //	|------------------------------------|-------------------------------|----------------------|
 //	| created (file made, SQLite not yet) | empty 0600 file              | migrates from 0      |
+//	| checked (probed, writer not open)  | empty 0600 file               | migrates from 0      |
+//	| opened (writer open, WAL mode set, | empty database in WAL mode,   | migrates from 0      |
+//	| no transaction yet)                | user_version 0                |                      |
 //	| before-sql, before-version,        | uncommitted transaction;      | rolled back; migrates|
 //	| before-record (each migration),    | user_version 0, no records    | from 0               |
 //	| before-commit                      |                               |                      |
@@ -67,7 +70,7 @@ func TestMigrationCrashPoints(t *testing.T) {
 		at        string
 		committed bool
 	}{
-		{"created:1", false},
+		{"created:1", false}, {"checked:1", false}, {"opened:1", false},
 		{"before-sql:1", false}, {"before-version:1", false}, {"before-record:1", false},
 		{"before-sql:2", false}, {"before-version:2", false}, {"before-record:2", false},
 		{"before-commit:1", false},

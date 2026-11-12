@@ -41,6 +41,9 @@ var (
 	// that migrates an existing database (ADR-0030); until then the runner refuses.
 	ErrSnapshotRequired = errors.New("sql: migrating an existing database needs the " +
 		"pre-migration snapshot, which this build doesn't have (ADR-0030)")
+	// ErrForeignDatabase: user_version is 0 but the file has tables. Nothing changed.
+	ErrForeignDatabase = errors.New("sql: app.db has tables but no PostelMD version, so another " +
+		"program made it; move it out of the state directory and start again (ADR-0030)")
 )
 
 // refusal names which refusal err is, for the log: a fixed word, never err's text.
@@ -48,7 +51,8 @@ func refusal(err error) string {
 	for _, r := range []struct {
 		err  error
 		name string
-	}{{ErrNewerDatabase, "newer-database"}, {ErrEditedMigration, "edited-migration"}, {ErrSnapshotRequired, "snapshot-required"}} {
+	}{{ErrNewerDatabase, "newer-database"}, {ErrEditedMigration, "edited-migration"}, {ErrSnapshotRequired, "snapshot-required"},
+		{ErrForeignDatabase, "foreign-database"}} {
 		if errors.Is(err, r.err) {
 			return r.name
 		}
@@ -56,9 +60,33 @@ func refusal(err error) string {
 	return "error"
 }
 
-// killPoint is called at each crash point of the migration runner. Production leaves it a
-// no-op; the crash tests kill the process there (CLAUDE.md rule 14).
+// killPoint is called at each crash point of Open and the migration runner. Production
+// leaves it a no-op; the crash tests kill the process there (CLAUDE.md rule 14), and the
+// race tests swap files there.
 var killPoint = func(string) {}
+
+// checkForeign refuses a database at user_version 0 that already has a schema: another
+// program's file, not one PostelMD created and never migrated. It reads the file on a
+// read-only connection without the WAL pragma, before the writer opens it, so a refused
+// file is left exactly as it was (the writer would switch it to WAL).
+func checkForeign(ctx context.Context, path string) error {
+	p, err := openPool(path, copyQuery, 1)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = p.Close() }()
+	var uv, n int
+	if err := p.QueryRowContext(ctx, "PRAGMA user_version").Scan(&uv); err != nil {
+		return damaged(fmt.Errorf("sql: read user_version: %w", err))
+	}
+	if err := p.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema").Scan(&n); err != nil {
+		return damaged(fmt.Errorf("sql: read the schema: %w", err))
+	}
+	if uv == 0 && n != 0 {
+		return ErrForeignDatabase
+	}
+	return nil
+}
 
 type migration struct {
 	version int
@@ -101,10 +129,12 @@ type migrated struct {
 	took     time.Duration
 }
 
-// migrate brings the database to fsys's last migration. A new database (user_version 0) gets
-// every migration in one transaction, each setting user_version and recording its row, so
-// a crash leaves version 0 and the next start runs them again. A newer database, an edited
-// migration, or pending migrations on an existing database are refused, changing nothing.
+// migrate brings the database to fsys's last migration. A new database (user_version 0 and
+// an empty sqlite_schema) gets every migration in one transaction, each setting user_version
+// and recording its row, so a crash leaves version 0 and the next start runs them again
+// (ADR-0030). A newer database, an edited migration, a foreign database (version 0 with
+// tables), or pending migrations on an existing database (they need the pre-migration
+// snapshot, not built yet) are refused, changing nothing.
 func migrate(ctx context.Context, db *DB, fsys fs.FS) (migrated, error) {
 	start := time.Now()
 	ms, err := loadMigrations(fsys)

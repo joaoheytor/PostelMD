@@ -325,5 +325,8 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 - **2026-11-12, `modernc.org/sqlite` is in use**, under its existing row (whose status cell
   still reads *planned*): the `store/sql` slice adds it to `go.mod` at v1.61.0, with
   `modernc.org/libc` v1.79.0 as a direct `require` (`store/sql` imports it, so `go mod tidy`
-  keeps it direct), and a Renovate rule groups the two in one human-reviewed PR. The driver
-  adds about 3.8 MB to the stripped static binary.
+  keeps it direct). Renovate proposes `modernc.org/sqlite` only (at least 14 days old, with a
+  human review), and never `modernc.org/libc` on its own, so the `go get` of a new sqlite
+  brings exactly the libc it requires; `make lint` fails when the selected libc differs from
+  that one (`scripts/check-sqlite-libc.sh`). The driver adds about 3.8 MB to the stripped
+  static binary.

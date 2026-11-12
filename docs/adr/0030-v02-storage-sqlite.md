@@ -40,12 +40,24 @@ moves to 2. The rest of v0.2's design: [ADR-0031](0031-v02-file-identity.md) (fi
   table checks (WAL needs shared memory and POSIX locks). Once `app.db` exists,
   `POSTELMD_ALLOW_NETWORK_FS` no longer overrides that check for the state directory; it
   still applies to vaults.
+- **With `POSTELMD_ALLOW_NETWORK_FS` set and the state directory on a filesystem only that
+  override accepts, a start also refuses to create `app.db`**, so it never creates a database
+  that later starts would refuse; the refusal names a local volume for `/data/.postelmd` as
+  the fix.
 - **Every database file and every copy of one is created `0600`**: `store/sql` creates the
-  file empty with `O_CREAT|O_EXCL` before SQLite opens or writes it (`app.db`, `index.db`,
+  file empty with `O_CREAT|O_EXCL|O_NOFOLLOW` (`os.OpenFile` with `syscall.O_NOFOLLOW`; the
+  package needs no `x/sys/unix`) before SQLite opens or writes it (`app.db`, `index.db`,
   each `VACUUM INTO` target, a restore's temp), so `-wal` and `-shm` inherit the mode; a
-  partial copy is removed on error. A start that finds group or world bits on the state
-  directory or a database logs a warning and goes on (Helm's `fsGroup` makes them `0660`; the
-  chart notes recommend `fsGroupChangePolicy: OnRootMismatch`).
+  partial copy is removed on error. An existing `-wal` or `-shm` must be a regular file (a
+  symlink is refused) and is set to `0600` if it has group or world bits. The file SQLite
+  opened must be the one checked (same device and inode before and after the first
+  connection). A start that finds group or world bits on the state directory or a database
+  logs a warning and goes on (Helm's `fsGroup` makes them `0660`; the chart notes recommend
+  `fsGroupChangePolicy: OnRootMismatch`).
+- **No connection can `ATTACH` or `DETACH`**: an authorizer on every connection denies them
+  (through `ATTACH` a read-only connection could open `app.db`, or a new file, read-write).
+  The snapshot connection's authorizer allows an `ATTACH` of exactly its `VACUUM INTO`
+  target, which `VACUUM INTO` needs, and runs nothing else.
 - Opened only by a command that holds the instance lock and has passed the format check
   (CLAUDE.md rule 12).
 - **Connections:**
@@ -54,7 +66,8 @@ moves to 2. The rest of v0.2's design: [ADR-0031](0031-v02-file-identity.md) (fi
   - **a read pool** of 4, `mode=ro` with `query_only=1`: the last committed snapshot, never
     blocking the writer;
   - **a snapshot connection**, `mode=ro` without `query_only` (`VACUUM INTO` fails under
-    `query_only`), opened for a snapshot or backup and closed after.
+    `query_only`): read-only for the main database, `ATTACH` denied (below); opened for a
+    snapshot or backup and closed after.
 - **Pragmas** on every connection:
 
   | Pragma | Value | Why |
@@ -83,17 +96,30 @@ moves to 2. The rest of v0.2's design: [ADR-0031](0031-v02-file-identity.md) (fi
 
 ### Migrations
 - SQL files embedded in the binary, `internal/store/sql/migrations/NNNN_slug.sql`, numbered
-  from 1 without gaps, forward-only. Each runs in **one transaction** that also sets
-  `PRAGMA user_version = NNNN` and inserts `(version, name, sha256)` into
-  `schema_migrations`. A crash mid-migration leaves the version before it; the next start
-  runs it again.
+  from 1 without gaps, forward-only. Each migration sets `PRAGMA user_version = NNNN` and
+  inserts `(version, name, sha256)` into `schema_migrations` in the transaction that runs it.
+  - **A new database** (`user_version` 0 and an empty `sqlite_schema`) gets all pending
+    migrations in **one** transaction: 0 → N is atomic, and a crash leaves version 0, so the
+    next start runs them all again.
+  - **An existing database** migrates **one migration per transaction**, after the
+    pre-migration snapshot below. A crash mid-migration leaves the version before it; the next
+    start runs it again.
+  - Migrations must not rely on statements that are no-ops or illegal inside a transaction
+    (`PRAGMA foreign_keys=OFF`, `VACUUM`, `journal_mode`). A migration that rebuilds a table
+    needs its own design (an ADR line) before it is written.
 - `user_version` above this build's last migration → refuse ("this database was written by
   a newer PostelMD"), nothing changed (ADR-0015). An applied migration whose embedded checksum
-  differs → refuse: released migrations are never edited.
+  differs, or a missing record → refuse: released migrations are never edited. A file at
+  `user_version` 0 whose `sqlite_schema` isn't empty was made by another program → refuse,
+  nothing changed (it is read before the writer switches it to WAL), and name the fix: move it
+  out of the state directory.
 - Migrating an existing database (`user_version` ≥ 1) takes ADR-0015's pre-migration snapshot
   first (`VACUUM INTO` on the snapshot connection, `migrate.intent`, `post_migration_started`).
-  v0.2.0 only creates databases (version 0 → N, no snapshot), so **`postelmd db rollback` ships
-  with the first release that migrates an existing database**, not in v0.2.0.
+  **The pre-migration snapshot, `migrate.intent` and its crash table ship in or before the
+  first slice where `serve` opens `app.db`**; from then on, every migration runs against
+  existing databases (a database `serve` created at an earlier build). Until then the runner
+  refuses pending migrations on an existing database. `postelmd db rollback` ships no later
+  than the first release whose migrations run against existing databases.
 - Steps that touch the vault (ID assignment, ADR-0031) are not SQL migrations: they are
   startup steps keyed by the data format.
 
@@ -140,8 +166,8 @@ generation bumps, suspects, tombstones).
      `0600` with `O_CREAT|O_EXCL` (as `auth.json` is), written, `fsync`ed and renamed; then
      the folder is `fsync`ed. A complete copy is kept (a resumed upgrade); an incomplete one
      is first moved aside to `pre-format-2-<time>/`, never written over;
-  2. create and migrate `app.db` (a database left by the `store/sql` build, without the flag,
-     is used as it is);
+  2. create and migrate `app.db` (a database an earlier build's `serve` created, without the
+     flag, is migrated like any existing database, snapshot first, then used);
   3. one transaction: a new vault UUID, every file row, the trash records (ADR-0031), the
      "assigned" flag;
   4. write the vault marker with the UUID and format 2 (ADR-0031);
@@ -195,7 +221,10 @@ generation bumps, suspects, tombstones).
 - `app.db` missing at format 2, or `quick_check` failing: **refuse to start**, change
   nothing, name the fix `postelmd db rebuild`. Never rebuild by itself: a missing database is
   also what a wrong mount looks like, and the operator must know IDs and intents are lost.
-  `index.db` failing its check is deleted and rebuilt: it is derived.
+  `index.db` failing its check is deleted and rebuilt: it is derived. Only a damaged file
+  (`quick_check` not `ok`, `SQLITE_CORRUPT`) or one that isn't a database (`SQLITE_NOTADB`,
+  also at the first connection) names `db rebuild`; a canceled start, a busy lock, an I/O or
+  permission error, or a `-wal` that isn't a regular file is a plain error.
 - **`postelmd db rebuild`** (offline, under the instance lock; in a container,
   `docker run --rm … postelmd db rebuild` with the same volumes):
   1. write and `fsync` `rebuild.intent`: a new rebuild UUID, the timestamp, and whether an
@@ -231,7 +260,11 @@ generation bumps, suspects, tombstones).
 - The database copy is **`VACUUM INTO`** a pre-created `0600` file on the snapshot connection,
   inside the backup barrier; we `fsync` it (SQLite doesn't), check it with
   `PRAGMA integrity_check`, and record its `user_version`. The same code takes the
-  pre-migration snapshot.
+  pre-migration snapshot. The copy's path must still name the file created for it (same
+  device and inode) before it is synced through the descriptor kept from its creation.
+- `Snapshot` removes its copy on an error. **After a crash, a partial copy is the caller's**:
+  the operation's intent (`migrate.intent`, the backup's) owns removing it, and the caller
+  verifies a copy (`integrity_check`, `user_version`) before trusting it.
 - A volume snapshot holding `app.db`, `-wal` and `-shm` together is crash-consistent. A
   file-by-file copy of a running instance is **not**: until the backup command exists, the
   runbook requires stopping the server, or an atomic snapshot of the volume.
@@ -251,10 +284,15 @@ generation bumps, suspects, tombstones).
   - rolling back to v0.1 loses file identity; going forward again assigns new IDs;
   - a vault whose marker was deleted by hand is refused until `postelmd vault claim` runs.
 - Follow-ups, in order (each a PR):
-  1. **`store/sql`** (flips this ADR): open, connections, pragmas, migrations with checksums,
-     `quick_check`, the boot UUID (ADR-0014), listen-early `/readyz`, `db rebuild`; the
-     dependency added to `go.mod`; format stays 1 (v0.1 ignores `app.db`);
-  2. **format 2** with ADR-0031's IDs slice, with `postelmd vault claim`. Done only with the
+  1. **`store/sql`** (flips this ADR): the package only, Linux-only like the server (the
+     other targets don't compile it, so no `!linux` stub): opening `app.db`, the connections
+     and pragmas, the `ATTACH` authorizer, `quick_check`, migrations with checksums,
+     `Snapshot`; the dependency added to `go.mod`. `serve` doesn't open the database, and the
+     format stays 1;
+  2. **wiring and format 2** with ADR-0031's IDs slice: `serve` opens the database (with the
+     network-filesystem refusal above), the boot UUID (ADR-0014), listen-early `/readyz`,
+     `db rebuild`, the snapshot-before-migrate path with `migrate.intent`, and `postelmd vault
+     claim`. Done only with the
      runbook in `docs/operations/`: the pre-upgrade copy (server stopped), the rollback (all
      four steps), `db rebuild` and `vault claim` in a container, every new refusal message
      and its fix, the trash's new 7-day clock (ADR-0031), the cleanup of `damaged-*`,

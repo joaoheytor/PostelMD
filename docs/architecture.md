@@ -19,8 +19,8 @@ Decisions are recorded in [`adr/`](adr/). This document describes how the pieces
 > [ADR-0033](adr/0033-v02-intents.md) intents for saves, creates and structural operations,
 > still under one vault mutex. Credentials stay in `auth.json` until v0.3.
 > Built so far: `internal/store/sql` (opening `app.db` with ADR-0030's pragmas, the writer,
-> read pool and snapshot connections, `quick_check`, embedded migrations, `VACUUM INTO`
-> copies); `serve` doesn't open it yet.
+> read pool and snapshot connections, `ATTACH` denied, `quick_check`, embedded migrations,
+> `VACUUM INTO` copies); `serve` doesn't open it yet.
 
 ## 1. System context
 
