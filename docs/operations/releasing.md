@@ -40,6 +40,8 @@ The maintainer's steps for a release candidate and a release. The design is in
    don't edit it), and carries the binaries, their SBOMs and `SHA256SUMS`.
 4. Test the RC by digest (`ghcr.io/joaoheytor/postelmd@sha256:…`, or `:0.1.0-rc.1`), and
    check it as in [verify-images](verify-images.md#release-candidates-and-candidates).
+5. Point the README's `docker run` and the runbook's `IMAGE=`
+   ([running-v0.1](running-v0.1.md)) at the new `:0.1.0-rc.N`, in a docs PR.
 
 **Don't merge to `main` while `prerelease` runs.** Its `publish` job shares the
 `ghcr-referrers` group with `candidate`: a `candidate` publish queued behind it can cancel the

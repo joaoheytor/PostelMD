@@ -3,8 +3,8 @@
 > A self-hosted, git-native Markdown workspace for operational knowledge
 > (runbooks, ADRs, postmortems), built for DevOps, Platform and SRE engineers.
 
-**Status:** v0.1, the single-user MVP, is code-complete; the first release candidate is
-pending. It works today: one user with a password, one vault of `.md` files, an editor with
+**Status:** v0.1, the single-user MVP, is code-complete; its first release candidate,
+0.1.0-rc.1, is out for testing. It works today: one user with a password, one vault of `.md` files, an editor with
 preview, conflict-aware autosave with drafts kept in the browser, create, move and delete
 (into a trash folder), manual git commits, history and restoring a version, and adopting an
 existing notes folder. Multi-user, auto-commit, push with secret gates and plugins come
