@@ -3,6 +3,7 @@ import * as api from "./api";
 import type { DocState } from "./document";
 import type { Drafts } from "./drafts";
 import { Git } from "./git";
+import * as gitApi from "./git-api";
 import { Store } from "./store";
 import { message, Workspace } from "./workspace";
 
@@ -56,10 +57,10 @@ export class App {
   readonly version = new Store<string | undefined>(undefined);
   readonly workspace = new Workspace();
   readonly git = new Git({
-    status: api.gitStatus,
-    readFile: api.readFileBytes,
-    commit: api.commit,
-    removeLocks: api.removeGitLocks,
+    status: gitApi.gitStatus,
+    readFile: gitApi.readFileBytes,
+    commit: gitApi.commit,
+    removeLocks: gitApi.removeGitLocks,
     saveOpen: () => this.workspace.saveOpen(),
   });
 

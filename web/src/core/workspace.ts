@@ -8,8 +8,8 @@ import { fill, localDate, type Template } from "./templates";
 import { moveItem } from "./move";
 import { fileText, type OpenNote, openSession, takeTheirs } from "./open-file";
 import { restoreVersion } from "./restore";
-import { normalize } from "./textfile";
-import { draftsUnchecked, message, openFailure, recoveredPath } from "./workspace-errors";
+import * as recovery from "./workspace-drafts";
+import { draftsUnchecked, message, openFailure } from "./workspace-errors";
 
 export type { OpenNote } from "./open-file";
 export { message } from "./workspace-errors";
@@ -194,72 +194,33 @@ export class Workspace {
     return ok;
   }
 
-  /**
-   * Saves the open note's text as a new note next to it ("x.md" → "x-recovered.md"), for a
-   * note deleted elsewhere: autosave never recreates it (ADR-0003 §7), but the user can.
-   */
+  // Drafts and recovered copies (ADR-0003 §7): each is documented in workspace-drafts.ts.
+
+  /** Saves the open note's text as "x-recovered.md" next to it, and opens that (workspace-drafts.ts). */
   async saveAsNew(): Promise<void> {
-    const open = this.state.value.open;
-    if (!open) return;
-    const path = recoveredPath(open.doc.path);
-    try {
-      await api.createNote(path, this.currentText() ?? open.initial);
-    } catch (err) {
-      this.fail(`Couldn't create ${path}: ${message(err)}`);
-      return;
-    }
-    await this.tree.changed(path);
-    await this.open(path); // closing the old note writes its draft, which goes next
-    open.doc.dropDraft();
+    const why = await recovery.saveAsNew(this);
+    if (why) this.fail(why);
   }
 
-  /** Reads the drafts to offer again. */
+  /** Reads the drafts to offer again (workspace-drafts.ts). */
   async refreshOffered(): Promise<void> {
-    this.offered.set((await this.drafts?.offered()) ?? []);
+    await recovery.refreshOffered(this);
   }
 
-  /**
-   * Puts a draft of the open note in the editor (put replaces its text) as an edit, which then
-   * saves through the normal path. A draft is based on the version it was edited from: its
-   * save sends If-Match with that base, so a draft older than the saved note gets a 412 and the
-   * conflict view, never a silent overwrite. The old draft is removed only once this tab's own
-   * draft holds the text.
-   */
+  /** Puts a draft of the open note in the editor as an edit; an older one gets the conflict view (workspace-drafts.ts). */
   async recoverDraft(d: Draft, put: (text: string) => void): Promise<void> {
-    const open = this.state.value.open;
-    if (!open || open.doc.path !== d.path) return;
-    if (d.base !== open.doc.etag) {
-      await open.doc.flush(); // no save in flight may move the base past the draft's
-      if (this.state.value.open !== open) return;
-    }
-    put(normalize(d.text)); // drafts hold the file's text
-    open.doc.rebase(d.base);
-    open.doc.edit();
-    if (!(await open.doc.writeDraft())) return; // no other copy yet: the old draft stays
-    await this.discardDraft(d);
+    await recovery.recoverDraft(this, d, put);
   }
 
-  /** Deletes a draft the user chose to discard. */
+  /** Deletes a draft the user chose to discard (workspace-drafts.ts). */
   async discardDraft(d: Draft): Promise<void> {
-    await this.drafts?.discard(d);
-    await this.refreshOffered();
-    this.noteDrafts.update((all) => all.filter((x) => x.esid !== d.esid || x.path !== d.path));
+    await recovery.discardDraft(this, d);
   }
 
-  /** Saves a draft as a new note ("x.md" → "x-recovered.md"); the draft goes only once saved. */
+  /** Saves a draft as "x-recovered.md"; the draft goes only once saved (workspace-drafts.ts). */
   async saveDraftAsNew(d: Draft): Promise<void> {
-    const path = recoveredPath(d.path);
-    try {
-      await api.createNote(path, d.text);
-    } catch (err) {
-      const why = err instanceof api.ApiError && err.status === 409 ? `${path} already exists` : message(err);
-      this.fail(`Couldn't save the draft as ${path}: ${why}`);
-      return;
-    }
-    await this.drafts?.discard(d);
-    await this.refreshOffered();
-    await this.tree.changed(path);
-    if (await this.saveOpen()) await this.open(path);
+    const why = await recovery.saveDraftAsNew(this, d);
+    if (why) this.fail(why);
   }
 
   /** The open file's text as a save would write it; undefined with no editor. */

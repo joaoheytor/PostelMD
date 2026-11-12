@@ -1,4 +1,5 @@
-import { ApiError, type GitStatus, type ListedChange } from "./api";
+import { ApiError } from "./api";
+import type { GitStatus, ListedChange } from "./git-api";
 import { type FileScan, needsConfirmation, type ReadFile, scanChanges } from "./commit-scan";
 import { Store } from "./store";
 import { message } from "./workspace";

@@ -1,4 +1,4 @@
-/** The workspace's failures in words, and the names it picks for a recovered copy. */
+/** The workspace's failures in words. */
 import { ApiError } from "./api";
 import { BinaryError, LineEndingsError, NotTextError } from "./textfile";
 import { parent } from "./tree";
@@ -31,9 +31,4 @@ export function moveError(err: unknown, from: string, to: string): string {
   if (err.status === 409) return `${to} already exists`;
   if (err.status === 404) return `${from} or the folder ${parent(to) || "it goes into"} doesn't exist any more`;
   return message(err);
-}
-
-/** Where a copy of path's text goes ("x.md" → "x-recovered.md"). */
-export function recoveredPath(path: string): string {
-  return path.replace(/(\.[a-z]+)?$/i, (ext) => `-recovered${ext || ".md"}`);
 }

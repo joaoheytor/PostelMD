@@ -3,7 +3,7 @@
  * so a commit never takes a change the user hasn't been warned about. Nothing leaves the
  * browser; findings carry only the rule, the line and a short hint, never the secret.
  */
-import type { GitChange } from "./api";
+import type { GitChange } from "./git-api";
 import { scanSecrets, type SecretFinding } from "./secrets";
 
 /** A file's current bytes and the ETag they were read with. */
