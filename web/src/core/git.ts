@@ -39,21 +39,23 @@ export interface LeftOut {
 
 /**
  * What commits leave out, by kind: files over the size limit (ADR-0020) and folders that are
- * git repositories of their own (ADR-0026). The server lists neither kind when it's ignored
- * by .gitignore (vault/history.go), so the hint's advice holds; it omits empty lists.
+ * git repositories of their own (ADR-0026), each with how many. The server lists neither
+ * kind when .gitignore ignores it and git doesn't track it (vault/history.go); a tracked file
+ * over 50 MB stays listed, so only repositories get "commit them" advice. The server omits
+ * empty lists.
  */
 export function leftOut(status: GitStatus): LeftOut[] {
   const out: LeftOut[] = [];
   if (status.skipped?.length) {
     out.push({
-      label: "Over 50 MB:",
+      label: `Over 50 MB (${status.skipped.length}):`,
       paths: status.skipped,
-      hint: "PostelMD doesn't commit files over 50 MB. Commit them with git yourself, or add them to .gitignore to hide them here.",
+      hint: "PostelMD doesn't commit files over 50 MB. Add them to .gitignore to hide them here.",
     });
   }
   if (status.repositories?.length) {
     out.push({
-      label: "Git repositories of their own:",
+      label: `Git repositories of their own (${status.repositories.length}):`,
       paths: status.repositories,
       hint: "PostelMD doesn't commit files in these folders. Commit them with their own git, or add them to .gitignore to hide them here.",
     });

@@ -28,7 +28,8 @@ test("the commit dialog names the folders that are git repositories of their own
 
     const leftOut = dialog.getByRole("region", { name: "Left out of commits" });
     await expect(leftOut.getByRole("heading", { name: "Left out of commits" })).toBeVisible();
-    const repos = leftOut.getByRole("list", { name: "Git repositories of their own" });
+    await expect(leftOut).toContainText(`Git repositories of their own (${names.length}):`);
+    const repos = leftOut.getByRole("list", { name: `Git repositories of their own (${names.length})` });
     await expect(repos.getByRole("listitem")).toHaveCount(names.length);
     await expect(repos).toContainText("ops-clone-25");
     await expect(leftOut).toContainText(

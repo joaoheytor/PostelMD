@@ -80,9 +80,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - The app shows the server's version beside its name once you log in, and the server logs
   it when it starts (#152). Nothing shown before login names it.
 - The commit dialog names the folders that are git repositories of their own (a clone, a
-  submodule), whose files commits leave out, next to the files over 50 MB, and says what to
-  do about them: commit them with git, or add them to `.gitignore`. The setup notice says how
-  many folders the initial import left out that way (#118).
+  submodule), whose files commits leave out, next to the files over 50 MB, with how many of
+  each and what to do: commit a repository with its own git, or add either to `.gitignore`
+  to hide it there. The setup notice says how many folders the initial import left out that
+  way (#118).
 
 ### Changed
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note

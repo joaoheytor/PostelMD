@@ -162,19 +162,18 @@ describe("Git", () => {
 describe("leftOut (ADR-0026: what commits leave out)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  // Only repositories can be committed elsewhere: a file over 50 MB is listed even if tracked.
   const tooLarge = {
-    label: "Over 50 MB:",
-    hint: "PostelMD doesn't commit files over 50 MB. Commit them with git yourself, or add them to .gitignore to hide them here.",
+    hint: "PostelMD doesn't commit files over 50 MB. Add them to .gitignore to hide them here.",
   };
   const repositories = {
-    label: "Git repositories of their own:",
     hint: "PostelMD doesn't commit files in these folders. Commit them with their own git, or add them to .gitignore to hide them here.",
   };
 
-  it("names the files too large to commit and the folders that are repositories of their own, and what to do", () => {
-    expect(leftOut({ ...clean, skipped: ["big.iso"], repositories: ["clone", "infra/sub"] })).toEqual([
-      { ...tooLarge, paths: ["big.iso"] },
-      { ...repositories, paths: ["clone", "infra/sub"] },
+  it("names the files too large to commit and the folders that are repositories of their own, how many, and what to do", () => {
+    expect(leftOut({ ...clean, skipped: ["big.iso", "dump.tar"], repositories: ["clone", "infra/sub", "x"] })).toEqual([
+      { ...tooLarge, label: "Over 50 MB (2):", paths: ["big.iso", "dump.tar"] },
+      { ...repositories, label: "Git repositories of their own (3):", paths: ["clone", "infra/sub", "x"] },
     ]);
   });
 
@@ -193,6 +192,6 @@ describe("leftOut (ADR-0026: what commits leave out)", () => {
 
   it("reads the repositories from the server's status", async () => {
     answering({ branch: "main", changes: [], locks: [], repositories: ["clone"] });
-    expect(leftOut(await gitStatus())).toEqual([{ ...repositories, paths: ["clone"] }]);
+    expect(leftOut(await gitStatus())).toEqual([{ ...repositories, label: "Git repositories of their own (1):", paths: ["clone"] }]);
   });
 });
