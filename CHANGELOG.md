@@ -87,9 +87,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - Move notes and folders by dragging them onto a folder, or onto Vault, in the file tree
   (#130). The folder under the drag is highlighted; a folder can't go into itself or one of
   its subfolders, and a name already taken there is reported without changing anything. An
-  open note follows the move with its unsaved edits. From the keyboard, "Move to…" (beside
-  the open note's Rename or move) and "Move folder to…" (in the tree) pick the folder from a
-  list. The tree's status now says when something moved. Files dragged in from outside the
+  open note follows the move with its unsaved edits. From the keyboard, the Rename or move
+  form now has a Folder list: pick a folder, or type a path. The tree's status now says when
+  something moved, and a move clears an earlier move's error. Files dragged in from outside the
   app are ignored.
 
 ### Changed

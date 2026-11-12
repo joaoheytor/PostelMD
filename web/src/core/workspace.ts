@@ -191,8 +191,12 @@ export class Workspace {
     await this.tree.changed(path);
   }
 
-  /** Renames or moves a note or folder, never onto an existing one (move.ts). True when it moved. */
+  /**
+   * Renames or moves a note or folder, never onto an existing one (move.ts). True when it moved.
+   * An earlier error is cleared first: only this move's outcome shows (a reopen may add its own).
+   */
   async move(from: string, to: string): Promise<boolean> {
+    this.fail(undefined);
     const r = await moveItem(this, from, to);
     if (r !== true) this.fail(r);
     return r === true;
