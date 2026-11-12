@@ -1,4 +1,4 @@
-import type { SaveResult } from "./api";
+import type { OtherVersion, SaveResult } from "./api";
 import { type Disposable, timeout } from "./disposable";
 import type { NoteDrafts } from "./drafts";
 import { Store } from "./store";
@@ -12,8 +12,8 @@ export interface DocState {
   message?: string;
   /** What happens next ("Retrying", "Log in again"), if anything. */
   next?: string;
-  /** The server's copy after a 412 (status "conflict"); binary: it isn't text, content is "". */
-  conflict?: { content: string; etag: string; binary?: true };
+  /** The server's copy after a 412 (status "conflict"); a binary one has no content. */
+  conflict?: OtherVersion;
 }
 
 export interface DocOptions {
@@ -147,7 +147,7 @@ export class DocumentSession implements Disposable {
   /** Resolves a conflict with the server's copy; the caller puts it in the editor. */
   takeTheirs(): string {
     const c = this.state.value.conflict;
-    if (!c) throw new Error("no conflict to resolve");
+    if (!c || c.binary) throw new Error(c ? "the other version isn't text: there is nothing to take" : "no conflict to resolve");
     this.cancelTimer();
     this.baseETag = c.etag;
     this.gen++;
@@ -233,7 +233,7 @@ export class DocumentSession implements Disposable {
     // The server holds snap.gen now, even if the note was closed meanwhile: its draft (written
     // on close, under this session's key) is cleared up to that generation, never past it.
     if (r.kind === "saved") this.opts.draft?.saved(snap.gen);
-    const landed = r.kind === "conflict" && !r.binary ? this.landedStall(r.content) : undefined; // binary "" is no text
+    const landed = r.kind === "conflict" && !r.binary ? this.landedStall(r.content) : undefined;
     if (landed !== undefined) this.opts.draft?.saved(landed);
     if (this.disposed) return;
     if (landed !== undefined && r.kind === "conflict") return this.stallLanded(landed, r.etag);
@@ -255,7 +255,7 @@ export class DocumentSession implements Disposable {
       case "conflict":
         this.stalls = [];
         this.cancelTimer();
-        this.state.set({ status: "conflict", conflict: { content: r.content, etag: r.etag, ...(r.binary && { binary: true }) } });
+        this.state.set({ status: "conflict", conflict: r.binary ? { etag: r.etag, binary: true } : { etag: r.etag, content: r.content } });
         return;
       case "gone":
         this.cancelTimer();

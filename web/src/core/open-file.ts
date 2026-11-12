@@ -49,6 +49,14 @@ export function openSession(path: string, note: Note, convert: boolean, deps: Se
   return holder.open;
 }
 
+/**
+ * Throws what openSession would for note (LineEndingsError), without starting a session: the
+ * workspace checks before it closes the open note, which stays open if this one can't (#134).
+ */
+export function checkOpens(note: Note, convert: boolean): void {
+  if (!convert) textFormat(note.content);
+}
+
 function asIs(text: string): { text: string; format: TextFormat } {
   const format = textFormat(text);
   return { text: toEditor(text, format), format };

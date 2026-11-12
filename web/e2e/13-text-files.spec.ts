@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { env, expect, login, noSeriousA11yViolations, test } from "./helpers";
@@ -14,7 +14,7 @@ async function withFiles(names: string[], fn: () => Promise<void>): Promise<void
   try {
     await fn();
   } finally {
-    for (const name of names) rmSync(vault(name), { force: true });
+    for (const name of names) rmSync(vault(name), { force: true, recursive: true });
   }
 }
 
@@ -59,19 +59,36 @@ test("a shell script stays executable after a save", async ({ page }) => {
   });
 });
 
-test("a binary file stays listed, and clicking it says why it doesn't open", async ({ page }) => {
-  await withFiles(["logo.png", "readme.md"], async () => {
+test("a binary file stays listed, and clicking it says why it doesn't open; the open note stays open and saving", async ({ page }) => {
+  await withFiles(["logo.png", "docs"], async () => {
     // A PNG's signature and the start of its header, built here: no binary fixture in the repository.
     writeFileSync(vault("logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]));
-    writeFileSync(vault("readme.md"), "# Readme\n");
+    mkdirSync(vault("docs"));
+    writeFileSync(vault("docs/readme.md"), "# Readme\n");
     await login(page);
+    await page.getByRole("button", { name: "docs", expanded: false }).click();
     await page.getByRole("button", { name: "readme.md" }).click();
+    await typeAtEnd(page, "docs/readme.md", "first");
     await page.getByRole("button", { name: "logo.png" }).click();
     const alert = page.getByRole("alert").filter({ hasText: "PostelMD opens only UTF-8 text files, and logo.png isn't one." });
     await expect(alert).toBeVisible();
     await expect(alert.getByRole("button", { name: "Convert to LF and open" })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Text of logo.png" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "logo.png" })).toBeVisible();
+
+    // #134: readme.md is still open, with its edit, and its folder is still the selected one.
+    const readme = page.getByRole("textbox", { name: "Text of docs/readme.md" });
+    await expect(readme).toContainText("first");
+    await expect(page.getByRole("button", { name: "Delete folder docs" })).toBeVisible();
+
+    // By keyboard too, and what is typed in the note afterwards saves.
+    await page.getByRole("button", { name: "logo.png" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(alert).toBeVisible();
+    await expect(readme).toContainText("first");
+    await typeAtEnd(page, "docs/readme.md", " second");
+    await expect.poll(() => readFileSync(vault("docs/readme.md"), "utf8")).toBe("# Readme\nfirst second");
+    await expect(alert).toBeVisible();
   });
 });
 

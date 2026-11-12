@@ -21,6 +21,11 @@ export function openFailure(path: string, err: unknown): { error: string; conver
   return { error: `Couldn't open ${path}: ${message(err)}` };
 }
 
+/** Why path didn't open: a save of the edits typed in prev while path loaded failed (#134). */
+export function unsavedMeanwhile(path: string, prev: string): string {
+  return `Couldn't open ${path}: your latest edits to ${prev} aren't saved yet, so it stays open. Open ${path} again once they save.`;
+}
+
 /** A note opened, but this browser's drafts couldn't be read (IndexedDB): its message says nothing to the user. */
 export const draftsUnchecked =
   "Couldn't check this browser for unsaved drafts of your notes. This note is open and saves as usual; reload the page to check again.";

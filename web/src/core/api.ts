@@ -160,13 +160,18 @@ export async function readNote(path: string): Promise<Note> {
 }
 
 /**
+ * A 412's other version: its text, or binary when it isn't text. A binary one has no content
+ * at all, so code that compares or takes it can't compile without ruling binary out (#139).
+ */
+export type OtherVersion = { etag: string; content: string; binary?: never } | { etag: string; binary: true };
+
+/**
  * The outcome of a save; saveNote never throws. "unknown": no answer in time, so the save may
  * or may not have landed.
  */
 export type SaveResult =
   | { kind: "saved"; etag: string }
-  // binary: the other version isn't text (content is ""): nothing to compare or take.
-  | { kind: "conflict"; etag: string; content: string; binary?: true }
+  | ({ kind: "conflict" } & OtherVersion)
   | { kind: "gone" }
   | { kind: "unknown" }
   | { kind: "error"; message: string; next?: string; retryAfterMs: number; retry: boolean };
@@ -217,7 +222,7 @@ async function conflictOf(resp: Response): Promise<SaveResult> {
     return { kind: "conflict", etag, content: decodeText(new Uint8Array(await resp.arrayBuffer())) };
   } catch (err) {
     if (!(err instanceof NotTextError)) throw err;
-    return { kind: "conflict", etag, content: "", binary: true };
+    return { kind: "conflict", etag, binary: true };
   }
 }
 
