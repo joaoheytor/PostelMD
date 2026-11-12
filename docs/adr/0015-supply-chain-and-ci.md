@@ -305,3 +305,20 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   nothing else.
   HCL/Terraform has no maintained official mode, so `.tf` files open as plain text.
   `npm audit --omit=dev` reports no vulnerability with them.
+- **2026-11-12, the `modernc.org/sqlite` version** (planned for v0.2;
+  [ADR-0030](0030-v02-storage-sqlite.md)), under its existing row: **v1.61.0** (SQLite
+  3.54.1), published 2026-10-21, the newest release at least two weeks old on 2026-11-12
+  (v1.61.1 and v1.62.0 are younger). Its `go.mod` brings these modules, all transitive:
+  `modernc.org/libc` v1.79.0, `modernc.org/memory` v1.12.1, `modernc.org/mathutil` v1.7.1,
+  `modernc.org/fileutil` v1.4.0, `github.com/dustin/go-humanize` v1.1.0,
+  `github.com/google/uuid` v1.6.0, `github.com/remyoudompheng/bigfft` (pseudo-version
+  `v0.0.0-20230129092748-24d4a6f8daec`), `github.com/mattn/go-isatty` v0.0.24,
+  `github.com/ncruces/go-strftime` v1.1.0 and `github.com/google/pprof` (a pseudo-version
+  of 2026-10-16), plus `golang.org/x/sys` v0.49.0, already in use. The driver's upstream
+  rule is that `modernc.org/libc` be pinned to exactly its version, so our `go.mod` has an
+  explicit `require` for it (`go get` would mark it `// indirect`, and a later bump of
+  another module could move it). Renovate bumps the two together. The row becomes *in use*
+  in the PR that adds it to `go.mod`.
+- **2026-11-12, `sqlc` waits for v0.3** ([ADR-0030](0030-v02-storage-sqlite.md)), under its
+  existing row: v0.2's few tables use hand-written, parameterized queries in `store/sql`;
+  `sqlc` comes with v0.3's account and membership tables.

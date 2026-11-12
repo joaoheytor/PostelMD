@@ -9,6 +9,15 @@ Decisions are recorded in [`adr/`](adr/). This document describes how the pieces
 > one vault at `/data/vaults/notes` serialized by one vault mutex, no SQLite (the credential is `/data/.postelmd/auth.json`, sessions
 > are signed cookies), a content-hash ETag, local git with no remote, and no watcher, plugins,
 > backup or metrics. The sections below describe the full design that later milestones build.
+>
+> **v0.2 (proposed):** [ADR-0030](adr/0030-v02-storage-sqlite.md) adds `app.db`
+> (`modernc.org/sqlite`, WAL, `synchronous=FULL`, one writer connection, embedded migrations,
+> data format 2, `postelmd db rebuild`, a separate rebuildable `index.db`);
+> [ADR-0031](adr/0031-v02-file-identity.md) adds file IDs, generations, outside-rename
+> matching, tombstones and a vault UUID in the marker; [ADR-0032](adr/0032-v02-etag-and-api.md)
+> the ID + generation + hash ETag with `/api/v1/files/{id}` saves; and
+> [ADR-0033](adr/0033-v02-intents.md) intents for saves, creates and structural operations,
+> still under one vault mutex. Credentials stay in `auth.json` until v0.3.
 
 ## 1. System context
 
@@ -42,7 +51,7 @@ Everything else consumes their interfaces.
 | `store/watch` | fsnotify adapter. Emits raw hints; it is the only place that touches inotify. |
 | `store/git` | go-git adapter. go-git touches only `.git/`; commits are built from supplied bytes and worktree changes go through `store/fs` (ADR-0016 spike results) |
 | `store/sql` | SQLite repositories (sqlc), migrations, outbox, intent log |
-| `store/lock` | Instance lock (`flock`), vault and file locks with fixed lock ordering |
+| `store/lock` | Instance lock (`flock`) and the vault mutex (one per vault; no per-file locks, ADR-0033) |
 | `store/auditfile` | The `file:` audit sink: an append-only JSON-lines file on a separate volume (§9). Filesystem I/O, so it lives under `store`. |
 | `vault` | Vault lifecycle and states, including maintenance mode |
 | `sync` | Debouncing of watcher hints, the reconciler, the per-vault event bus, SSE fan-out with replay and per-event authorization |
@@ -87,7 +96,13 @@ Everything else consumes their interfaces.
     instance.lock            # flock held by the single running process (ADR-0014)
     format                   # data format number; an older binary refuses a newer one (ADR-0025)
     admin.sock               # 0600 Unix socket for online CLI commands (ADR-0009)
-    app.db                   # SQLite WAL: identity, ACLs, file IDs, findings, outbox, intent log, FTS
+    app.db                   # SQLite WAL, 0600: identity, ACLs, file IDs, findings, outbox, intent log (ADR-0030)
+    index.db                 # SQLite WAL, 0600: FTS and links; derived, rebuilt by `reindex` (ADR-0030)
+    migrate.intent           # sidecar while a migration's snapshot is taken (ADR-0015)
+    rebuild.intent           # sidecar while `postelmd db rebuild` runs (ADR-0030)
+    damaged-*/               # app.db files moved aside by `db rebuild`, never deleted automatically (ADR-0030)
+    pre-format-2/            # 0600 copies of format, auth.json, secret.key, config.yaml as v0.1 left them (ADR-0030)
+    pre-format-2-*/, rolled-back-*/  # set aside by a v0.2 → v0.1 rollback or a redone copy; removed by the runbook
     keys/                    # key ring, one key per purpose, versioned, 0600 (ADR-0005)
     recovery/                # overwritten or stashed content kept 7 days (ADR-0003, ADR-0016)
     plugins/<id>/<version>/  # approved plugin artifacts, hash-pinned
@@ -321,7 +336,7 @@ each one; a change updates both.
 | Limit | Default | Configurable | Defined in |
 |---|---|---|---|
 | Note size | 5 MB (`413` above) | no | ADR-0003 §8 |
-| File read (`GET` of a note or file) | 64 MiB (`413` above; the app shows its own "larger than 5 MiB" refusal) | no | store read limit (#144) |
+| File read (`GET` of a note or file) | 64 MiB (`413` above; the app shows its own "larger than 5 MiB" refusal; a save over such a file is `412` without an `ETag`) | no | store read limit (#144), ADR-0029 |
 | Request body for notes | 6 MB | no | ADR-0003 §8 |
 | Upload size | 25 MB | `POSTELMD_MAX_UPLOAD_MB` | ADR-0009 |
 | Save timeout (server) | 10 s | no | ADR-0003 §8 |

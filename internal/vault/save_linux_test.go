@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
 
 // TestRetryOfALandedSave: the first save's rename landed but its response was lost, so the
@@ -28,6 +30,62 @@ func TestRetryOfALandedSave(t *testing.T) {
 	}
 	if got := content(t, dir, "notes/a.md"); got != "B" {
 		t.Fatalf("note = %q, want B", got)
+	}
+}
+
+// TestSaveOverAFileTooLargeToRead: something outside PostelMD grew the note past the store's
+// read limit. The client can't have based its edit on a file it could never read, so the save
+// is a conflict, with no current note to send (ADR-0029), never an internal error (#157). The
+// file is left as it is. Create, Move and Delete never read it: they work as for any file.
+func TestSaveOverAFileTooLargeToRead(t *testing.T) {
+	v, dir := newVault(t)
+	big := filepath.Join(dir, "notes", "a.md")
+	must(t, os.Truncate(big, fs.MaxFileSize+1)) // sparse: no 64 MiB written
+	_, err := v.Save(ctx, "notes/a.md", RevOf([]byte("A")), []byte("B"))
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || !conflict.TooLarge || !errors.Is(err, ErrTooLargeToRead) || conflict.Current != nil || conflict.Rev != "" {
+		t.Fatalf("save over a file too large to read = %#v, want a ConflictError with no current note", err)
+	}
+	if fi, err := os.Stat(big); err != nil || fi.Size() != fs.MaxFileSize+1 {
+		t.Fatalf("the large file after the save: %v, %v", fi, err)
+	}
+	// Shrunk back, it saves as before; changed to other bytes, it's an ordinary conflict.
+	must(t, os.WriteFile(big, []byte("A"), 0o600))
+	if _, err := v.Save(ctx, "notes/a.md", RevOf([]byte("A")), []byte("B")); err != nil {
+		t.Fatalf("save after the file shrank back = %v", err)
+	}
+	must(t, os.WriteFile(big, []byte("C"), 0o600))
+	_, err = v.Save(ctx, "notes/a.md", RevOf([]byte("B")), []byte("D"))
+	if !errors.As(err, &conflict) || conflict.TooLarge || errors.Is(err, ErrTooLargeToRead) || string(conflict.Current) != "C" || conflict.Rev != RevOf([]byte("C")) {
+		t.Fatalf("save over other bytes = %#v, want an ordinary conflict with C", err)
+	}
+	must(t, os.Truncate(big, fs.MaxFileSize+1))
+	if _, err := v.Create(ctx, "notes/a.md", []byte("B")); !errors.Is(err, ErrExists) {
+		t.Fatalf("create over it = %v, want ErrExists", err)
+	}
+	must(t, v.Move(ctx, "notes/a.md", "notes/b.md"))
+	if _, err := v.Delete(ctx, "notes/b.md"); err != nil {
+		t.Fatalf("delete it = %v", err)
+	}
+}
+
+// TestRestoreOverAFileTooLargeToRead: a restore from history goes through the save path, so
+// over a file grown past the read limit it is the same conflict with no current note (ADR-0029).
+func TestRestoreOverAFileTooLargeToRead(t *testing.T) {
+	v, dir := newVault(t)
+	if _, err := v.EnableGit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	hist, err := v.History("notes/a.md", 1)
+	must(t, err)
+	must(t, os.Truncate(filepath.Join(dir, "notes", "a.md"), fs.MaxFileSize+1))
+	_, err = v.Restore(ctx, "notes/a.md", hist[0].Commit, RevOf([]byte("A")))
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || !conflict.TooLarge || !errors.Is(err, ErrTooLargeToRead) {
+		t.Fatalf("restore over a file too large to read = %#v, want a too-large ConflictError", err)
 	}
 }
 

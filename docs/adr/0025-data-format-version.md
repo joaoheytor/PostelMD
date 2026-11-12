@@ -65,3 +65,11 @@ unchanged, and a binary that doesn't check can't be taught to later.
 | A version field in `auth.json` | Read after other state; missing before setup; ties the check of all of `/data` to the credential's format |
 | The release version (`0.1.0`) instead of a format number | Most releases don't change the data; a rollback between two of them must keep working |
 | No check until SQLite arrives | 0.1 binaries could never refuse 0.2 data: the RC's bytes become 0.1.0 unchanged |
+
+## Clarifications
+- **2026-11-12, format 2.** The table above is what a format-1 build does. What a format-2
+  build does with `format` 1 or missing (the first upgrade, its crash rows, and the vault
+  marker that goes with it) is in [ADR-0030](0030-v02-storage-sqlite.md), which extends this
+  table; the rows for a higher, damaged or symlinked `format` are unchanged. ADR-0030's
+  rollback to v0.1 writes `1` into `format` deliberately, by a runbook step after the
+  database is moved aside; that is not editing it "to get past a newer format".

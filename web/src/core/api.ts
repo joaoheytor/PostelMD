@@ -162,7 +162,8 @@ export async function readNote(path: string): Promise<Note> {
 }
 
 /**
- * A 412's other version: its text, or binary when it isn't text. A binary one has no content
+ * A 412's other version: its text, or binary when it isn't text or the server can't read it
+ * (over its read limit: no ETag either, ADR-0029). A binary one has no content
  * at all, so code that compares or takes it can't compile without ruling binary out (#139).
  */
 export type OtherVersion = { etag: string; content: string; binary?: never } | { etag: string; binary: true };
@@ -216,10 +217,12 @@ function contentType(path: string): string {
 /**
  * A 412's other version, read like readNote reads a file. If it is no longer text, it is a
  * conflict with nothing to compare or take (binary): the user can only keep their text
- * elsewhere, and the other version stays on disk.
+ * elsewhere, and the other version stays on disk. A 412 without an ETag carries no other
+ * version: the file grew past the server's read limit (ADR-0029), so it is binary too.
  */
 async function conflictOf(resp: Response): Promise<SaveResult> {
   const etag = resp.headers.get("ETag") ?? "";
+  if (etag === "") return { kind: "conflict", etag, binary: true };
   try {
     return { kind: "conflict", etag, content: decodeText(new Uint8Array(await resp.arrayBuffer())) };
   } catch (err) {

@@ -9,13 +9,16 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
 
 // Save replaces the note at p with content if its current revision is base (If-Match).
 // It never creates a note: a missing one is ErrNotFound, so an autosave can't recreate a
 // deleted note. A different revision is a *ConflictError carrying the current note, unless
 // the note already holds exactly content: then it answers the current revision whatever the
-// base, so a retry whose first response was lost succeeds (ADR-0027). Saving
+// base, so a retry whose first response was lost succeeds (ADR-0027). A note grown past the
+// store's read limit is a *ConflictError without one (ADR-0029). Saving
 // identical content writes nothing. The new note keeps the old one's permission bits. The
 // vault mutex is held from the check until the replacement is durable.
 func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (Rev, error) {
@@ -32,6 +35,12 @@ func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (R
 	defer unlock()
 
 	cur, err := v.root.ReadFile(p)
+	if errors.Is(err, fs.ErrTooLarge) {
+		// Grown past the read limit outside PostelMD: no client could read it to base an
+		// edit on, and content (at most MaxNoteSize) can't equal it, so this is a conflict
+		// with no current note to send (ADR-0029). The file is left as it is.
+		return "", &ConflictError{TooLarge: true}
+	}
 	if err != nil {
 		return "", notFound(err)
 	}

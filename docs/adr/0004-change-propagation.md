@@ -26,19 +26,25 @@ on the next save. inotify is unreliable in some environments:
   - **Absence is confirmed by two passes** before a tombstone or an ID transfer
     (ADR-0003 §2, "brief absences"). Those paths belong to their intent's recovery
     table, or to the user's decision, until the intent is cleared.
-- **Startup order.** Each step finishes before the next starts; nothing serves requests or
-  mutates a vault before intent recovery has run:
-  1. take the instance lock (ADR-0014);
-  2. refuse to start if a restore is in progress (ADR-0017; the marker is specified in #4);
-  3. run schema migrations (ADR-0015);
-  4. write the `post_migration_started` marker if a migration ran (ADR-0015);
+- **Startup order.** Each step finishes before the next starts; nothing serves requests
+  (other than `/healthz`, and `/readyz` answering `503`) or mutates a vault before intent
+  recovery has run ([ADR-0030](0030-v02-storage-sqlite.md)):
+  1. the layout checks (ADR-0025), then take the instance lock (ADR-0014), then start the
+     HTTP listener: `/healthz` answers `200`, `/readyz` and every other route `503` with
+     `Retry-After`;
+  2. the format check (ADR-0025, ADR-0030); refuse to start if a restore is in progress
+     (ADR-0017; the marker is specified in #4);
+  3. open `app.db` and run `PRAGMA quick_check` (ADR-0030); run schema migrations (ADR-0015);
+  4. write the `post_migration_started` marker if a migration ran (ADR-0015); check the
+     vault marker, and on format-1 data run the first ID assignment (ADR-0030, ADR-0031);
   5. **intent recovery** for every open intent (save, structural, restore, git; ADR-0003 §2
      and §5, ADR-0016), then the temp sweep (ADR-0003 §5);
   6. start the watcher, holding its hints, then run the **full reconcile** (with the rules
      above), then apply the held hints;
   7. replay the unprocessed outbox (ADR-0003 §6);
   8. start the background workers (index, commit, push, purge);
-  9. open the admin socket, then HTTP. `/readyz` reports ready only after this step.
+  9. open the admin socket, then serve every route. `/readyz` reports ready only after this
+     step.
 - Changes go to a **per-vault event bus** and are pushed to clients over **SSE**
   (`GET /api/v1/events`):
   - each event has a monotonic ID, and a ring buffer replays from `Last-Event-ID`;
