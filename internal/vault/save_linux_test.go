@@ -43,12 +43,23 @@ func TestSaveOverAFileTooLargeToRead(t *testing.T) {
 	must(t, os.Truncate(big, fs.MaxFileSize+1)) // sparse: no 64 MiB written
 	_, err := v.Save(ctx, "notes/a.md", RevOf([]byte("A")), []byte("B"))
 	var conflict *ConflictError
-	if !errors.As(err, &conflict) || !errors.Is(err, ErrTooLargeToRead) || conflict.Current != nil || conflict.Rev != "" {
+	if !errors.As(err, &conflict) || !conflict.TooLarge || !errors.Is(err, ErrTooLargeToRead) || conflict.Current != nil || conflict.Rev != "" {
 		t.Fatalf("save over a file too large to read = %#v, want a ConflictError with no current note", err)
 	}
 	if fi, err := os.Stat(big); err != nil || fi.Size() != fs.MaxFileSize+1 {
 		t.Fatalf("the large file after the save: %v, %v", fi, err)
 	}
+	// Shrunk back, it saves as before; changed to other bytes, it's an ordinary conflict.
+	must(t, os.WriteFile(big, []byte("A"), 0o600))
+	if _, err := v.Save(ctx, "notes/a.md", RevOf([]byte("A")), []byte("B")); err != nil {
+		t.Fatalf("save after the file shrank back = %v", err)
+	}
+	must(t, os.WriteFile(big, []byte("C"), 0o600))
+	_, err = v.Save(ctx, "notes/a.md", RevOf([]byte("B")), []byte("D"))
+	if !errors.As(err, &conflict) || conflict.TooLarge || errors.Is(err, ErrTooLargeToRead) || string(conflict.Current) != "C" || conflict.Rev != RevOf([]byte("C")) {
+		t.Fatalf("save over other bytes = %#v, want an ordinary conflict with C", err)
+	}
+	must(t, os.Truncate(big, fs.MaxFileSize+1))
 	if _, err := v.Create(ctx, "notes/a.md", []byte("B")); !errors.Is(err, ErrExists) {
 		t.Fatalf("create over it = %v, want ErrExists", err)
 	}
@@ -58,7 +69,27 @@ func TestSaveOverAFileTooLargeToRead(t *testing.T) {
 	}
 }
 
-// TestSaveKeepsTheNotesMode:a save replaces the note with a temp file that took the note's
+// TestRestoreOverAFileTooLargeToRead: a restore from history goes through the save path, so
+// over a file grown past the read limit it is the same conflict with no current note (ADR-0029).
+func TestRestoreOverAFileTooLargeToRead(t *testing.T) {
+	v, dir := newVault(t)
+	if _, err := v.EnableGit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.ImportInitial(ctx, "Ada", "ada@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	hist, err := v.History("notes/a.md", 1)
+	must(t, err)
+	must(t, os.Truncate(filepath.Join(dir, "notes", "a.md"), fs.MaxFileSize+1))
+	_, err = v.Restore(ctx, "notes/a.md", hist[0].Commit, RevOf([]byte("A")))
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) || !conflict.TooLarge || !errors.Is(err, ErrTooLargeToRead) {
+		t.Fatalf("restore over a file too large to read = %#v, want a too-large ConflictError", err)
+	}
+}
+
+// TestSaveKeepsTheNotesMode: a save replaces the note with a temp file that took the note's
 // own permission bits first (ADR-0003 §5), so a 0644 note stays readable by the host's other
 // tools and a 0755 script stays executable. Bits the umask would clear (0664) survive too.
 func TestSaveKeepsTheNotesMode(t *testing.T) {

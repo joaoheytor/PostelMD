@@ -39,7 +39,7 @@ func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (R
 		// Grown past the read limit outside PostelMD: no client could read it to base an
 		// edit on, and content (at most MaxNoteSize) can't equal it, so this is a conflict
 		// with no current note to send (ADR-0029). The file is left as it is.
-		return "", &ConflictError{}
+		return "", &ConflictError{TooLarge: true}
 	}
 	if err != nil {
 		return "", notFound(err)

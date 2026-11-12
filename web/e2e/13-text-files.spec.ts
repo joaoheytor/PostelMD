@@ -209,28 +209,31 @@ test("another version that isn't text leaves one way out: my text as a new file,
 test("a file grown past 64 MiB outside PostelMD is a conflict, not retried; my text saves as a new file", async ({ page }) => {
   await withFiles(["grown.log", "grown-recovered.log"], async () => {
     writeFileSync(vault("grown.log"), "start\n");
+    await page.clock.install(); // the app's timers run only when the test says
     await login(page);
     await page.getByRole("button", { name: "grown.log" }).click();
     await expect(page.getByRole("textbox", { name: "Text of grown.log" })).toContainText("start");
 
     truncateSync(vault("grown.log"), 64 * 1024 * 1024 + 1); // sparse: no 64 MiB written (#157)
-    let puts = 0;
+    const saves: string[] = [];
     page.on("request", (r) => {
-      if (r.method() === "PUT" && r.url().endsWith("/api/v1/notes/grown.log")) puts++;
+      if (r.method() === "PUT") saves.push(new URL(r.url()).pathname);
     });
     await typeAtEnd(page, "grown.log", "mine");
+    await page.clock.runFor(2000); // the autosave debounce
     const banner = page
       .getByRole("alert")
       .filter({ has: page.getByRole("heading", { name: "This file changed outside this editor into something PostelMD can't open" }) });
     await expect(banner).toBeVisible();
     await expect(page.getByText("too large to save")).toHaveCount(0);
-    await page.waitForTimeout(3000); // a retry would come within 1 s (the first backoff)
-    expect(puts).toBe(1);
+    await page.clock.runFor(120_000); // any retry's backoff, many times over
 
     await banner.getByRole("button", { name: "Save my version as a new file" }).click();
     await expect
       .poll(() => (existsSync(vault("grown-recovered.log")) ? readFileSync(vault("grown-recovered.log"), "utf8") : ""))
       .toBe("start\nmine");
+    const beforeRecovery = saves.slice(0, saves.indexOf("/api/v1/notes/grown-recovered.log"));
+    expect(beforeRecovery).toEqual(["/api/v1/notes/grown.log"]); // one save, never retried
     expect(statSync(vault("grown.log")).size).toBe(64 * 1024 * 1024 + 1);
   });
 });

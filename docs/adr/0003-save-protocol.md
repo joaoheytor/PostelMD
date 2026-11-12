@@ -192,7 +192,7 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
 | Operation | Request | Preconditions | Outcome |
 |---|---|---|---|
 | Create | `POST …/files` `{path}` | `If-None-Match: *` | `201` + ETag; `412` if the path exists (including a concurrent create) |
-| Update | `PUT …/files/{id}` | `If-Match` | `200` + new ETag; `412` with the current content on mismatch, **unless the current content equals the submitted content** (`200`, idempotent; §5); `410` on a tombstone. **Never creates.** |
+| Update | `PUT …/files/{id}` | `If-Match` | `200` + new ETag; `412` with the current content on mismatch, **unless the current content equals the submitted content** (`200`, idempotent; §5); over a file past the store's read limit, `412` with no content and no ETag ([ADR-0029](0029-a-save-over-a-file-too-large-to-read.md)); `410` on a tombstone. **Never creates.** |
 | Delete | `DELETE …/files/{id}` | `If-Match` | `204`; leaves a tombstone |
 | Rename/move file | `POST …/files/{id}/move` `{to}` | `If-Match` on the source; the destination **must not exist** | **No-clobber**: `renameat2(RENAME_NOREPLACE)`, or `link()`+`unlink()` where that's unavailable; `409` if the destination exists |
 | Folder rename/move | `POST …/folders/move` | A subtree lock; every open file under it must be clean | No-clobber: `renameat2(RENAME_NOREPLACE)`, or `rename-checked` where that's unavailable (§2); children keep their IDs and get a generation bump |

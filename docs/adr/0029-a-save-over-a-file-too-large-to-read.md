@@ -42,7 +42,9 @@ can't apply). What can't be sent is the current note and its `ETag`.
   `ETag` (or the JSON `code`) first. "Keep my version" isn't offered: overwriting needs an
   `ETag`, and hashing a file of any size under the vault mutex is the cost the read limit
   exists to avoid. The user can remove or shrink the file on the host and reopen it.
-- Follow-ups: none.
+- Follow-ups: [ADR-0003](0003-save-protocol.md)'s Update row (the v0.2 protocol, Proposed)
+  has the same "`412` with the current content" rule; it points here, and the v0.2 save path
+  keeps this exception.
 
 ## Alternatives considered
 | Option | Why not |
