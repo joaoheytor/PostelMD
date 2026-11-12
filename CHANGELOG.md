@@ -220,6 +220,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   no longer log an error's text, which could quote a path.
 
 ### Security
+- At startup the server now removes every git transport except `https`, which goes through
+  its outbound-request policy, before it opens the vault. PostelMD doesn't fetch or push yet;
+  this keeps a git remote from ever reaching a local path, `file://` or a private address
+  once it does (#143).
 - Names that Windows or macOS treat as `.git` (`.git ` with a trailing space or dot,
   `git~1`, or `.git` with invisible Unicode characters) are refused like `.git` itself, so
   a vault can't hold a path that git refuses to push or clone. Such names already on disk are

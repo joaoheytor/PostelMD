@@ -20,6 +20,14 @@ All others are **Proposed** until the code that depends on them is merged.
 **MVP:** ADR-0020 defines v0.1 as a subset of this design. Each ADR it narrows has a
 "MVP scope" note under its status line.
 
+**ADRs that ADR-0020 narrows stay Proposed** (0003, 0005, 0006, 0014, 0016, …) although
+the MVP's code depends on part of them, until the milestone that implements them fully
+flips them to Accepted; ADR-0020, which is Accepted, records the subset v0.1 implements, and
+each one's "MVP scope" note says which part that is
+([#107](https://github.com/joaoheytor/PostelMD/issues/107)). For example, ADR-0003's
+conditional saves, per-edit `esid` and drafts are in use, and the v0.2 slice that brings the
+ID + generation ETag flips it.
+
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-backend-language.md) | Go backend, TypeScript + CodeMirror 6 frontend | Proposed |
