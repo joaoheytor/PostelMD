@@ -222,7 +222,8 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 	case errors.Is(err, vault.ErrTooLarge):
 		writeError(w, stdhttp.StatusRequestEntityTooLarge, "note too large")
 	case errors.Is(err, vault.ErrTooLargeToRead):
-		// Worded like the web app's TooLargeError, which it shows instead.
+		// For API clients: the web app ignores this text and shows its own TooLargeError
+		// (its 5 MiB editing limit) for any 413 on a read.
 		writeError(w, stdhttp.StatusRequestEntityTooLarge, "it's larger than 64 MiB, the most PostelMD opens")
 	case errors.Is(err, vault.ErrBusy):
 		w.Header().Set("Retry-After", "1")

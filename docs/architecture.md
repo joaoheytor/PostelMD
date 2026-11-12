@@ -321,6 +321,7 @@ each one; a change updates both.
 | Limit | Default | Configurable | Defined in |
 |---|---|---|---|
 | Note size | 5 MB (`413` above) | no | ADR-0003 §8 |
+| File read (`GET` of a note or file) | 64 MiB (`413` above; the app says the file is too large to open) | no | store read limit (#144) |
 | Request body for notes | 6 MB | no | ADR-0003 §8 |
 | Upload size | 25 MB | `POSTELMD_MAX_UPLOAD_MB` | ADR-0009 |
 | Save timeout (server) | 10 s | no | ADR-0003 §8 |
@@ -342,3 +343,8 @@ each one; a change updates both.
 | Login backoff | after 5 failures, 1 s doubling to 15 min | no | ADR-0005 |
 | Invite / reset link / setup token | 72 h / 24 h / 30 min, single use | no | ADR-0018, ADR-0009 |
 | Graceful shutdown | 45 s deadline (`--stop-timeout 60`) | no | §8, ADR-0009 |
+
+A read over the store's limit reuses `413`, though it names a too-large response rather than
+a request body: it is the one status clients already treat as "too large", it isn't a
+server fault (so it is neither a `5xx` nor logged as an error), and the web app maps it to
+the same refusal it gives a file it fetched and found over its own 5 MiB editing limit.
