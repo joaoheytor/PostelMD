@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, type GitStatus } from "./api";
+import { ApiError } from "./api";
+import type { GitStatus } from "./git-api";
 import { changedNotice, Git, type GitDeps } from "./git";
 
 // Fake secrets, built at run time so no scanner flags this public file.

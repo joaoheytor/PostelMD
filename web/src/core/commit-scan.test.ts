@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GitChange } from "./api";
+import type { GitChange } from "./git-api";
 import { decodeText, type FileBytes, needsConfirmation, scanChanges, scanText } from "./commit-scan";
 import { scanSecrets } from "./secrets";
 

@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import type { GitStatus } from "../core/api";
+import type { GitStatus } from "../core/git-api";
 import { type FileScan, needsConfirmation, notChecked, withFindings } from "../core/commit-scan";
 import type { Git } from "../core/git";
 import { fields, LightElement, StoreController } from "./base";
