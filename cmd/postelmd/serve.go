@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/audit"
 	"github.com/joaoheytor/PostelMD/internal/auth"
 	"github.com/joaoheytor/PostelMD/internal/config"
+	"github.com/joaoheytor/PostelMD/internal/egress"
 	pmhttp "github.com/joaoheytor/PostelMD/internal/http"
+	"github.com/joaoheytor/PostelMD/internal/store/git"
 	"github.com/joaoheytor/PostelMD/internal/store/layout"
 	"github.com/joaoheytor/PostelMD/internal/store/lock"
 	"github.com/joaoheytor/PostelMD/internal/vault"
@@ -41,7 +44,8 @@ func setupURL(listen, actual string) string {
 
 // serve runs the server until ctx ends. The startup order is: layout and the filesystem
 // checks of the state and vault directories → instance lock → data format (ADR-0025) → auth
-// state → vault (adoption check, temp sweep, rename probe) → the vault's git repository (adopted, or created empty) → HTTP.
+// state → go-git transports (https only, through egress) → vault (adoption check, temp
+// sweep, rename probe) → the vault's git repository (adopted, or created empty) → HTTP.
 // ready, if set, gets the listening address.
 func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(addr string)) error {
 	log := slog.New(slog.NewJSONHandler(stdout, nil))
@@ -66,6 +70,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = svc.Close() }()
+	installGitTransports()
 	v, err := openVault(paths.Vault, log)
 	if err != nil {
 		return err
@@ -103,6 +108,13 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 	}
 	return nil
 }
+
+// installGitTransports leaves go-git only the https transport, through the egress client,
+// before any vault is opened (threat model I13, #40). go-git's transports are process-wide,
+// so it runs once per process, however many times serve runs (tests).
+var installGitTransports = sync.OnceFunc(func() {
+	git.InstallTransports(egress.New(egress.Options{}))
+})
 
 // openVault opens the vault at dir and its git repository (adopted, or created empty).
 func openVault(dir string, log *slog.Logger) (*vault.Vault, error) {

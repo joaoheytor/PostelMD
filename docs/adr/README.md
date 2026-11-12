@@ -20,11 +20,17 @@ All others are **Proposed** until the code that depends on them is merged.
 **MVP:** ADR-0020 defines v0.1 as a subset of this design. Each ADR it narrows has a
 "MVP scope" note under its status line.
 
+**ADR-0003 stays Proposed** although the MVP's code depends on part of it (conditional
+saves, the per-edit `esid` and generation rule, the drafts of §7). ADR-0020, which is
+Accepted, records the subset the MVP implements; the rest (ID + generation ETags, file IDs,
+op-id intents) isn't built. The v0.2 slice that brings the ID + generation ETag flips
+ADR-0003 to Accepted ([#107](https://github.com/joaoheytor/PostelMD/issues/107)).
+
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-backend-language.md) | Go backend, TypeScript + CodeMirror 6 frontend | Proposed |
 | [0002](0002-storage-files-as-source-of-truth.md) | Files are the source of truth; SQLite for derived data and identity | Proposed |
-| [0003](0003-save-protocol.md) | Save protocol: identity, conditional writes, atomic rename | Proposed |
+| [0003](0003-save-protocol.md) | Save protocol: identity, conditional writes, atomic rename | Proposed (until v0.2; the MVP's subset: see 0020) |
 | [0004](0004-change-propagation.md) | Change propagation: watcher + reconciler + SSE | Proposed |
 | [0005](0005-auth-providers.md) | Pluggable auth providers, local accounts by default | Proposed |
 | [0006](0006-authorization-and-confinement.md) | Vaults, memberships, confinement and reserved paths | Proposed |

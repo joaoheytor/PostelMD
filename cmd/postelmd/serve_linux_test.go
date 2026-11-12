@@ -14,7 +14,12 @@ import (
 	"testing"
 	"time"
 
+	gogit "github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing/transport/client"
+
 	"github.com/joaoheytor/PostelMD/internal/config"
+	"github.com/joaoheytor/PostelMD/internal/egress"
 	"github.com/joaoheytor/PostelMD/internal/store/lock"
 )
 
@@ -181,6 +186,40 @@ func TestSetupURL(t *testing.T) {
 	} {
 		if got := setupURL(tc.listen, tc.actual); got != tc.want {
 			t.Errorf("setupURL(%q, %q) = %q, want %q", tc.listen, tc.actual, got, tc.want)
+		}
+	}
+}
+
+// TestServeInstallsHTTPSOnlyGitTransport: once serve has started, go-git knows only the
+// https transport, and that transport is the egress client (threat model I13, #40, #143).
+func TestServeInstallsHTTPSOnlyGitTransport(t *testing.T) {
+	start(t, t.TempDir())
+	if len(client.Protocols) != 1 || client.Protocols["https"] == nil {
+		schemes := make([]string, 0, len(client.Protocols))
+		for s := range client.Protocols {
+			schemes = append(schemes, s)
+		}
+		t.Fatalf("go-git transports after serve = %v, want only https", schemes)
+	}
+	other := t.TempDir()
+	if _, err := gogit.PlainInit(other, false); err != nil {
+		t.Fatal(err)
+	}
+	for remote, want := range map[string]string{
+		"file://" + other:              "unsupported scheme",
+		other:                          "unsupported scheme",
+		"https://127.0.0.1:9/repo.git": egress.ErrDenied.Error(), // egress refuses loopback
+	} {
+		repo, err := gogit.PlainInit(t.TempDir(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.CreateRemote(&gitconfig.RemoteConfig{Name: "origin", URLs: []string{remote}}); err != nil {
+			t.Fatal(err)
+		}
+		err = repo.FetchContext(t.Context(), &gogit.FetchOptions{RemoteName: "origin"})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("fetch from %s = %v, want %q", remote, err, want)
 		}
 	}
 }
