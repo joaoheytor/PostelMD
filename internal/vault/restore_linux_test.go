@@ -3,7 +3,9 @@
 package vault
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,5 +217,28 @@ func TestRestoreChecksTheDestination(t *testing.T) {
 	}
 	if c := content(t, dir, TrashDir+"/"+stamp2+"/a.md"); c != "AAAA" {
 		t.Fatalf("the trashed item holds %q", c)
+	}
+}
+
+// TestRestoreLogsAStuckStampFolderWithoutItsText: a stamp folder that can't be removed
+// after a restore is only a warning, logged with the pathless attributes, never the
+// error's text (CLAUDE.md rule 15, #144).
+func TestRestoreLogsAStuckStampFolderWithoutItsText(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes entries from read-only directories")
+	}
+	v, dir := newVault(t)
+	trashFixture(t, dir)
+	var logs bytes.Buffer
+	v.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	trash := filepath.Join(dir, TrashDir)
+	must(t, os.Chmod(trash, 0o500))                  //nolint:gosec // read-only, but still listable
+	t.Cleanup(func() { _ = os.Chmod(trash, 0o700) }) //nolint:gosec // removing a directory needs its x bit
+	if _, err := v.RestoreTrashed(ctx, stamp2, "", ""); err != nil {
+		t.Fatalf("RestoreTrashed = %v", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "err.errno=EACCES") || strings.Contains(out, stamp2) {
+		t.Fatalf("want a pathless warning, got %q", out)
 	}
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNote, readNote, saveNote } from "./api";
-import { bomChar, NotTextError } from "./textfile";
+import { bomChar, NotTextError, TooLargeError } from "./textfile";
 
 const answer = (status: number, body: Uint8Array<ArrayBuffer>) =>
   (() => Promise.resolve(new Response(body, { status, headers: { ETag: '"e9"' } }))) as typeof fetch;
@@ -19,6 +19,11 @@ describe("reading a file's text", () => {
   it("refuses a binary file", async () => {
     vi.stubGlobal("fetch", answer(200, png));
     await expect(readNote("logo.png")).rejects.toThrow(NotTextError);
+  });
+
+  it("a file the server won't read for its size is too large, like one it sends (#144)", async () => {
+    vi.stubGlobal("fetch", answer(413, new TextEncoder().encode('{"error":"too large"}')));
+    await expect(readNote("huge.log")).rejects.toThrow(TooLargeError);
   });
 
   it("a conflict's other version keeps its byte order mark: a save that landed is recognised by its bytes", async () => {

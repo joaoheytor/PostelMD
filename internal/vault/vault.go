@@ -44,6 +44,8 @@ var (
 	ErrIntoItself = errors.New("vault: a folder can't move into itself")
 	// ErrNameTooLong: a new name has a part over MaxNameBytes, the filesystem's limit.
 	ErrNameTooLong = errors.New("vault: a file or folder name can be at most 255 bytes")
+	// ErrTooLargeToRead: Read refused a file over the store's read limit (64 MiB).
+	ErrTooLargeToRead = errors.New("vault: file too large to read")
 )
 
 // MaxNameBytes is the longest file or folder name the filesystem takes (Linux NAME_MAX).
@@ -252,6 +254,9 @@ func (v *Vault) Read(p string) ([]byte, Rev, error) {
 		return nil, "", err
 	}
 	b, err := v.root.ReadFile(p)
+	if errors.Is(err, fs.ErrTooLarge) {
+		return nil, "", fmt.Errorf("%w: %w", ErrTooLargeToRead, err)
+	}
 	if err != nil {
 		return nil, "", notFound(err)
 	}

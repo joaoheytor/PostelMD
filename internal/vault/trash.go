@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/joaoheytor/PostelMD/internal/errattr"
 )
 
 // ErrNotInTrash: the trash id names nothing a delete left there (ADR-0024). It is an
@@ -211,8 +213,7 @@ func (v *Vault) RestoreTrashed(ctx context.Context, id, folder, name string) (st
 			err = v.root.SyncDir(TrashDir)
 		}
 		if err != nil {
-			// The folder name is a stamp, never user content.
-			v.log.Warn("trash: couldn't remove an emptied stamp folder; the listing skips it", "err", err.Error())
+			v.log.Warn("trash: couldn't remove an emptied stamp folder; the listing skips it", errattr.Pathless(err))
 		}
 	}
 	return to, nil

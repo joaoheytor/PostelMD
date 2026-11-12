@@ -200,6 +200,10 @@ func (a *NotesAPI) move(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
+// statusClientClosed is nginx's 499 Client Closed Request: the client went away before the
+// answer. net/http has no name for it.
+const statusClientClosed = 499
+
 // fail maps a vault error to a response. Only the path is logged, never content.
 func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
 	var conflict *vault.ConflictError
@@ -217,11 +221,16 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 		writeError(w, stdhttp.StatusBadRequest, "a file or folder name can be at most 255 bytes")
 	case errors.Is(err, vault.ErrTooLarge):
 		writeError(w, stdhttp.StatusRequestEntityTooLarge, "note too large")
+	case errors.Is(err, vault.ErrTooLargeToRead):
+		// Worded like the web app's TooLargeError, which it shows instead.
+		writeError(w, stdhttp.StatusRequestEntityTooLarge, "it's larger than 64 MiB, the most PostelMD opens")
 	case errors.Is(err, vault.ErrBusy):
 		w.Header().Set("Retry-After", "1")
 		writeError(w, stdhttp.StatusServiceUnavailable, "busy, retry")
 	case errors.Is(err, context.Canceled):
-		// The client went away; nothing to answer.
+		// The client went away: nobody reads the answer, but the write log records it as
+		// 499, never as the 200 net/http would assume.
+		w.WriteHeader(statusClientClosed)
 	default:
 		// The route pattern is ours; the error can quote a note's path, so it is logged
 		// without its text (rule 15).

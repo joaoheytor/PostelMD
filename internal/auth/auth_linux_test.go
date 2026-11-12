@@ -281,12 +281,20 @@ func TestPasswordChangeAndRevocation(t *testing.T) {
 
 func TestResetPassword(t *testing.T) {
 	e := newEnv(t)
-	if err := ResetPassword(e.dir, pw); !errors.Is(err, ErrNotSetUp) {
+	var logs bytes.Buffer
+	a := audit.New(slog.New(slog.NewTextHandler(&logs, nil)))
+	if err := ResetPassword(ctx, e.dir, pw, a); !errors.Is(err, ErrNotSetUp) {
 		t.Fatalf("reset before setup = %v", err)
 	}
+	if logs.Len() != 0 {
+		t.Fatalf("a refused reset was audited: %s", logs.String())
+	}
 	_, cookie := setUp(t, e)
-	if err := ResetPassword(e.dir, "the reset password"); err != nil {
+	if err := ResetPassword(ctx, e.dir, "the reset password", a); err != nil {
 		t.Fatal(err)
+	}
+	if out := logs.String(); !strings.Contains(out, "event=password.reset") || strings.Contains(out, "the reset password") {
+		t.Fatalf("want a password.reset record without the password, got %q", out)
 	}
 	restarted := e.open(t)
 	if restarted.Check(cookie) == nil {

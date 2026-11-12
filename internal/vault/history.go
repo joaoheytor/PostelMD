@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/joaoheytor/PostelMD/internal/errattr"
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
 	"github.com/joaoheytor/PostelMD/internal/store/git"
 )
@@ -84,7 +85,7 @@ func (v *Vault) EnableGit() (bool, error) {
 	// An adopted repository may lack the reserved folders in info/exclude. Best effort: a
 	// read-only or symlinked one only means the user's own git may list the trash.
 	if err := repo.EnsureExclude(); err != nil {
-		v.log.Warn("couldn't add PostelMD's folders to .git/info/exclude", "err", err)
+		v.log.Warn("couldn't add PostelMD's folders to .git/info/exclude", errattr.Pathless(err))
 	}
 	v.git = repo
 	return created, nil
@@ -158,17 +159,26 @@ func (v *Vault) status(load bool) (*Status, git.Hash, map[string][]byte, error) 
 	if err != nil {
 		return nil, head, nil, err
 	}
-	for p := range committed {
-		// Committed notes in a folder that has since become a repository are left as they
-		// are, never listed as deleted: a commit would drop them from the history (ADR-0026).
-		inRepo := slices.ContainsFunc(repos, func(r string) bool { return strings.HasPrefix(p, r) })
-		if !seen[p] && !inRepo && !fs.IsReserved(p) {
-			st.Changes = append(st.Changes, Change{Path: p, Kind: Deleted})
-			content[p] = nil
-		}
+	for _, p := range deleted(committed, seen, repos) {
+		st.Changes = append(st.Changes, Change{Path: p, Kind: Deleted})
+		content[p] = nil
 	}
 	sort.Slice(st.Changes, func(i, j int) bool { return st.Changes[i].Path < st.Changes[j].Path })
 	return st, head, content, nil
+}
+
+// deleted lists the committed paths the walk didn't see. Committed notes in a folder that
+// has since become a repository (repos, with a trailing slash) are left as they are, never
+// listed as deleted: a commit would drop them from the history (ADR-0026).
+func deleted(committed map[string]git.Hash, seen map[string]bool, repos []string) []string {
+	var out []string
+	for p := range committed {
+		inRepo := slices.ContainsFunc(repos, func(r string) bool { return strings.HasPrefix(p, r) })
+		if !seen[p] && !inRepo && !fs.IsReserved(p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // ParseCommit parses a full hex commit ID; anything else is ErrNotFound.
