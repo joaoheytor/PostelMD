@@ -6,6 +6,8 @@ export interface TreeState {
   folders: ReadonlyMap<string, readonly Entry[]>;
   expanded: ReadonlySet<string>;
   error?: string | undefined;
+  /** What the last change in the tree did, for its "File tree status" region ("" for nothing). */
+  status: string;
 }
 
 /**
@@ -54,7 +56,7 @@ export function moveTarget(from: string, typed: string, kind: "file" | "folder")
 
 /** The file tree: folders load when first expanded and reload after a change in them. */
 export class Tree {
-  readonly state = new Store<TreeState>({ folders: new Map(), expanded: new Set([""]) });
+  readonly state = new Store<TreeState>({ folders: new Map(), expanded: new Set([""]), status: "" });
 
   constructor(private readonly list: (path: string) => Promise<Entry[]>) {}
 
@@ -114,14 +116,20 @@ export class Tree {
     if (open && !this.state.value.folders.has(path)) await this.load(path);
   }
 
+  /** Says text in the tree's status region; "" clears it (the next action in the tree does). */
+  announce(text: string): void {
+    this.state.update((s) => (s.status === text ? s : { ...s, status: text }));
+  }
+
   /**
    * After a move: forgets the moved folder and everything under it (stale listings), then
-   * reloads both parents. The new location starts collapsed.
+   * reloads both parents and announces it. The new location starts collapsed.
    */
   async moved(from: string, to: string): Promise<void> {
     const gone = (p: string) => rebase(p, from, to) !== undefined;
     this.state.update((s) => ({
       ...s,
+      status: `Moved ${from} to ${to}.`,
       folders: new Map([...s.folders].filter(([p]) => !gone(p))),
       expanded: new Set([...s.expanded].filter((p) => !gone(p))),
     }));

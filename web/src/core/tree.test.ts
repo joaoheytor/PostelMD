@@ -97,6 +97,9 @@ describe("Tree", () => {
     expect(s.expanded.has("ops") || s.expanded.has("ops/db")).toBe(false);
     expect(s.expanded.has("ops-old")).toBe(true);
     expect(calls.sort()).toEqual(["", "archive"]);
+    expect(s.status).toBe("Moved ops to archive/ops."); // for the "File tree status" region
+    tree.announce("");
+    expect(tree.state.value.status).toBe("");
     calls.length = 0;
     await tree.moved("ops-old", "ops-2020");
     expect(calls).toEqual([""]); // a rename reloads its folder once

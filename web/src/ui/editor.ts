@@ -14,6 +14,7 @@ import { conflictBanner } from "./conflict";
 import "./drafts";
 import "./history";
 import "./move";
+import "./move-to";
 
 /** Whether the preview is shown, remembered in this browser only. */
 const previewKey = "postelmd.preview";
@@ -249,6 +250,7 @@ export class NoteEditor extends LightElement {
           : nothing}
         <button type="button" @click=${() => (this.browsing = true)}>History</button>
         <button type="button" class="pm-editor-move" @click=${this.startMove}>Rename or move</button>
+        <pm-move-to .workspace=${this.workspace} .path=${note.doc.path} .kind=${"file"} .label=${"Move to…"} .onDone=${(to: string) => this.moveDone(to)}></pm-move-to>
         <button type="button" @click=${() => this.trash(note.doc.path)}>Delete</button>
       </header>
       ${this.browsing ? html`<pm-history .workspace=${this.workspace} .onClose=${() => this.historyClosed()}></pm-history>` : nothing}
