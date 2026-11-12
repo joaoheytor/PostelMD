@@ -1,6 +1,6 @@
 # ADR-0027: Landed retries and the adoption marker
 
-- **Status:** Accepted
+- **Status:** Accepted; its save-mismatch statement, for a file over the read limit, is superseded by [ADR-0029](0029-a-save-over-a-file-too-large-to-read.md)
 - **Date:** 2026-11-11
 
 ## Context

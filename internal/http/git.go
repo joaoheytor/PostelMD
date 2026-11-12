@@ -161,7 +161,7 @@ func (a *GitAPI) restore(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	rev, err := a.git.Restore(r.Context(), req.Path, req.Commit, vault.Rev(m[1]))
 	var conflict *vault.ConflictError
 	if errors.As(err, &conflict) {
-		writeNote(w, stdhttp.StatusPreconditionFailed, req.Path, conflict.Current, conflict.Rev)
+		writeConflict(w, req.Path, conflict)
 		return
 	}
 	if err != nil {

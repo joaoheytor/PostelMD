@@ -219,6 +219,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   the old note over it.
 - Opening a file over 64 MiB now says it's too large to open, instead of a server error
   (the API answers 413, and the server no longer logs it as an error).
+- Saving a file that something outside PostelMD grew past 64 MiB while it was open no longer
+  fails with a server error retried forever: the editor shows that the file changed into
+  something PostelMD can't open, keeps your text, and offers to save it as a new file. The
+  API answers 412 without an ETag and with the code `too-large-to-read` (ADR-0029).
 - The write log records a save whose browser went away as status 499, no longer as a
   successful 200.
 - `postelmd reset-password` now writes a `password.reset` audit record. Two vault warnings

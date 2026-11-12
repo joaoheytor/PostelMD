@@ -51,16 +51,6 @@ var (
 // MaxNameBytes is the longest file or folder name the filesystem takes (Linux NAME_MAX).
 const MaxNameBytes = 255
 
-// ConflictError is a failed save precondition. It carries the current note for the
-// conflict view.
-type ConflictError struct {
-	Current []byte
-	Rev     Rev
-}
-
-func (e *ConflictError) Error() string { return ErrConflict.Error() }
-func (e *ConflictError) Unwrap() error { return ErrConflict }
-
 // Rev identifies a note's content: the hex SHA-256 of its bytes (the ETag; ADR-0020).
 type Rev string
 
