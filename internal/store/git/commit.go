@@ -10,6 +10,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
 
 var (
@@ -48,14 +50,15 @@ func (g *Repo) Commit(parent Hash, changes map[string][]byte, msg string, author
 }
 
 // checkPath accepts clean, relative, slash-separated paths with no ".git" component in any
-// letter case (git itself refuses such trees on checkout).
+// letter case, nor a name Windows or macOS treat as ".git" (fs.IsDotGit; git itself refuses
+// such trees on checkout).
 func checkPath(p string) error {
 	if p == "" || strings.Contains(p, `\`) || strings.ContainsRune(p, 0) ||
 		!filepath.IsLocal(p) || filepath.Clean(p) != p {
 		return ErrInvalidPath
 	}
 	for _, part := range strings.Split(p, "/") {
-		if strings.EqualFold(part, ".git") {
+		if fs.IsDotGit(part) {
 			return ErrInvalidPath
 		}
 	}

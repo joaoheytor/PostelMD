@@ -61,16 +61,24 @@ func (g *Repo) Files(commit Hash) (map[string]Hash, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store/git: tree: %w", err)
 	}
-	err = t.Files().ForEach(func(f *object.File) error {
-		if f.Mode == filemode.Regular || f.Mode == filemode.Executable {
-			out[f.Name] = f.Hash
+	// Every name is listed, including ones go-git's walker refuses (a git~1 committed on the
+	// host with core.protectNTFS off): the list only names paths, which callers check with
+	// fs.IsReserved before any filesystem access, and a commit carries such files through.
+	w := object.NewTreeWalker(t, true, nil)
+	defer w.Close()
+	w.SkipPathValidation()
+	for {
+		name, e, err := w.Next()
+		if errors.Is(err, io.EOF) {
+			return out, nil
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store/git: files: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("store/git: files: %w", err)
+		}
+		if e.Mode == filemode.Regular || e.Mode == filemode.Executable {
+			out[name] = e.Hash
+		}
 	}
-	return out, nil
 }
 
 // Version is one commit that changed a file.

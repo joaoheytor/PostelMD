@@ -220,8 +220,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - Names that Windows or macOS treat as `.git` (`.git ` with a trailing space or dot,
   `git~1`, or `.git` with invisible Unicode characters) are refused like `.git` itself, so
   a vault can't hold a path that git refuses to push or clone. Such names already on disk are
-  hidden and never committed. On a case-insensitive filesystem, a folder holding `.GIT` is
-  now left out of commits as a nested repository, as git does (#119).
+  hidden and never committed, and notes committed under such a name on the host no longer
+  break the commit dialog. On a case-insensitive filesystem, a folder holding `.GIT` is now
+  left out of commits as a nested repository, as git does, and history enabled there
+  records that the filesystem ignores case (#119).
 - Built with Go 1.27.4, which fixes an HTTP/1 server crash in the standard library
   (GO-2026-6859).
 - PostelMD answers only to `localhost`, IP addresses and the host names in the new

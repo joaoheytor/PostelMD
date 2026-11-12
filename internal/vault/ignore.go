@@ -66,12 +66,13 @@ func (v *Vault) walkForCommit(committed map[string]git.Hash, fn func(p string, s
 
 // hasGit reports whether a folder's entries include a .git of any kind (a folder in a clone,
 // a file in a submodule). Git opens "<folder>/.git", so the name is matched exactly on a
-// case-sensitive filesystem (".GIT" doesn't make a repository) and in any case when git
-// folds case (fold, core.ignorecase). Other look-alikes, such as ".git ", are reserved but
-// never make a repository: Linux keeps their spaces, dots and ignorable code points.
+// case-sensitive filesystem (".GIT" doesn't make a repository), and as a case-folding one
+// may find it when git folds case (fold, core.ignorecase): any letter case, ignorable code
+// points dropped (fs.FoldsToDotGit). Other look-alikes, such as ".git ", are reserved but
+// never make a repository: Linux keeps their spaces and dots.
 func hasGit(entries []iofs.DirEntry, fold bool) bool {
 	for _, e := range entries {
-		if e.Name() == ".git" || fold && strings.EqualFold(e.Name(), ".git") {
+		if e.Name() == ".git" || fold && fs.FoldsToDotGit(e.Name()) {
 			return true
 		}
 	}

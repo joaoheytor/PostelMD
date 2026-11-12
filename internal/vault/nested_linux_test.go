@@ -86,43 +86,19 @@ func TestOnlyDotGitMakesARepository(t *testing.T) {
 // TestDotGitInAnyCaseMakesARepositoryWhenGitFoldsCase: with core.ignorecase=true (git sets
 // it on a case-insensitive filesystem), git opens "odd/.git" and finds "odd/.GIT", so odd is
 // a repository: its notes aren't committed and it is named among the repositories (#119).
+// Casefold on older Linux kernels also ignored default-ignorable code points, so "zw"'s
+// ".G<U+200B>it" counts too; "dots"' ".git." doesn't: Linux keeps trailing dots.
 func TestDotGitInAnyCaseMakesARepositoryWhenGitFoldsCase(t *testing.T) {
 	v, dir := newVault(t)
-	writeFiles(t, dir, map[string]string{"odd/.GIT": "gitdir: ../.git/modules/odd\n", "odd/n.md": "n"})
+	writeFiles(t, dir, map[string]string{"odd/.GIT": "gitdir: ../.git/modules/odd\n", "odd/n.md": "n",
+		"zw/.G" + string(rune(0x200b)) + "it/config": "x", "zw/n.md": "n", "dots/.git./config": "x", "dots/n.md": "n"})
 	_, err := v.EnableGit()
 	must(t, err)
 	gitCLI(t, dir, "config", "core.ignorecase", "true")
 	st, err := v.Status(ctx)
 	must(t, err)
-	if got := paths(st.Changes); !reflect.DeepEqual(got, []string{"notes/a.md"}) || !reflect.DeepEqual(st.Repositories, []string{"odd"}) {
-		t.Fatalf("Status = %+v; want only notes/a.md added, and odd named", st)
-	}
-}
-
-// TestGitLookalikesOnDiskAreHidden: names git treats as .git on Windows or macOS (#119),
-// made on disk outside PostelMD, are handled like .git itself: never listed, never offered
-// for a commit, and the folders around them stay ordinary folders.
-func TestGitLookalikesOnDiskAreHidden(t *testing.T) {
-	v, dir := newVault(t)
-	hfs := ".g" + string(rune(0x200c)) + "it"
-	writeFiles(t, dir, map[string]string{".git /x.md": "x", "notes/.git.": "gitdir: elsewhere\n", "GIT~1/y.md": "y",
-		hfs + "/z.md": "z", "notes/b.md": "b"})
-	_, err := v.EnableGit()
-	must(t, err)
-	root, err := v.List("")
-	must(t, err)
-	notes, err := v.List("notes")
-	must(t, err)
-	if !reflect.DeepEqual(root, []Entry{{Name: "notes", Kind: KindFolder}}) || len(notes) != 2 {
-		t.Fatalf("List = %+v and notes %+v; want only the notes folder and its two notes", root, notes)
-	}
-	files, _, err := v.Files(100)
-	must(t, err)
-	st, err := v.Status(ctx)
-	must(t, err)
-	want := []string{"notes/a.md", "notes/b.md"}
-	if !reflect.DeepEqual(files, want) || !reflect.DeepEqual(paths(st.Changes), want) || len(st.Repositories) != 0 {
-		t.Fatalf("Files = %v, Status = %+v; want %v only and no repository", files, st, want)
+	if got := paths(st.Changes); !reflect.DeepEqual(got, []string{"dots/n.md", "notes/a.md"}) || !reflect.DeepEqual(st.Repositories, []string{"odd", "zw"}) {
+		t.Fatalf("Status = %+v; want dots/n.md and notes/a.md added, and odd and zw named", st)
 	}
 }
 

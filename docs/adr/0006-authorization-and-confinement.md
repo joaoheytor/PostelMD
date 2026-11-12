@@ -64,7 +64,7 @@ ADR-0016) and plugin vault access.
 | Reserved (case-insensitive, any depth) | Reason |
 |---|---|
 | `.git` and everything below | Repository internals; git access only through `gitvault` |
-| The names git refuses in a tree as `.git` look-alikes, and everything below: `.git` or `git~1` followed only by spaces and dots, optionally then `:` and anything (NTFS), and `.git` with the code points HFS+ ignores (U+200C–U+200F, U+202A–U+202E, U+206A–U+206F, U+FEFF) | Windows or macOS would treat them as `.git` (git's `verify_path`, CVE-2014-9390), so a vault holding one can't be pushed or cloned safely (#119) |
+| The names git refuses in a tree as `.git` look-alikes, and everything below: `.git` or `git~1` followed only by spaces and dots, optionally then `:` and anything (NTFS), and `.git` with code points a filesystem may ignore: the ones HFS+ ignores (U+200C–U+200F, U+202A–U+202E, U+206A–U+206F, U+FEFF) and, a superset, every format character, default-ignorable code point and variation selector, which casefold on older Linux kernels ignored (U+200B, U+00AD, U+2060, U+FE0F, …). Compared in any letter case (`strings.ToLower` and Unicode simple folding) | Windows, macOS or a case-folding Linux filesystem would treat them as `.git` (git's `verify_path`, CVE-2014-9390), so a vault holding one can't be pushed or cloned safely (#119) |
 | `.postelmd` and everything below | Application state |
 | `.postelmd-trash` and everything below (at the vault root) | Vault trash for deletes (ADR-0003). Reachable only through the trash API (list, restore). |
 | `.postelmd-tmp` and everything below (at the vault root) | Temp files of in-flight writes, named by their intents (ADR-0003 §5). Never reachable through the API. |

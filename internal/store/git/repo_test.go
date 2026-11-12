@@ -102,6 +102,11 @@ func TestCommitRejects(t *testing.T) {
 		{`a\b.md`, ErrInvalidPath},
 		{".git/config", ErrInvalidPath},
 		{"sub/.GIT/hooks/post-checkout", ErrInvalidPath},
+		// Names Windows or macOS treat as .git (#119): git refuses them in a tree too.
+		{".git /config", ErrInvalidPath},
+		{"sub/GIT~1/hooks/post-checkout", ErrInvalidPath},
+		{".git::$INDEX_ALLOCATION/config", ErrInvalidPath},
+		{".g" + string(rune(0x200c)) + "it/config", ErrInvalidPath},
 		{"dir", ErrTypeConflict},
 		{"file.md/child.md", ErrTypeConflict},
 	}

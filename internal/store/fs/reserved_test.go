@@ -63,9 +63,19 @@ func TestIsReservedGitLookalikes(t *testing.T) {
 			nil},
 		{"HFS+ ignorable code points",
 			append(hfs, "notes/.g"+zwnj+"it/config"),
-			// U+200B (zero-width space) isn't among the code points HFS+ ignores, nor in git's
-			// list; HFS+ folds neither a dotless i nor an i with diaeresis to i.
-			[]string{zwsp + ".git", ".g" + zwsp + "it", ".g" + string(rune(0x131)) + "t", ".g" + string(rune(0xef)) + "t"}},
+			// HFS+ folds neither a dotless i nor an i with diaeresis to i.
+			[]string{".g" + string(rune(0x131)) + "t", ".g" + string(rune(0xef)) + "t"}},
+		// Linux casefold on older kernels ignored every default-ignorable code point, a wider
+		// set than git's: zero-width space, word joiner, soft hyphen, a variation selector,
+		// the combining grapheme joiner.
+		{"Linux casefold ignorable code points",
+			[]string{zwsp + ".git", ".g" + zwsp + "it", ".git" + string(rune(0x2060)), ".g" + string(rune(0xad)) + "it",
+				".git" + string(rune(0xfe0f)), ".git" + string(rune(0x34f)), "a/" + string(rune(0x115f)) + "git~1"},
+			[]string{".g" + string(rune(0x300)) + "it", ".gi t"}},
+		// strings.ToLower maps U+0130 (I with a dot above) to i, as the reserved-name map did.
+		{"capital I with a dot above",
+			[]string{".g" + string(rune(0x130)) + "t", "G" + string(rune(0x130)) + "T~1"},
+			nil},
 		{"both at once",
 			[]string{".g" + zwnj + "it ", bom + "git~1."},
 			nil},
