@@ -25,6 +25,7 @@ class Bypasses(unittest.TestCase):
         git(cls.repo, "-c", "tag.gpgsign=false", "tag", "v0.1.0")
         git(cls.repo, "branch", "x")
         git(cls.repo, "switch", "-q", "-c", "feature")
+        git(cls.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
         cls.files = tempfile.mkdtemp()
         for name, text in (("secret.md", f"key {FAKE_KEY}\n"), ("ip.md", "host 10.1.2.3\n"),
                            ("clean.md", "## What\nA fix.\n")):
@@ -124,6 +125,45 @@ class Bypasses(unittest.TestCase):
             "gh pr create --fill && echo done",
             "gh api repos/o/r/pulls | jq .",
         ], "ask")
+
+    def test_rereview_bypasses_ask(self):
+        """Still silent at 68929b7 (re-review of #170)."""
+        self.assert_cases([
+            # fetch, pull and grep running commands
+            "git fetch --upload-pack='touch x; git-upload-pack' .",
+            "git fetch --upload-pack 'touch x' origin",
+            "git fetch -u'touch x' origin",
+            "git pull --ff-only --upload-pack='sh -c x' .",
+            "git pull --ff-only --exec='sh -c x' origin",
+            "git fetch --receive-pack=x origin",
+            "git fetch other",
+            "git fetch origin main:main",
+            "git grep -O'sh -c x' pat",
+            "git grep -iO pat",
+            "git grep --open-files-in-pager=vi pat",
+            # a remote-only tag overwritten through HEAD:<name>
+            "git push --force-with-lease=v0.2.0:{sha} origin HEAD:v0.2.0",
+            "git push origin HEAD:v0.2.0",
+            "git push origin HEAD:other-name",
+            "git push --force-with-lease=x:{sha} origin x",  # no refs/remotes/origin/x
+            "git push origin V1",
+            # build output over a git hook
+            "go build -o .githooks/pre-commit ./x",
+            "go test -c -o .githooks/commit-msg ./x",
+            "go build -o=.git/hooks/pre-push ./x",
+            "go build -o bin/../.githooks/pre-commit ./x",
+        ], "ask")
+        self.assert_cases([
+            "git fetch",
+            "git fetch origin",
+            "git fetch -q --prune origin main",
+            "git pull --ff-only",
+            "git pull --ff-only origin main",
+            "git grep -n pat",
+            "go build -o bin/postelmd ./cmd/postelmd",
+            "go test -c -o /tmp/x.test ./x",
+            "git push origin HEAD:feature",
+        ], None)
 
     def test_routine_forms_still_pass(self):
         self.assert_cases([

@@ -7,8 +7,10 @@ heredocs, $ or backticks) whose arguments are all on an allowlist. Anything else
   git [-C DIR] [--no-pager] push [-u] [--force-with-lease[=<branch>[:<sha>]]] [-q] [-v]
       [origin [<branch> | <branch>:<branch> | HEAD | HEAD:<branch>]]
 <branch> is a plain name: no refs/ (except a full refs/heads/<name>), heads/, tags/,
-remotes/ prefix, not HEAD, not main/master in any case, not a local tag's name, no `#`. The
-source must be a local branch. A lease names that same branch. With no refspec the current
+remotes/ prefix, not HEAD, not main/master in any case, not tag-like (v<digit>...: a tag may
+exist only on the remote) or a local tag's name, no `#`. The source must be a local branch,
+pushed under its own name (HEAD:<branch> only for the current branch). A lease names that
+same branch; one with :<sha> needs refs/remotes/origin/<branch>. With no refspec the current
 branch must be such a name, push.default simple or current, no remote.*.push config, and
 its @{upstream}/@{push} origin/<same name> (bare `git push` needs @{push}).
 gh rules: gh_rules.py. Other code-running options: codeexec.py.
@@ -33,13 +35,15 @@ OUTWARD_GH = GH + r"(api|pr\s+(merge|create|comment|edit|ready)|issue\s+(create|
 PUSH_FLAGS = {"-u", "--set-upstream", "--force-if-includes", "-q", "--quiet", "-v", "--verbose"}
 BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*")
 NAMESPACES = ("heads/", "tags/", "remotes/", "refs/", "notes/", "pull/")
+TAG_LIKE = re.compile(r"[vV]\d")
 
 
 def branch_name(ref):
     """The plain branch a ref names (refs/heads/<name> or <name>), or None."""
     name = ref.removeprefix("refs/heads/")
     if not BRANCH.fullmatch(name) or name.startswith(NAMESPACES) or ".." in name \
-            or name.endswith(".lock") or name == "HEAD" or name.lower() in ("main", "master"):
+            or name.endswith(".lock") or name == "HEAD" or name.lower() in ("main", "master") \
+            or TAG_LIKE.match(name):  # a tag may exist only on the remote
         return None
     return name
 
@@ -64,8 +68,8 @@ def refspec_dest(ref, cwd, git_out):
     dst_b = branch_name(dst) if colon else src_b
     if not dst_b:
         return None, f"{dst} is not a plain branch name"
-    if colon and src != "HEAD" and dst_b != src_b:
-        return None, f"{ref} pushes a branch under another name (use HEAD:<branch> from it)"
+    if colon and dst_b != src_b:  # HEAD:<dst> only for the current branch's own name
+        return None, f"{ref} pushes a branch under another name"
     if is_ref(cwd, f"refs/tags/{dst_b}", git_out):
         return None, f"{dst_b} is also a tag name"
     return dst_b, None
@@ -116,8 +120,11 @@ def check_push(words, cwd, git_out):
     if why:
         return f"git push: {why}"
     for lease in leases:
-        if lease and branch_name(lease.partition(":")[0]) != dest:
+        name, sha = lease.partition(":")[::2]
+        if lease and branch_name(name) != dest:
             return f"--force-with-lease={lease} names a ref other than {dest}"
+        if sha and not is_ref(cwd, f"refs/remotes/origin/{dest}", git_out):
+            return f"--force-with-lease={lease} on a branch with no refs/remotes/origin/{dest}"
     return None
 
 
