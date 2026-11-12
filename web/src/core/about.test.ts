@@ -14,6 +14,6 @@ describe("about", () => {
   it("names the commit once", () => {
     expect(versionLabel({ version: "0.1.0-rc.1", commit: "e3fd8bb" })).toBe("0.1.0-rc.1 (e3fd8bb)");
     expect(versionLabel({ version: "main-e3fd8bb", commit: "e3fd8bb" })).toBe("main-e3fd8bb");
-    expect(versionLabel({ version: "dev", commit: "none" })).toBe("dev (none)");
+    expect(versionLabel({ version: "dev", commit: "none" })).toBe("dev");
   });
 });

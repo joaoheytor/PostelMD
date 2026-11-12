@@ -11,7 +11,7 @@ export async function about(): Promise<About> {
   return (await (await ok(await request("GET", "/api/v1/about"))).json()) as About;
 }
 
-/** "0.1.0-rc.1 (1a2b3c4)"; just the version when it already names the commit. */
+/** "0.1.0-rc.1 (1a2b3c4)"; just the version when it names the commit or none is known. */
 export function versionLabel({ version, commit }: About): string {
-  return version.includes(commit) ? version : `${version} (${commit})`;
+  return !commit || commit === "none" || version.includes(commit) ? version : `${version} (${commit})`;
 }

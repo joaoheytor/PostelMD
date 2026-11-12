@@ -93,7 +93,7 @@ export class WorkspaceView extends LightElement {
       <header class="pm-top">
         <div class="pm-top-brand">
           <h1 class="pm-top-name">PostelMD</h1>
-          ${this.version.value ? html`<p class="pm-top-version">Version ${this.version.value}</p>` : nothing}
+          ${this.version.value ? html`<p class="pm-top-version" title="Version ${this.version.value}">Version ${this.version.value}</p>` : nothing}
         </div>
         <button type="button" aria-keyshortcuts="Control+P" @click=${() => (this.finding = true)}>Find a note</button>
         ${this.offered.value?.length

@@ -334,3 +334,8 @@ design.
 | No auth for a single user | Auth stays on (ADR-0005, FrankMD lesson); one password costs little. |
 | A few trusted accounts with equal access | Not needed yet: the maintainer is the only user. Accounts come with roles in v0.3. |
 | Push in the MVP, without the secret gate | Pushing a secret to a remote is the one MVP-sized mistake we can't undo; push waits for the gate. |
+
+## Clarifications
+- **2026-11-12, `GET /api/v1/about`.** The API also serves the running build's
+  `{version, commit}`, behind a session like the notes API. Nothing served before login names
+  it (#152, threat model I14).

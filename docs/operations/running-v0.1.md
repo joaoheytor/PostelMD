@@ -18,9 +18,10 @@ After the v0.1.0 release, use `docker.io/joaoheytor/postelmd:0.1`. The candidate
 every merge, `ghcr.io/joaoheytor/postelmd:main`, moves with each one. (The blocks in this
 runbook have no trailing comments: zsh, by default, would take them as arguments.)
 
-Which version runs: the app shows it beside its name once you log in, and the `listening`
-line of `docker logs postelmd` has its `version` and `commit`. Or ask the binary itself:
-`docker exec postelmd /postelmd version`.
+To see which version is running: the app shows it beside its name once you log in (reload
+the page after an upgrade: an open tab keeps showing the version it loaded), and the
+`listening` line of `docker logs postelmd` has its `version` and `commit`. Or ask the binary
+itself: `docker exec postelmd /postelmd version`.
 
 Note the digest of the image the container runs, so you can go back to it:
 

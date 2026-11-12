@@ -44,6 +44,7 @@ test("a wrong password is refused", async ({ page }) => {
 test("the server's version shows only once logged in", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
+  // A smoke check only: the server-side guarantee is TestNoVersionBeforeLogin.
   await expect(page.getByText(/^Version /)).toHaveCount(0);
   await login(page);
   // `make build` stamps `git describe` and the short commit.
