@@ -7,7 +7,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 sqlite=$(go list -m -f '{{.Version}}' modernc.org/sqlite)
 selected=$(go list -m -f '{{.Version}}' modernc.org/libc)
-required=$(go mod graph | awk -v from="modernc.org/sqlite@$sqlite" \
+# Into a variable first: in a pipe, a failing go mod graph would be hidden by awk's status.
+graph=$(go mod graph)
+required=$(printf '%s\n' "$graph" | awk -v from="modernc.org/sqlite@$sqlite" \
   '$1 == from && index($2, "modernc.org/libc@") == 1 { sub(/^modernc\.org\/libc@/, "", $2); print $2 }')
 
 if [ -z "$required" ]; then

@@ -290,7 +290,9 @@ generation bumps, suspects, tombstones).
      `Snapshot`; the dependency added to `go.mod`. `serve` doesn't open the database, and the
      format stays 1;
   2. **wiring and format 2** with ADR-0031's IDs slice: `serve` opens the database (with the
-     network-filesystem refusal above), the boot UUID (ADR-0014), listen-early `/readyz`,
+     network-filesystem refusal above, and an absolute state directory: `store/sql` refuses
+     relative database paths, so `config` makes `DataDir` absolute or refuses it), the boot
+     UUID (ADR-0014), listen-early `/readyz`,
      `db rebuild`, the snapshot-before-migrate path with `migrate.intent`, and `postelmd vault
      claim`. Done only with the
      runbook in `docs/operations/`: the pre-upgrade copy (server stopped), the rollback (all

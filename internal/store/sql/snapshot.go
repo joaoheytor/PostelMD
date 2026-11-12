@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	sqlite "modernc.org/sqlite"
 )
@@ -33,6 +34,10 @@ var (
 // a partial copy can stay behind: the caller's intent (migrate.intent, the backup's) owns
 // removing it, and the caller verifies a copy (as checkCopy does) before trusting it.
 func (db *DB) Snapshot(ctx context.Context, dest string) (version int, err error) {
+	if err := checkAbs(dest); err != nil {
+		return 0, err
+	}
+	dest = filepath.Clean(dest)
 	f, err := createExclusive(dest)
 	if err != nil {
 		return 0, err

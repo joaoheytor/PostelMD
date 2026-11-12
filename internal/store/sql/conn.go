@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"sync"
 
 	// The driver needs modernc.org/libc at exactly the version its go.mod names. Imported
@@ -61,9 +62,13 @@ func damaged(err error) error {
 
 // installPolicy makes every connection of the driver, in this process, deny ATTACH and
 // DETACH: nothing needs them, and through ATTACH a read-only connection could open app.db
-// (or a new file) read-write. VACUUM INTO, which Snapshot uses, isn't an ATTACH to the
-// authorizer. It also turns on the driver's StrictPragmas (process-wide): a _pragma holding
-// two statements fails to open.
+// (or a new file) read-write. VACUUM INTO is an ATTACH to the authorizer too, so Snapshot's
+// own connection replaces this policy with one that allows an ATTACH of exactly its target
+// (vacuumInto). It also turns on the driver's StrictPragmas (process-wide): a _pragma
+// holding two statements fails to open.
+//
+// Every sql.Open("sqlite") in the repository goes through openPool, so this hook is always
+// installed first (TestOnlyOpenPoolOpensSQLite checks it).
 var installPolicy = sync.OnceFunc(func() {
 	sqlite.StrictPragmas(true)
 	sqlite.RegisterConnectionHook(func(c sqlite.ExecQuerierContext, _ string) error {
@@ -82,7 +87,23 @@ func denyAttach(action sqlite.AuthorizerActionCode, _, _, _, _ string) sqlite.Au
 	return sqlite.AuthorizerOK
 }
 
-// fileURI is path as a file: URI with query q.
+// ErrRelativePath: a database path isn't absolute. A relative one would be
+// misread: in a file: URI, "localhost/x" becomes an authority (SQLite opens /x while Go
+// checked ./localhost/x), and "file:x.db" as a VACUUM INTO target is a URI of its own.
+var ErrRelativePath = errors.New("sql: database paths must be absolute")
+
+// The paths openPool gets are clean: filepath.Join's, or a dest Snapshot cleaned.
+
+// checkAbs refuses a path that isn't absolute; it never resolves one against the working
+// directory. Callers clean what they accept.
+func checkAbs(path string) error {
+	if !filepath.IsAbs(path) {
+		return ErrRelativePath
+	}
+	return nil
+}
+
+// fileURI is path, absolute (checkAbs), as a file: URI with query q.
 func fileURI(path, q string) string {
 	u := url.URL{Scheme: "file", Path: path, RawQuery: q}
 	return u.String()
@@ -91,6 +112,9 @@ func fileURI(path, q string) string {
 // openPool opens a database/sql pool of at most n connections on path, and opens its first
 // connection so a bad DSN or file fails here (ErrDamaged if it isn't a database).
 func openPool(path, q string, n int) (*sql.DB, error) {
+	if err := checkAbs(path); err != nil {
+		return nil, err
+	}
 	installPolicy()
 	p, err := sql.Open("sqlite", fileURI(path, q))
 	if err != nil {

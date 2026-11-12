@@ -53,6 +53,9 @@ func Open(ctx context.Context, stateDir string, log *slog.Logger) (*DB, error) {
 
 // open is Open with the migrations in fsys (tests use their own).
 func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*DB, error) {
+	if err := checkAbs(stateDir); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(stateDir, AppDB)
 	f, err := createExclusive(path)
 	if err == nil {

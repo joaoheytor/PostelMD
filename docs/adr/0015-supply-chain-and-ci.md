@@ -330,3 +330,11 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   brings exactly the libc it requires; `make lint` fails when the selected libc differs from
   that one (`scripts/check-sqlite-libc.sh`). The driver adds about 3.8 MB to the stripped
   static binary.
+- **2026-11-12, how a `modernc.org/libc` fix arrives, and migration transactions**: with
+  Renovate's libc rule disabled, a libc security fix reaches us only through a
+  `modernc.org/sqlite` release that requires it. `govulncheck` in CI (`make vuln`, and on
+  every PR) is the alarm for a libc advisory: it fails the build, and the fix is the sqlite
+  release that moves libc, or a pin bump with the check above. The "single transaction" of
+  the migrations bullet above: [ADR-0030](0030-v02-storage-sqlite.md#migrations) gives a new
+  database all its migrations in one 0 → N transaction; each migration is still atomic, and
+  an existing database still migrates one migration per transaction.
