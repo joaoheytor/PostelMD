@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
-import { destination, folderChoices, moveInto } from "./move-into";
+import { destination, folderChoices, folderOf, intoFolder, moveInto } from "./move-into";
 import { Tree } from "./tree";
 import { Workspace } from "./workspace";
 
@@ -38,14 +38,34 @@ describe("destination", () => {
 });
 
 describe("folderChoices", () => {
-  it("lists the folders the tree knows that the item can go into, the vault first", async () => {
+  it("lists the folders the tree knows that the item can be in, its own included, the vault first", async () => {
     const tree = new Tree(api.listFolder);
     await tree.load("");
     await tree.load("ops");
     const s = tree.state.value;
-    expect(folderChoices(s, "a.md", "file")).toEqual(["archive", "ops", "ops/db"]);
-    expect(folderChoices(s, "ops/db/x.md", "file")).toEqual(["", "archive", "ops"]);
-    expect(folderChoices(s, "ops", "folder")).toEqual(["archive"]); // not itself, not ops/db, not its own folder
+    expect(folderChoices(s, "a.md", "file")).toEqual(["", "archive", "ops", "ops/db"]);
+    expect(folderChoices(s, "ops/db/x.md", "file")).toEqual(["", "archive", "ops", "ops/db"]);
+    expect(folderChoices(s, "ops", "folder")).toEqual(["", "archive"]); // not itself, not ops/db
+    expect(folderChoices(s, "deep/er/x.md", "file")).toContain("deep/er"); // its own, even if not loaded
+  });
+});
+
+describe("folderOf", () => {
+  it("is the folder the typed path puts the item in, as the move would read it", () => {
+    expect(folderOf("a.md", "ops/x.md", "file")).toBe("ops");
+    expect(folderOf("ops/a.md", " /archive/old/b ", "file")).toBe("archive/old"); // trimmed, .md added
+    expect(folderOf("ops/a.md", "b.md", "file")).toBe("");
+    expect(folderOf("ops", "archive/ops/", "folder")).toBe("archive");
+    expect(folderOf("ops/a.md", "", "file")).toBe("");
+  });
+});
+
+describe("intoFolder", () => {
+  it("keeps the typed name and puts it in the chosen folder", () => {
+    expect(intoFolder("ops/a.md", "archive")).toBe("archive/a.md");
+    expect(intoFolder(" ops/renamed.md/ ", "")).toBe("renamed.md");
+    expect(intoFolder("a.md", "ops/db")).toBe("ops/db/a.md");
+    expect(intoFolder("", "ops")).toBe("ops/");
   });
 });
 
