@@ -1,6 +1,6 @@
 # ADR-0030: v0.2 storage: SQLite in /data, its driver, migrations and data format 2
 
-- **Status:** Proposed (Accepted with the `store/sql` slice, the first code that depends on it)
+- **Status:** Accepted
 - **Date:** 2026-11-12
 
 ## Context

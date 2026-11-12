@@ -27,6 +27,12 @@
       "description": "Minor and major updates always get a human review.",
       "matchUpdateTypes": ["minor", "major"],
       "automerge": false
+    },
+    {
+      "description": "modernc.org/sqlite needs modernc.org/libc at exactly the version its go.mod names: one PR bumps both, with a human review (ADR-0015).",
+      "matchPackageNames": ["modernc.org/sqlite", "modernc.org/libc"],
+      "groupName": "modernc.org/sqlite and libc",
+      "automerge": false
     }
   ]
 }

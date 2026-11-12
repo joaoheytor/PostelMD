@@ -322,3 +322,8 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
 - **2026-11-12, `sqlc` waits for v0.3** ([ADR-0030](0030-v02-storage-sqlite.md)), under its
   existing row: v0.2's few tables use hand-written, parameterized queries in `store/sql`;
   `sqlc` comes with v0.3's account and membership tables.
+- **2026-11-12, `modernc.org/sqlite` is in use**, under its existing row (whose status cell
+  still reads *planned*): the `store/sql` slice adds it to `go.mod` at v1.61.0, with
+  `modernc.org/libc` v1.79.0 as a direct `require` (`store/sql` imports it, so `go mod tidy`
+  keeps it direct), and a Renovate rule groups the two in one human-reviewed PR. The driver
+  adds about 3.8 MB to the stripped static binary.
