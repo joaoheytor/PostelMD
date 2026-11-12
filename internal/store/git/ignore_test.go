@@ -9,17 +9,27 @@ import (
 )
 
 // TestIgnoreNoExponentialBacktracking: a hostile .gitignore can't stall Status. Without
-// git's abort rule, `*a` x12 + `*b` against 60 a's takes seconds; with it, microseconds.
+// git's abort rule, `*a` x12 + `*b` against 60 a's runs for minutes; with it, microseconds.
+// The 10 s guard only catches a hang (CLAUDE.md, Testing conventions: no wall-clock bound).
 func TestIgnoreNoExponentialBacktracking(t *testing.T) {
 	ign := NewIgnore(false).With([]byte(strings.Repeat("*a", 12)+"*b\n"+"x/"+strings.Repeat("**/a*", 8)+"b\n"), ".")
-	start := time.Now()
-	for _, p := range []string{strings.Repeat("a", 60), "x/" + strings.Repeat("a/", 30) + "c"} {
-		if ign.Match(p, false) {
+	matched := make(chan string, 1)
+	go func() {
+		for _, p := range []string{strings.Repeat("a", 60), "x/" + strings.Repeat("a/", 30) + "c"} {
+			if ign.Match(p, false) {
+				matched <- p
+				return
+			}
+		}
+		close(matched)
+	}()
+	select {
+	case p, ok := <-matched:
+		if ok {
 			t.Fatalf("%q matched", p)
 		}
-	}
-	if d := time.Since(start); d > 100*time.Millisecond {
-		t.Fatalf("matching took %v", d)
+	case <-time.After(10 * time.Second):
+		t.Fatal("matching did not finish within 10 s: exponential backtracking")
 	}
 }
 

@@ -42,24 +42,35 @@ func swapVault(t *testing.T) (r *Root, vault, outside string, stop func()) {
 	return r, vault, outside, func() { cancel(); wg.Wait(); _ = r.Close() }
 }
 
+// raceLoop runs attempt for at least 500 ms and until it has been refused at least once: a
+// refusal means the attempt saw the swapped-in symlink, so the race window was hit. Without
+// one, "0 escaped" proves nothing, and after 10 s (a hang guard, not a timing bound) the
+// test fails. It returns the number of attempts and refusals.
+func raceLoop(t *testing.T, attempt func(n int) (refused bool)) (n, refused int) {
+	t.Helper()
+	start := time.Now()
+	for ; time.Since(start) < 500*time.Millisecond || refused == 0; n++ {
+		if time.Since(start) > 10*time.Second {
+			t.Fatalf("%d attempts in 10 s, none refused: the swap was never observed, so the race was not exercised", n)
+		}
+		if attempt(n) {
+			refused++
+		}
+	}
+	return n, refused
+}
+
 func TestReadFileSymlinkSwapRace(t *testing.T) {
 	r, _, _, stop := swapVault(t)
 	defer stop()
-	var reads, symlinkErrs int
-	for deadline := time.Now().Add(500 * time.Millisecond); time.Now().Before(deadline); {
+	reads, refused := raceLoop(t, func(n int) bool {
 		b, err := r.ReadFile("dir/note.md")
-		reads++
 		if string(b) == "SECRET" {
-			t.Fatalf("read outside the vault after %d reads", reads)
+			t.Fatalf("read outside the vault after %d reads", n+1)
 		}
-		if err != nil {
-			symlinkErrs++
-		}
-	}
-	t.Logf("%d reads during swaps, %d refused (the swap was visible), 0 escaped", reads, symlinkErrs)
-	if symlinkErrs == 0 {
-		t.Log("warning: no swap was observed; the race was not exercised")
-	}
+		return err != nil
+	})
+	t.Logf("%d reads during swaps, %d refused (the swap was visible), 0 escaped", reads, refused)
 }
 
 // TestSwapHarnessCatchesNaiveRead is the negative control: the same attack against a naive
@@ -78,24 +89,25 @@ func TestSwapHarnessCatchesNaiveRead(t *testing.T) {
 func TestRenameNoReplaceSymlinkSwapRace(t *testing.T) {
 	r, vault, outside, stop := swapVault(t)
 	defer stop()
-	attempts := 0
-	for deadline := time.Now().Add(500 * time.Millisecond); time.Now().Before(deadline); attempts++ {
+	attempts, refused := raceLoop(t, func(n int) bool {
 		// Move a file into "dir" while "dir" is being swapped with the outside symlink.
 		name := filepath.Join(vault, "victim.md")
 		mustDo(t, os.WriteFile(name, []byte("x"), 0o600))
-		if err := r.RenameNoReplace("victim.md", "dir/victim.md"); err != nil {
+		err := r.RenameNoReplace("victim.md", "dir/victim.md")
+		if err != nil {
 			_ = os.Remove(name)
 		}
 		// Check before cleaning up: "swap" may currently point outside, so removing
 		// swap/victim.md first could delete the evidence of an escape.
 		if _, err := os.Lstat(filepath.Join(outside, "victim.md")); err == nil {
-			t.Fatalf("a rename wrote outside the vault after %d attempts", attempts)
+			t.Fatalf("a rename wrote outside the vault after %d attempts", n+1)
 		}
 		// The vault directory is "dir" or "swap" depending on the last exchange.
 		_ = os.Remove(filepath.Join(vault, "dir", "victim.md"))
 		_ = os.Remove(filepath.Join(vault, "swap", "victim.md"))
-	}
-	t.Logf("%d renames during swaps, none escaped", attempts)
+		return err != nil
+	})
+	t.Logf("%d renames during swaps, %d refused (the swap was visible), none escaped", attempts, refused)
 }
 
 func FuzzReadFile(f *testing.F) {
