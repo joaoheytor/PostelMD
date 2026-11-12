@@ -1,6 +1,6 @@
 # ADR-0028: A nested repository's .git in any letter case when git folds case
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-12
 
 ## Context
