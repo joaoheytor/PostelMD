@@ -177,7 +177,12 @@ PostelMD is worth using before building the rest of the design.
 ## v0.2: Remote git, live sync, search
 The order after v0.1 is a starting point; the MVP's findings decide it.
 - SQLite (ADR-0002): file IDs, generations, save and structural intents, outbox (the full
-  ADR-0003).
+  ADR-0003). Designed in ADR-0030 (storage, driver, migrations, data format 2), ADR-0031
+  (identity), ADR-0032 (ETag and API) and ADR-0033 (intents), built in this order:
+  `store/sql`; IDs, the startup scan and format 2 (with its runbook and the image-level
+  upgrade smoke test); intents; the ETag switch and `/api/v1/files/{id}`; outbox and SSE;
+  the watcher and reconciler. The ETag switch is a breaking API change: v0.2.0. Deleted
+  items leave the trash automatically after 7 days (ADR-0033).
 - Push and fast-forward-only pull through the egress client (ADR-0010, ADR-0016, #40); remote
   credentials; the commit and push secret gates and findings.
 - Auto-commit after a quiet window (ADR-0010), behind the commit gate: a file whose bytes
@@ -198,6 +203,36 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   token in a path or branch name blocks the push.
 - A `kill -9` during a git commit, pull or structural operation → repaired on startup (the
   intent tests in the failure-scenario suite).
+- Failure-scenario tests for ADR-0030 to ADR-0033, each under the process-kill and
+  power-loss models:
+  - a save crashed at every step of ADR-0033's table reaches its row, including a power
+    loss that leaves the temp's entry beside the renamed target (same inode: applied);
+  - a create crashed at every step reaches ADR-0003's Create rows (and the same-inode row);
+  - move, delete (with ADR-0022's power-loss duplicate), restore from the trash and the
+    purge (`trashed` → `purging` committed before the first removal; a restore of a
+    `purging` record is `409`), crashed at every step, reach ADR-0003's rows;
+  - the v0.1 → v0.2 upgrade crashed at each of its five steps resumes by ADR-0030's table;
+    a v0.1 binary refuses the result; a vault marker naming another UUID, or a UUID with no
+    `app.db`, is refused; at format 2, an empty vault mount (marker absent) and a different
+    v0.1 vault (empty marker, identity check fails) are refused and nothing is tombstoned;
+    `postelmd vault claim` then writes the marker;
+  - the rollback runbook's four steps, then a v0.2 start, run a normal first upgrade with a
+    fresh `pre-format-2/` (created `0600`);
+  - a trash item deleted under v0.1, with a stamp older than 7 days, survives the first
+    v0.2 hour (its clock starts at the import);
+  - a read of a pending path within 10 s of the suspect answers `503` with `Retry-After`,
+    and resolves the match after;
+  - `postelmd db rebuild` crashed at each step resumes, and an `app.db` without the intent's
+    rebuild UUID is never taken for the new one; a start with `app.db` missing at format 2,
+    or failing `quick_check`, refuses and changes nothing;
+  - a migration crashed mid-transaction runs again; an edited migration, and a database
+    newer than the binary, are refused;
+  - an outside `mv` of one of several identical files keeps its ID at once; a unique
+    copy-and-delete keeps it after the second pass (pending until then); a `cp` over a freed
+    inode, and a rename plus an edit, give new IDs; a path missing for one pass only keeps
+    its ID;
+  - a save after an outside edit the scan hasn't seen gets `412` (the bytes are read, not the
+    row); a save to a missing path gets `412 file-missing` without an ETag.
 - Search across 10k notes < 200 ms p95.
 
 ## v0.3: Multiple users and homelab dogfooding
