@@ -153,6 +153,13 @@ pm-tree .pm-move { padding: 0 0 8px; border-bottom: none; }
 .pm-commit-changes { margin: 0; padding: 0; list-style: none; max-height: 40vh; overflow: auto; }
 .pm-commit-kind { display: inline-block; min-width: 5.5em; color: var(--muted); }
 .pm-commit-kind[data-kind="deleted"] { color: var(--danger); }
+.pm-commit-left-out { color: var(--muted); }
+.pm-commit-left-out h3 { margin: 0 0 4px; font-size: 1rem; }
+.pm-commit-left-out p { margin: 4px 0 0; }
+.pm-commit-left-out ul { margin: 0; padding: 0; list-style: none; }
+.pm-commit-left-out-kinds { max-height: 20vh; overflow: auto; }
+.pm-commit-left-out-kinds ul { padding-left: 1em; }
+.pm-commit-left-out-kinds ul li { overflow-wrap: anywhere; }
 .pm-commit-secrets ul { margin: 0 0 8px; padding-left: 1.2em; }
 .pm-danger { border-color: var(--danger); color: var(--danger); }
 .pm-dialog-wide { width: min(64rem, calc(100vw - 32px)); }

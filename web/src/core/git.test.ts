@@ -162,21 +162,37 @@ describe("Git", () => {
 describe("leftOut (ADR-0026: what commits leave out)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("names the files too large to commit and the folders that are repositories of their own", () => {
+  const tooLarge = {
+    label: "Over 50 MB:",
+    hint: "PostelMD doesn't commit files over 50 MB. Commit them with git yourself, or add them to .gitignore to hide them here.",
+  };
+  const repositories = {
+    label: "Git repositories of their own:",
+    hint: "PostelMD doesn't commit files in these folders. Commit them with their own git, or add them to .gitignore to hide them here.",
+  };
+
+  it("names the files too large to commit and the folders that are repositories of their own, and what to do", () => {
     expect(leftOut({ ...clean, skipped: ["big.iso"], repositories: ["clone", "infra/sub"] })).toEqual([
-      "Too large to commit, left out: big.iso",
-      "Folders that are git repositories of their own, left out: clone, infra/sub",
+      { ...tooLarge, paths: ["big.iso"] },
+      { ...repositories, paths: ["clone", "infra/sub"] },
     ]);
   });
 
+  const answering = (body: object) =>
+    vi.stubGlobal("fetch", (() => Promise.resolve(Response.json(body))) as typeof fetch);
+
   it("says nothing when the server lists neither, as it omits empty lists", async () => {
-    vi.stubGlobal("fetch", (() => Promise.resolve(Response.json({ branch: "main", changes: [], locks: [] }))) as typeof fetch);
+    answering({ branch: "main", changes: [], locks: [] });
+    expect(leftOut(await gitStatus())).toEqual([]);
+  });
+
+  it("says nothing for empty lists, should the server send them", async () => {
+    answering({ branch: "main", changes: [], locks: [], skipped: [], repositories: [] });
     expect(leftOut(await gitStatus())).toEqual([]);
   });
 
   it("reads the repositories from the server's status", async () => {
-    const body = { branch: "main", changes: [], locks: [], repositories: ["clone"] };
-    vi.stubGlobal("fetch", (() => Promise.resolve(Response.json(body))) as typeof fetch);
-    expect(leftOut(await gitStatus())).toEqual(["Folders that are git repositories of their own, left out: clone"]);
+    answering({ branch: "main", changes: [], locks: [], repositories: ["clone"] });
+    expect(leftOut(await gitStatus())).toEqual([{ ...repositories, paths: ["clone"] }]);
   });
 });

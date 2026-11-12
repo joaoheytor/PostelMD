@@ -89,11 +89,23 @@ export class CommitDialog extends LightElement {
 
   /** What commits leave out: files too large, and repositories of their own (ADR-0026). */
   private leftOut(st: GitStatus) {
-    const lines = leftOut(st);
-    if (lines.length === 0) return nothing;
-    return html`<ul aria-label="Left out of commits">
-      ${lines.map((l) => html`<li>${l}</li>`)}
-    </ul>`;
+    const kinds = leftOut(st);
+    if (kinds.length === 0) return nothing;
+    // Capped and focusable like the changes: many repositories mustn't push the buttons away.
+    return html`<section class="pm-commit-left-out" aria-labelledby="pm-left-out-title">
+      <h3 id="pm-left-out-title">Left out of commits</h3>
+      <ul class="pm-commit-left-out-kinds" aria-labelledby="pm-left-out-title" tabindex="0">
+        ${kinds.map(
+          (k) => html`<li>
+            ${k.label}
+            <ul aria-label=${k.label.replace(/:$/, "")}>
+              ${k.paths.map((p) => html`<li><code>${p}</code></li>`)}
+            </ul>
+          </li>`,
+        )}
+      </ul>
+      ${kinds.map((k) => html`<p>${k.hint}</p>`)}
+    </section>`;
   }
 
   /**

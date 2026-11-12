@@ -30,17 +30,35 @@ export interface GitDeps {
 
 export const changedNotice = "The changes were updated since you opened this dialog; review them again.";
 
+/** One kind of path commits leave out, and what the user can do about it. */
+export interface LeftOut {
+  label: string;
+  paths: string[];
+  hint: string;
+}
+
 /**
- * What commits leave out, one plain line per kind: files over the size limit (ADR-0020) and
- * folders that are git repositories of their own (ADR-0026). The server omits empty lists.
+ * What commits leave out, by kind: files over the size limit (ADR-0020) and folders that are
+ * git repositories of their own (ADR-0026). The server lists neither kind when it's ignored
+ * by .gitignore (vault/history.go), so the hint's advice holds; it omits empty lists.
  */
-export function leftOut(status: GitStatus): string[] {
-  const lines: string[] = [];
-  if (status.skipped?.length) lines.push(`Too large to commit, left out: ${status.skipped.join(", ")}`);
-  if (status.repositories?.length) {
-    lines.push(`Folders that are git repositories of their own, left out: ${status.repositories.join(", ")}`);
+export function leftOut(status: GitStatus): LeftOut[] {
+  const out: LeftOut[] = [];
+  if (status.skipped?.length) {
+    out.push({
+      label: "Over 50 MB:",
+      paths: status.skipped,
+      hint: "PostelMD doesn't commit files over 50 MB. Commit them with git yourself, or add them to .gitignore to hide them here.",
+    });
   }
-  return lines;
+  if (status.repositories?.length) {
+    out.push({
+      label: "Git repositories of their own:",
+      paths: status.repositories,
+      hint: "PostelMD doesn't commit files in these folders. Commit them with their own git, or add them to .gitignore to hide them here.",
+    });
+  }
+  return out;
 }
 
 /** How many times a refresh lists the changes again when a file changes while it reads. */

@@ -5,9 +5,11 @@ import { importNotice } from "./app";
 describe("importNotice (ADR-0020: what setup imported)", () => {
   it("says how many files the first commit holds, and to check them for secrets", () => {
     expect(importNotice({ imported: 1, skipped: 0, repositories: 0 })).toBe(
-      "Imported 1 file from your notes folder as the first commit. Check them for secrets before you push this repository anywhere.",
+      "Imported 1 file from your notes folder as the first commit. Check it for secrets before you push this repository anywhere.",
     );
-    expect(importNotice({ imported: 3, skipped: 0, repositories: 0 })).toMatch(/^Imported 3 files /);
+    expect(importNotice({ imported: 3, skipped: 0, repositories: 0 })).toBe(
+      "Imported 3 files from your notes folder as the first commit. Check them for secrets before you push this repository anywhere.",
+    );
   });
 
   it("says which files were too large to commit, so the notice never claims the whole folder", () => {
@@ -17,10 +19,10 @@ describe("importNotice (ADR-0020: what setup imported)", () => {
 
   it("says how many folders were left out as repositories of their own (ADR-0026)", () => {
     expect(importNotice({ imported: 2, skipped: 0, repositories: 1 })).toMatch(
-      / 1 folder is a git repository of its own and was left out\.$/,
+      / 1 folder is a git repository of its own and was left out of git; PostelMD doesn't commit its notes\.$/,
     );
     expect(importNotice({ imported: 0, skipped: 0, repositories: 3 })).toBe(
-      "3 folders are git repositories of their own and were left out.",
+      "3 folders are git repositories of their own and were left out of git; PostelMD doesn't commit their notes.",
     );
   });
 
