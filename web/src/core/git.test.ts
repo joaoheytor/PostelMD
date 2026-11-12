@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api";
-import type { GitStatus } from "./git-api";
-import { changedNotice, Git, type GitDeps } from "./git";
+import { gitStatus, type GitStatus } from "./git-api";
+import { changedNotice, Git, type GitDeps, leftOut } from "./git";
 
 // Fake secrets, built at run time so no scanner flags this public file.
 const awsKey = `AKIA${"Q7".repeat(8)}`;
@@ -156,5 +156,27 @@ describe("Git", () => {
     await git.refresh();
     expect(git.state.value.status).toBe(edited);
     expect(git.state.value.error).toBe("Couldn't read the changes: 503");
+  });
+});
+
+describe("leftOut (ADR-0026: what commits leave out)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("names the files too large to commit and the folders that are repositories of their own", () => {
+    expect(leftOut({ ...clean, skipped: ["big.iso"], repositories: ["clone", "infra/sub"] })).toEqual([
+      "Too large to commit, left out: big.iso",
+      "Folders that are git repositories of their own, left out: clone, infra/sub",
+    ]);
+  });
+
+  it("says nothing when the server lists neither, as it omits empty lists", async () => {
+    vi.stubGlobal("fetch", (() => Promise.resolve(Response.json({ branch: "main", changes: [], locks: [] }))) as typeof fetch);
+    expect(leftOut(await gitStatus())).toEqual([]);
+  });
+
+  it("reads the repositories from the server's status", async () => {
+    const body = { branch: "main", changes: [], locks: [], repositories: ["clone"] };
+    vi.stubGlobal("fetch", (() => Promise.resolve(Response.json(body))) as typeof fetch);
+    expect(leftOut(await gitStatus())).toEqual(["Folders that are git repositories of their own, left out: clone"]);
   });
 });

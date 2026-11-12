@@ -38,7 +38,7 @@ const files = (n: number) => `${n} file${n === 1 ? "" : "s"}`;
  * What setup's initial import did, or nothing if it imported nothing. ADR-0020: the import
  * commits the files as they are, without a secret check, and leaves out files over 50 MB.
  */
-export function importNotice({ imported, skipped }: api.SetupResult): string | undefined {
+export function importNotice({ imported, skipped, repositories }: api.SetupResult): string | undefined {
   const parts: string[] = [];
   if (imported > 0) {
     parts.push(
@@ -47,6 +47,8 @@ export function importNotice({ imported, skipped }: api.SetupResult): string | u
     );
   }
   if (skipped > 0) parts.push(`${files(skipped)} over 50 MB ${skipped === 1 ? "was" : "were"} left out of git.`);
+  if (repositories === 1) parts.push("1 folder is a git repository of its own and was left out.");
+  if (repositories > 1) parts.push(`${repositories} folders are git repositories of their own and were left out.`);
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 

@@ -79,6 +79,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   code) with syntax highlighting; binary files show why they can't open.
 - The app shows the server's version beside its name once you log in, and the server logs
   it when it starts (#152). Nothing shown before login names it.
+- The commit dialog names the folders that are git repositories of their own (a clone, a
+  submodule), whose files commits leave out, and the setup notice says how many folders the
+  initial import left out that way (#118).
 
 ### Changed
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note

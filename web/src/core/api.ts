@@ -114,13 +114,15 @@ export interface SetupForm {
 export interface SetupResult {
   imported: number;
   skipped: number;
+  /** Folders that are git repositories of their own, left out of the import (ADR-0026). */
+  repositories: number;
 }
 
 /** Runs the first-run setup. */
 export async function setup(form: SetupForm): Promise<SetupResult> {
   const resp = await ok(await request("POST", "/api/v1/setup", json(form)));
-  const r = (await resp.json()) as { imported: number; skipped?: number };
-  return { imported: r.imported, skipped: r.skipped ?? 0 };
+  const r = (await resp.json()) as { imported: number; skipped?: number; repositories?: number };
+  return { imported: r.imported, skipped: r.skipped ?? 0, repositories: r.repositories ?? 0 };
 }
 
 // Notes and folders.

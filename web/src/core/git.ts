@@ -30,6 +30,19 @@ export interface GitDeps {
 
 export const changedNotice = "The changes were updated since you opened this dialog; review them again.";
 
+/**
+ * What commits leave out, one plain line per kind: files over the size limit (ADR-0020) and
+ * folders that are git repositories of their own (ADR-0026). The server omits empty lists.
+ */
+export function leftOut(status: GitStatus): string[] {
+  const lines: string[] = [];
+  if (status.skipped?.length) lines.push(`Too large to commit, left out: ${status.skipped.join(", ")}`);
+  if (status.repositories?.length) {
+    lines.push(`Folders that are git repositories of their own, left out: ${status.repositories.join(", ")}`);
+  }
+  return lines;
+}
+
 /** How many times a refresh lists the changes again when a file changes while it reads. */
 const maxRelists = 3;
 

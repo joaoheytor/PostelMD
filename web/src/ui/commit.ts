@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import type { GitStatus } from "../core/git-api";
 import { type FileScan, needsConfirmation, notChecked, withFindings } from "../core/commit-scan";
-import type { Git } from "../core/git";
+import { type Git, leftOut } from "../core/git";
 import { fields, LightElement, StoreController } from "./base";
 
 const kindText: Record<GitStatus["changes"][number]["kind"], string> = {
@@ -87,6 +87,15 @@ export class CommitDialog extends LightElement {
     </ul>`;
   }
 
+  /** What commits leave out: files too large, and repositories of their own (ADR-0026). */
+  private leftOut(st: GitStatus) {
+    const lines = leftOut(st);
+    if (lines.length === 0) return nothing;
+    return html`<ul aria-label="Left out of commits">
+      ${lines.map((l) => html`<li>${l}</li>`)}
+    </ul>`;
+  }
+
   /**
    * ADR-0020: each finding by file, rule, line and a short hint, never the secret; and each
    * file the dialog couldn't check, which needs "Commit anyway" too.
@@ -138,9 +147,7 @@ export class CommitDialog extends LightElement {
           ${st
             ? html`<p>On branch <code>${st.branch}</code></p>
                 ${this.locks(st)} ${this.changes(st)}
-                ${st.skipped?.length
-                  ? html`<p>Too large to commit, left out: ${st.skipped.join(", ")}</p>`
-                  : nothing}`
+                ${this.leftOut(st)}`
             : html`<p>Loading…</p>`}
           ${s?.scanning && st?.changes.length ? html`<p>Checking the changes for secrets…</p>` : nothing}
           ${this.secrets(s?.scan)}
