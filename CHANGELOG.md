@@ -84,6 +84,13 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   each and what to do: commit a repository with its own git, or add either to `.gitignore`
   to hide it there. The setup notice says how many folders the initial import left out that
   way (#118).
+- Move notes and folders by dragging them onto a folder, or onto Vault, in the file tree
+  (#130). The folder under the drag is highlighted; a folder can't go into itself or one of
+  its subfolders, and a name already taken there is reported without changing anything. An
+  open note follows the move with its unsaved edits. From the keyboard, "Move to…" (beside
+  the open note's Rename or move) and "Move folder to…" (in the tree) pick the folder from a
+  list. The tree's status now says when something moved. Files dragged in from outside the
+  app are ignored.
 
 ### Changed
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note
