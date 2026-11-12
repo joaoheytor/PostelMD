@@ -3,6 +3,7 @@
 package vault
 
 import (
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,6 +115,31 @@ func TestCraftedDotGitInTheTreeIsCarriedThrough(t *testing.T) {
 	}
 	if hist, err := v.History("notes/a.md", 10); err != nil || len(hist) != 2 {
 		t.Fatalf("History(notes/a.md) = %+v, %v; want the edit and the import", hist, err)
+	}
+}
+
+// A crafted tree entry whose own name holds a "/" joins to a path that another entry also
+// names. The index must name it once, or the user's git refuses to read the index.
+func TestCraftedSlashNameIsLeftOutOfTheIndex(t *testing.T) {
+	v, dir := newVault(t)
+	_, err := v.EnableGit()
+	must(t, err)
+	_, err = v.ImportInitial(ctx, "Ada", "ada@example.invalid")
+	must(t, err)
+	raw, err := exec.Command("git", "-C", dir, "cat-file", "tree", "HEAD^{tree}").Output()
+	must(t, err)
+	blob, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD:notes/a.md").Output()
+	must(t, err)
+	id, err := hex.DecodeString(strings.TrimSpace(string(blob)))
+	must(t, err)
+	root := gitStdin(t, dir, string(raw)+"100644 notes/a.md\x00"+string(id), "hash-object", "-t", "tree", "--literally", "-w", "--stdin")
+	gitCLI(t, dir, "update-ref", "refs/heads/main", gitCLI(t, dir, "commit-tree", root, "-p", "HEAD", "-m", "crafted"))
+
+	writeFiles(t, dir, map[string]string{"notes/a.md": "A2"})
+	_, err = commitAll(v, "edit", "Ada", "ada@example.invalid")
+	must(t, err)
+	if got := gitCLI(t, dir, "ls-files"); got != "notes/a.md" {
+		t.Fatalf("index = %q, want notes/a.md once", got)
 	}
 }
 

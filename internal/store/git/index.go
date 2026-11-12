@@ -7,6 +7,7 @@ import (
 	"io"
 	iofs "io/fs"
 	"sort"
+	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/index"
@@ -38,7 +39,9 @@ func (g *Repo) ResetIndex(commit Hash) error {
 		}
 		// The whole tree is walked, names go-git refuses included, so one such name (a
 		// git~1 committed on the host) never cuts the index short. Names checkPath refuses
-		// are left out: the user's git then shows each as one staged deletion.
+		// are left out: the user's git then shows each as one staged deletion. So is an entry
+		// whose own name holds a "/" (only a crafted tree has one): it would name a path
+		// twice, and git refuses an index with a duplicate entry.
 		w := object.NewTreeWalker(t, true, nil)
 		defer w.Close()
 		w.SkipPathValidation()
@@ -50,7 +53,7 @@ func (g *Repo) ResetIndex(commit Hash) error {
 			if err != nil {
 				return fmt.Errorf("store/git: index: %w", err)
 			}
-			if e.Mode != filemode.Dir && checkPath(name) == nil {
+			if e.Mode != filemode.Dir && !strings.Contains(e.Name, "/") && checkPath(name) == nil {
 				idx.Entries = append(idx.Entries, &index.Entry{Name: name, Hash: e.Hash, Mode: e.Mode})
 			}
 		}
