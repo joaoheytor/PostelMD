@@ -39,9 +39,11 @@ without the maintainer's explicit go-ahead in the conversation.
 7. **Commit**, signed off, with a Conventional Commit subject:
    `git commit -s` and end the message with the trailer line
    `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-8. **Push and open the PR** (no prompts for a non-main branch; the guard hook still asks
-   for pushes to main, force pushes without a lease and any other remote):
-   `git push -u origin <branch>`, then `gh pr create` with
+8. **Push and open the PR** (no prompts for a non-main branch, when each is its own Bash
+   call with no `cd`, `&&`, pipes or `$(…)`; the guard hook asks otherwise, and for pushes
+   to main, force pushes without a lease and any other remote):
+   `git push -u origin <branch>`, then write the body to a scratch file with Write and run
+   `gh pr create --title … --body-file <file>` (the hook scans it for secrets) with
    - a Conventional Commit title (`feat(editor): …`, `fix!: …`);
    - a body with **What** (the change and why), **Tests** (what they cover, and the
      negative check: what you broke and that the test failed), and anything found along the

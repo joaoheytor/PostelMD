@@ -10,11 +10,13 @@ Modes (first CLI argument):
            on main (at the merge base of HEAD and origin/main, or at origin/main's tip; HEAD
            without origin/main). scripts/adr-immutable.sh is the enforced check (pre-commit, CI).
   git      Bash: enforce DCO sign-off + Conventional Commit subjects; forbid skipping hooks;
-           routine branch and PR work passes (pushes of a non-main branch to origin, PR and
-           issue create/edit/comment, a squash merge pinned to the reviewed head, run reruns;
-           outward.py); everything else outward-facing (pushes to main/master, force, tags,
-           releases, closing or reviewing PRs, repo settings, mutating API calls) gets a human
-           permission prompt ("ask"); ask before shell writes to repository files (bash_writes.py).
+           routine branch and PR work passes, fail closed: one simple command with an
+           allowlisted argument set (outward.py, gh_rules.py); everything else outward-facing
+           (pushes to main/master, force, tags, releases, closing or reviewing PRs, repo
+           settings, mutating API calls) gets a human permission prompt ("ask"); PR and issue
+           text is scanned like Write/Edit content; options that make allowed commands run
+           other programs ask (codeexec.py); so do shell writes to repository files
+           (bash_writes.py).
 
 These are guardrails for an agent, not a security boundary: CI and branch protection are the
 hard gates.
@@ -31,42 +33,14 @@ import subprocess
 import sys
 
 from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets
+from content import has_secret, public_reasons
 from outward import CMD_START, GH, GIT, check as check_outward
 
 CONVENTIONAL = r"(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S"
-
-SECRET_PATTERNS = [
-    r"(AKIA|ASIA)[0-9A-Z]{16}",                           # AWS access key IDs
-    r"AIza[0-9A-Za-z_-]{35}",                             # Google API key
-    r"glpat-[0-9A-Za-z_-]{20,}",                          # GitLab PAT
-    r"npm_[A-Za-z0-9]{36}",                               # npm token
-    r"(sk|rk)_live_[0-9A-Za-z]{20,}",                     # Stripe live keys
-    r"hooks\.slack\.com/services/T[0-9A-Z]+/B[0-9A-Z]+/[0-9A-Za-z]+",  # Slack webhook
-    r"gh[pousr]_[A-Za-z0-9]{36}",                         # GitHub tokens
-    r"github_pat_[A-Za-z0-9_]{22,}",                      # GitHub fine-grained PAT
-    r"dckr_pat_[A-Za-z0-9_-]{20,}",                       # Docker Hub PAT
-    r"sk-(ant-)?[A-Za-z0-9_-]{32,}",                      # OpenAI / Anthropic style keys
-    r"xox[baprs]-[A-Za-z0-9-]{10,}",                      # Slack
-    r"AGE-SECRET-KEY-1[0-9A-Z]{58}",                      # age identity
-    r"-----BEGIN( [A-Z0-9]+)* PRIVATE KEY( BLOCK)?-----", # PEM / OpenSSH / PGP private keys
-]
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
 # _test.go files next to the code they cover.
 SECRET_FIXTURE_PATHS = re.compile(r"(^|/)testdata/|_test\.go$")
-
-ALLOWED_EMAILS = re.compile(
-    r"^(jhkpereira@gmail\.com|noreply@anthropic\.com|.+@example\.(com|org|net)|you@example\.com)$",
-    re.I,
-)
-HOME_PATH = re.compile(r"(/home/[a-z][a-z0-9_-]*/|/Users/[^/\s]+/)")
-PRIVATE_IP = re.compile(
-    r"\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}"
-    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3})\b"
-)
-# Bounded quantifiers keep this linear on large inputs (an unbounded local part is quadratic).
-EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,8}")
-TEST_PATHS = re.compile(r"(^|/)(test|testdata|tests)/|_test\.go$|\.test\.ts$")
 
 
 def respond(decision, reason):
@@ -94,9 +68,7 @@ def rel_path(tool_input):
 
 
 def check_secrets(tool_input):
-    text = written_text(tool_input)
-    hits = [p for p in SECRET_PATTERNS if re.search(p, text)]
-    if not hits:
+    if not has_secret(written_text(tool_input)):
         return
     path = rel_path(tool_input)
     if SECRET_FIXTURE_PATHS.search(path):
@@ -104,37 +76,14 @@ def check_secrets(tool_input):
                        "(this repository is public).")
     respond("deny", "BLOCKED: secret-shaped string in the content being written (AWS/GitHub/Docker "
                     "Hub/Slack/API key/age/private key). PostelMD is a PUBLIC repository: reference "
-                    "an env var or *_FILE path instead. Patterns: .claude/hooks/postelmd_guard.py.")
-
-
-def local_denylist():
-    root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
-    path = os.path.join(root, ".claude", "public-guard.local.txt")
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return [ln.strip() for ln in fh if ln.strip() and not ln.startswith("#")]
-    except OSError:
-        return []
+                    "an env var or *_FILE path instead. Patterns: .claude/hooks/content.py.")
 
 
 def check_public(tool_input):
     path = rel_path(tool_input)
     if path.endswith("public-guard.local.txt") or path.startswith(".claude/hooks/"):
         return
-    text = written_text(tool_input)
-    reasons = []
-    if HOME_PATH.search(text):
-        reasons.append("an absolute home-directory path")
-    if not TEST_PATHS.search(path) and PRIVATE_IP.search(text):
-        reasons.append("a private/Tailscale IP address")
-    emails = {m.group(0) for m in EMAIL.finditer(text)}
-    unknown = sorted(e for e in emails if not ALLOWED_EMAILS.match(e))
-    if unknown:
-        reasons.append("email address(es) " + ", ".join(unknown))
-    lowered = text.lower()
-    terms = [t for t in local_denylist() if t.lower() in lowered]
-    if terms:
-        reasons.append("term(s) from the local public-guard denylist")
+    reasons = public_reasons(written_text(tool_input), path)
     if reasons:
         respond("ask", f"PUBLIC REPO CHECK for {path or 'file'}: content contains "
                        + "; ".join(reasons) + ". Confirm this is meant to be published.")
@@ -199,8 +148,8 @@ def check_adr(tool_input):
                        "a dated Clarification may only add rationale, links or typo fixes.")
 
 
-# Outward-facing commands that always need the maintainer. Pushes and `gh pr merge` are
-# judged by outward.py; PR/issue create, edit and comment, and `gh run rerun`, pass.
+# Outward-facing commands that always need the maintainer, wherever they appear. Pushes and
+# the gh commands routine work uses are judged by outward.py and gh_rules.py.
 GATED = [
     (GIT + r"tag\b(?!\s+(-l|--list)\b)\s+\S", "creating/changing git tags"),
     (GH + r"release\b", "GitHub releases"),
@@ -208,8 +157,6 @@ GATED = [
     (GH + r"(secret|variable|ruleset|label|gist)\s+(?!list\b|view\b)\S", "repo secrets/variables/rulesets/labels or gists"),
     (GH + r"pr\s+(close|review|reopen)\b", "closing, reopening or reviewing pull requests"),
     (GH + r"issue\s+(reopen|delete|transfer)\b", "reopening, deleting or transferring issues"),
-    (GH + r"(pr\s+(create|ready|edit|comment|merge)|issue\s+(create|comment|edit|close)|run\s+rerun)"
-          r"\b[^;&|\n]*(\s-R|--repo\b)", "acting on another repository"),
     (GH + r"(workflow\s+(run|enable|disable)|run\s+(cancel|delete))\b", "running or changing workflows"),
     (GH + r"api\b[^;&|\n]*(-X\s*|--method[=\s]+)(POST|PUT|PATCH|DELETE)\b", "mutating GitHub API calls"),
     (GH + r"api\b[^;&|\n]*(\s-[fF]\b|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
@@ -233,17 +180,17 @@ def check_commit(cmd):
 
 def check_git(tool_input, cwd):
     cmd = tool_input.get("command") or ""
-    if not re.search(r"\b(git|gh)\b", cmd):
-        return
     check_commit(cmd)  # denials first: `git commit -m x && git push` is still a bad commit
     for pattern, label in GATED:
         if re.search(pattern, cmd):
             respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
                            "maintainer asked for exactly this in the conversation.")
-    reason = check_outward(cmd, cwd, git_out)
-    if reason:
-        respond("ask", f"OUTWARD-FACING: {reason}. Branch pushes to origin and pinned squash "
-                       "merges pass; this needs the maintainer's go-ahead in the conversation.")
+    found = check_outward(cmd, cwd, git_out)
+    if found and found[0] == "deny":
+        respond("deny", found[1])
+    if found:
+        respond("ask", f"NEEDS THE MAINTAINER: {found[1]}. Routine pushes and PR work pass only "
+                       "as one simple command with allowlisted arguments (outward.py).")
 
 
 def check_bash_writes(tool_input, cwd):

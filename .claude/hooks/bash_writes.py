@@ -52,6 +52,7 @@ def tokens(cmd):
     text = strip_heredocs(cmd).replace("\\\n", " ").replace("\n", " ; ")
     lex = shlex.shlex(text, posix=True, punctuation_chars=True)
     lex.whitespace_split = True
+    lex.commenters = ""  # shlex ends a word at `#`; bash doesn't (x#y), so a comment hid args
     try:
         return list(lex)
     except ValueError:  # unbalanced quotes: not judged
