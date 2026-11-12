@@ -87,9 +87,11 @@ export class Workspace {
    * and saving, and only the error shows (#134). Edits typed while path loads are saved first;
    * if one can't be, the note stays and the error says so. So continuous typing holds the open
    * back until a save catches up, and a close() meanwhile (a trash, move or restore of the open
-   * note, a logout) cancels it. The open note itself, saved, is kept as it is: a read of it could
-   * be older than a save landing meanwhile. Reloaded (converted, or edits the user agreed to
-   * leave, which go to a draft offered again), it is read again if a save landed meanwhile.
+   * note, a logout) cancels it. Opening the open note again while it is saved doesn't reload it
+   * from disk: its session, cursor and undo history stay, and a change made outside shows as a
+   * conflict (412) at its next save (a read could also be older than a save landing meanwhile).
+   * Reloaded (converted, or with edits the user agreed to leave, which go to a draft offered
+   * again), it is read again if a save landed meanwhile.
    */
   async open(path: string, convert = false): Promise<void> {
     const seq = ++this.opens;

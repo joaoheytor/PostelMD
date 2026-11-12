@@ -31,7 +31,8 @@ export async function saveAsNew(ws: Workspace): Promise<string | undefined> {
   }
   await ws.tree.changed(path);
   await ws.open(path); // closing the old note writes its draft, which goes next
-  open.doc.dropDraft();
+  // Only if the copy opened: a note that stays open (the copy couldn't be read) keeps its draft.
+  if (ws.state.value.open?.doc.path === path) open.doc.dropDraft();
 }
 
 /**

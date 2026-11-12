@@ -9,6 +9,7 @@ vi.mock("./api", async (actual) => ({
   listFolder: vi.fn(async () => []),
   readNote: vi.fn(async (path: string) => ({ content: `# ${path}\n`, etag: `"${path}"` })),
   saveNote: vi.fn(async () => ({ kind: "saved", etag: '"e2"' })),
+  createNote: vi.fn(async () => '"e5"'),
 }));
 
 /** A read the test answers. */
@@ -177,7 +178,7 @@ describe("Workspace: a file that can't be opened keeps the open note", () => {
     expect(ws.state.value).toEqual({ open: c }); // and no error from b.md's open, cancelled
   });
 
-  it("opening the open note again keeps its session: an edit typed meanwhile stays, and saves over its own last save", async () => {
+  it("opening the saved open note again doesn't reload it from disk: its session, and an edit typed meanwhile, stay", async () => {
     const before = ws.state.value.open;
     type("one\n");
     await ws.saveOpen(); // saved as "e2"
@@ -185,7 +186,7 @@ describe("Workspace: a file that can't be opened keeps the open note", () => {
     type("two\n");
     await opening;
     expect(ws.state.value.open).toBe(before);
-    expect(api.readNote).toHaveBeenCalledTimes(1); // a.md's first open only: a read now would be stale
+    expect(api.readNote).toHaveBeenCalledTimes(1); // a.md's first open only: no reload from disk
     await vi.advanceTimersByTimeAsync(1000);
     expect(api.saveNote).toHaveBeenLastCalledWith("a.md", "# a.md\none\ntwo\n", '"e2"');
   });
@@ -246,5 +247,36 @@ describe("Workspace: a file that can't be opened keeps the open note", () => {
     expect(ws.state.value.open?.doc.state.value.status).toBe("conflict");
     await ws.open("b.md");
     expect(ws.state.value.open?.doc.path).toBe("b.md");
+  });
+
+  it("reloading the open note left unsaved, whose retried save lands during the read, keeps it: the read is stale", async () => {
+    const before = ws.state.value.open;
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "error", message: "down", retryAfterMs: 0, retry: true });
+    type("one\n");
+    expect(await ws.saveOpen()).toBe(false);
+    const read = slowRead();
+    const opening = ws.open("a.md"); // "Leave them?" answered yes: a reload
+    await vi.advanceTimersByTimeAsync(1000); // the retry lands as "e2"
+    expect(api.saveNote).toHaveBeenCalledTimes(2);
+    read.resolve({ content: "# a.md\n", etag: '"a.md"' }); // read before that save
+    await opening;
+    // Saved now, the note is kept as it is (the open again finds it clean), never the stale read.
+    expect(ws.state.value.open).toBe(before);
+    expect(before?.doc.etag).toBe('"e2"');
+    expect(before?.doc.dirty).toBe(false);
+  });
+
+  it("a copy saved as a new file that can't be opened keeps the note open, and its draft", async () => {
+    vi.mocked(api.saveNote).mockResolvedValueOnce({ kind: "gone" });
+    type("mine\n");
+    expect(await ws.saveOpen()).toBe(false);
+    const before = ws.state.value.open;
+    await before?.doc.writeDraft();
+    vi.mocked(api.readNote).mockRejectedValueOnce(new Error("can't reach the server"));
+    await ws.saveAsNew();
+    expect(api.createNote).toHaveBeenCalledWith("a-recovered.md", "# a.md\nmine\n");
+    expect(ws.state.value.open).toBe(before);
+    await ws.drafts?.idle();
+    expect((await backend.all()).map((d) => d.text)).toEqual(["# a.md\nmine\n"]);
   });
 });
