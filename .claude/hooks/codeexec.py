@@ -63,8 +63,43 @@ def git_check(words, cwd):
     return bad_long(sub, args)
 
 
+ENV_OK = {"CGO_ENABLED", "IMAGE", "PM_E2E_PORT", "SMOKE_PORT", "SAMPLES", "CI"}
+TOOLS = {"git", "go", "npm", "npx", "make"}
+ASSIGN = re.compile(r"(\w+)=")
+
+
+def env_check(segs):
+    """Ask when a variable outside ENV_OK is set for git/go/npm/npx/make or a script: HOME,
+    XDG_*, PATH, EDITOR, PAGER, SSH_ASKPASS, ... change which config and programs they run.
+    Covers `VAR=x cmd`, `env VAR=x cmd`, and `VAR=x;` / `export VAR=x` before cmd."""
+    earlier = []
+    for words in segs:
+        j, before = 0, []
+        while j < len(words) and (ASSIGN.match(words[j]) or words[j] == "env"
+                                  or (words[j].startswith("-") and "env" in words[:j])):
+            before.append(words[j])
+            j += 1
+        tool = j < len(words) and (os.path.basename(words[j]) in TOOLS
+                                   or re.match(r"(\./)?scripts/", words[j]))
+        if not tool:
+            if j == len(words) or words[0] in ("export", "declare", "typeset", "readonly"):
+                earlier += [m.group(1) for m in map(ASSIGN.match, words) if m]
+            continue
+        flags = [w for w in before if w.startswith("-")]
+        if flags:
+            return f"env {flags[0]} before {words[j]}"
+        bad = [n for n in earlier + [ASSIGN.match(w).group(1) for w in before if ASSIGN.match(w)]
+               if n not in ENV_OK]
+        if bad:
+            return f"{bad[0]}= changes what {words[j]} reads or runs (allowed: {', '.join(sorted(ENV_OK))})"
+    return None
+
+
 def check(segs, cwd):
     """A reason to ask for any simple command in segs, or None."""
+    why = env_check(segs)
+    if why:
+        return why
     for words in segs:
         if any(w.startswith("GOFLAGS=") for w in words):
             return "GOFLAGS can make go run other programs (-toolexec, -exec)"

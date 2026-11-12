@@ -86,7 +86,9 @@
       "Edit(**/.github/workflows/**)",
       "Edit(**/LICENSE)",
       "Edit(**/.git/**)",
-      "Write(**/.git/**)"
+      "Write(**/.git/**)",
+      "Edit(**/.git)",
+      "Write(**/.git)"
     ],
     "deny": [
       "Bash(printenv*)",

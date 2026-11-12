@@ -1,12 +1,29 @@
 #!/bin/sh
-# commit-msg: Conventional Commit subject + DCO sign-off matching the author (CONTRIBUTING.md).
+# commit-msg: no secrets in the message, a Conventional Commit subject, and a DCO sign-off
+# matching the author (CONTRIBUTING.md).
 # Enable once per clone:  git config core.hooksPath .githooks
-# CI enforces the same rules (pr-title, DCO); this only fails earlier.
+# CI enforces the format rules (pr-title, DCO); this only fails earlier.
 msg_file="$1"
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT INT TERM
+tmpd=$(mktemp -d)
+trap 'rm -rf "$tmpd"' EXIT INT TERM
+tmp="$tmpd/msg"
 # Normalize: drop CR, stop at the scissors line (commit -v), drop comment lines.
 tr -d '\r' < "$msg_file" | sed '/^# -\{8,\} >8 -\{8,\}$/,$d' | grep -v '^#' > "$tmp" || true
+
+# Secrets (rule 15): the next push publishes the message, e.g. one read with -F from a
+# credentials file. gitleaks' default rules, no ignore file; skipped with a warning if
+# gitleaks isn't installed (the pre-commit hook does the same).
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks stdin --no-banner --redact --gitleaks-ignore-path "$tmpd/noignore" \
+      < "$tmp" > "$tmpd/gl.log" 2>&1; then
+    echo "commit-msg: gitleaks found a possible secret in the commit message:" >&2
+    grep -E 'RuleID|Finding|Line' "$tmpd/gl.log" >&2 || cat "$tmpd/gl.log" >&2
+    exit 1
+  fi
+else
+  echo "commit-msg: warning: gitleaks not installed; the message was not scanned for secrets." >&2
+fi
+
 subject=$(sed -n '/./{p;q;}' "$tmp")
 
 # Git-generated subjects skip the format check, but never the sign-off check.

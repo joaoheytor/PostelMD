@@ -31,10 +31,10 @@ PREFIXES = {"sudo", "env", "command", "xargs", "time", "nohup", "exec"}
 HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([\w.-]+)\2")
 
 
-def strip_heredocs(cmd):
-    """The command without heredoc bodies: their text is data, not shell. A `<<WORD` with no
-    closing WORD line isn't a heredoc (e.g. "<<EOF" in quotes): nothing is skipped for it."""
-    out, lines, i = [], cmd.split("\n"), 0
+def split_heredocs(cmd):
+    """(the command without heredoc bodies, [(quoted delimiter?, body)]): bodies are data, not
+    shell. A `<<WORD` with no closing WORD line isn't a heredoc (e.g. "<<EOF" in quotes)."""
+    out, bodies, lines, i = [], [], cmd.split("\n"), 0
     while i < len(lines):
         line = lines[i]
         out.append(line)
@@ -44,8 +44,13 @@ def strip_heredocs(cmd):
             while end < len(lines) and (lines[end].lstrip("\t") if m.group(1) else lines[end]) != m.group(3):
                 end += 1
             if end < len(lines):
+                bodies.append((bool(m.group(2)), "\n".join(lines[i:end])))
                 i = end + 1
-    return "\n".join(out)
+    return "\n".join(out), bodies
+
+
+def strip_heredocs(cmd):
+    return split_heredocs(cmd)[0]
 
 
 def tokens(cmd):
