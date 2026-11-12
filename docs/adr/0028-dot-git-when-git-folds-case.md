@@ -31,7 +31,11 @@ exists to prevent. Found in the re-review of #116, recorded on
   `git~1`) never make a nested repository: Linux keeps those characters, so the lookup
   doesn't find them. They, and `.git` with ignorable code points in any case, are reserved
   ([ADR-0006](0006-authorization-and-confinement.md), "Reserved paths"), so they are never
-  committed either.
+  committed either. An entry the branch already holds under such a name, or under `.git`
+  or `..` (committed on the host with git's protections off, or pushed crafted), is carried
+  through by commits unchanged, never listed as deleted, left out of the index a commit
+  writes (the user's git shows it as a staged deletion), and doesn't stop other notes'
+  history from being read.
 - **`core.ignorecase` in vaults PostelMD creates.** When enabling history creates the
   repository, it probes the filesystem as `git init` does: it creates a file in the new
   `.git` being built (inside the vault's temp folder), looks it up in another letter case,
@@ -48,7 +52,11 @@ exists to prevent. Found in the re-review of #116, recorded on
 - Negative / costs: if a user sets `core.ignorecase` on a case-sensitive filesystem, a folder
   holding `.GIT` is left out of commits and named under `repositories`; the user can see it
   and unset the option. Enabling history writes and removes one empty probe file, inside
-  the temp folder the startup sweep already cleans.
+  the temp folder the startup sweep already cleans. Dropping ignorable code points
+  over-matches where the filesystem keeps them (newer Linux kernels' casefold, APFS): a
+  folder holding `.G<U+200B>it` is left out of commits and named under `repositories`
+  although git wouldn't treat it as a repository there. The name is reserved anyway, so
+  only someone writing on the host can make one, and the user sees the folder named.
 - Follow-ups: none.
 
 ## Alternatives considered

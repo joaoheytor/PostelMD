@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	iofs "io/fs"
 	"sort"
 
@@ -19,8 +20,9 @@ const indexLock = "index.lock"
 // behind; like a ref lock, only the user may remove it (ADR-0020).
 var ErrIndexLocked = errors.New("store/git: the index is locked")
 
-// ResetIndex makes .git/index list exactly commit's tree, so the user's own git sees the
-// working tree as PostelMD committed it (ADR-0016: a commit resets the index to HEAD). The
+// ResetIndex makes .git/index list commit's tree, so the user's own git sees the working
+// tree as PostelMD committed it (ADR-0016: a commit resets the index to HEAD), except the
+// paths checkPath refuses (ADR-0028: they stay in the tree, out of the index). The
 // entries carry no stat data, so git re-hashes each file once and then shows it clean. It
 // uses git's lockfile protocol: index.lock, fsync, rename, fsync the directory.
 func (g *Repo) ResetIndex(commit Hash) error {
@@ -34,14 +36,21 @@ func (g *Repo) ResetIndex(commit Hash) error {
 		if err != nil {
 			return fmt.Errorf("store/git: index: %w", err)
 		}
+		// The whole tree is walked, names go-git refuses included, so one such name (a
+		// git~1 committed on the host) never cuts the index short. Names checkPath refuses
+		// are left out: the user's git then shows each as one staged deletion.
 		w := object.NewTreeWalker(t, true, nil)
 		defer w.Close()
+		w.SkipPathValidation()
 		for {
 			name, e, err := w.Next()
-			if err != nil {
-				break // io.EOF ends the walk; a broken tree was caught by Commit already
+			if errors.Is(err, io.EOF) {
+				break
 			}
-			if e.Mode != filemode.Dir {
+			if err != nil {
+				return fmt.Errorf("store/git: index: %w", err)
+			}
+			if e.Mode != filemode.Dir && checkPath(name) == nil {
 				idx.Entries = append(idx.Entries, &index.Entry{Name: name, Hash: e.Hash, Mode: e.Mode})
 			}
 		}
