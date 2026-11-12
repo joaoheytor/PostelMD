@@ -7,7 +7,9 @@ description: Use when a PostelMD pull request is open and needs review before me
 
 Reviews one open PR with the persona agents in `.claude/agents/` and gets it to "ready to
 merge". Reviewers are read-only; the PR's author (you, or the slice agent) applies fixes.
-Never merge, push to `main`, or create tags: merging is the maintainer's step.
+Never push to `main` or create tags. Merge only after the maintainer's go-ahead for this
+PR, pinned to the head that was reviewed:
+`gh pr merge N --squash --match-head-commit <reviewed-sha>` (any other merge is a prompt).
 
 ## 1. Pick the reviewers
 

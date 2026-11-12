@@ -128,9 +128,13 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   what changed, and include logs. "It stopped working" is not a report.
 - Humans review every diff an agent produces. No unattended agent runs on the main branch.
 - **This repository is public.** Never write private hostnames, IPs, home paths, tokens or
-  work references into it. `.claude/hooks/postelmd_guard.py` blocks secrets, asks about
-  anything that looks private, and turns every outward-facing command (push, tag, release,
-  PR, issue, repo settings) into a permission prompt for the maintainer.
+  work references into it. `.claude/hooks/postelmd_guard.py` blocks secrets and asks about
+  anything that looks private. Routine branch work runs without prompts (the allow list in
+  `.claude/settings.json`): pushing a non-main branch to origin, opening, editing and
+  commenting on PRs and issues, re-running CI, and a squash merge pinned to the reviewed
+  head (`gh pr merge N --squash --match-head-commit <sha>`), which agents run only after the
+  maintainer's go-ahead for that PR. Pushes to main/master, force pushes without a lease,
+  tags, releases, closing or reviewing PRs and repo settings stay permission prompts.
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
   acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
   in `.claude/agents/` for a PR.
