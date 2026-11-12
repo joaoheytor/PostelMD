@@ -62,6 +62,7 @@ class WriteTargets(unittest.TestCase):
         ("echo x >&2", []),
         ("cmd 'unbalanced > x", []),
         ("echo \"<<EOF\" > doc.md\necho y > b.md", ["doc.md", "b.md"]),  # no closing EOF line
+        ("echo x#y > c.md", ["c.md"]),  # `#` inside a word isn't a comment in bash
     ]
 
     def test_targets(self):

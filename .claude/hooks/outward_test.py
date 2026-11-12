@@ -27,6 +27,8 @@ class Gating(unittest.TestCase):
         git(cls.feat, "-c", "tag.gpgsign=false", "tag", "v1")
         git(cls.feat, "branch", "tracks-main", "origin/main")
         git(cls.feat, "switch", "-q", "-c", "feature")
+        git(cls.feat, "update-ref", "refs/remotes/origin/feature", "HEAD")
+        git(cls.feat, "branch", "-q", "--set-upstream-to=origin/feature")
         cls.detached = new_repo()
         git(cls.detached, "commit", "-q", "--allow-empty", "-s", "-m", "chore: init")
         git(cls.detached, "switch", "-q", "--detach", "HEAD")
@@ -52,17 +54,14 @@ class Gating(unittest.TestCase):
             "git push -u origin feature",
             "git push --set-upstream origin HEAD",
             "git push origin HEAD:feature",
-            "git push origin feature:refs/heads/feature-2",
+            "git push origin feature:refs/heads/feature",
             "git push origin refs/heads/feature",
             "git push --force-with-lease",
             "git push --force-with-lease=feature:abc123 --force-if-includes origin feature",
-            "git push -uq origin feature 2>&1 | tail -5",
+            "git push -u -q origin feature",
             "git -C {f} push -u origin feature",
-            "cd {f} && git push",
-            "make test && git push -u origin feature && gh pr create --fill",
             "git --no-pager push origin feature",
         ], None)
-        self.assertIsNone(self.decide("cd {f} && git push".format(f=self.feat), cwd=self.onmain))
         self.assertIsNone(self.decide(f"git -C {self.feat} push", cwd=self.onmain))
 
     def test_protected_or_risky_pushes_ask(self):
@@ -109,7 +108,13 @@ class Gating(unittest.TestCase):
             "git -C \"{m}\" push",
             "git push origin feature 'unbalanced",            # the parser gives up: ask
             "echo \"x\ngit push origin main\"",               # seen by the regex, not parsed
+            # fail closed: a push must be the whole command (use git -C, not cd)
+            "cd {f} && git push",
+            "git push -uq origin feature 2>&1 | tail -5",
+            "make test && git push -u origin feature && gh pr create --fill",
+            "git push origin feature:refs/heads/feature-2",   # a rename: use HEAD:<branch>
         ], "ask")
+        self.assertEqual(self.decide(f"cd {self.feat} && git push", cwd=self.onmain), "ask")
         for repo in (self.onmain, self.detached):
             with self.subTest(cwd=repo):
                 self.assertEqual(self.decide("git push", cwd=repo), "ask")
@@ -177,7 +182,7 @@ class Gating(unittest.TestCase):
             "git commit -s -m 'update stuff' && git push",        # not conventional
             "git push --no-verify",
         ], "deny")
-        self.assertIsNone(self.decide("git commit -s -m 'chore: x' && git push"))
+        self.assertEqual(self.decide("git commit -s -m 'chore: x' && git push"), "ask")
 
 
 class NotAGitDirectory(unittest.TestCase):
