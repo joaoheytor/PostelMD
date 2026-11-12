@@ -15,8 +15,9 @@ fast search.
   - **authoritative:** users, credentials, sessions, vaults, memberships, invites, plugin
     approvals, secret findings and acknowledgements, **file IDs, generations and tombstones**
     (ADR-0003), the git intent log (ADR-0016) and the event outbox;
-  - **derived (rebuildable):** the FTS5 index, link graph and file metadata cache. `postelmd
-    reindex` rebuilds it from the files.
+  - **derived (rebuildable):** the FTS5 index, link graph and file metadata cache, in a
+    separate `/data/.postelmd/index.db` so its damage never touches identity
+    ([ADR-0030](0030-v02-storage-sqlite.md)). `postelmd reindex` rebuilds it from the files.
 - A single writer process owns `/data`, enforced by the instance lock (ADR-0014). No external
   database in v1.
 - Reserved paths (`.git/`, `.postelmd*`, Syncthing internals; ADR-0006) are filtered by

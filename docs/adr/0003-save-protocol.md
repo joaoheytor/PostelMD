@@ -50,14 +50,18 @@ matches when **ID, generation and hash all match**. So a file that was deleted a
 with identical bytes gets a **new ID** and an old autosave fails with `412`/`410`.
 
 **Tombstones:** a delete keeps the ID's row as a tombstone (`deleted_at`, last path) for
-30 days. A request for that ID returns `410 Gone`; nothing is ever recreated from it.
+30 days. A request for that ID returns `410 Gone`; nothing is ever recreated from it. An ID
+never seen, or whose tombstone has expired, returns `404 {"code": "unknown-file"}`
+([ADR-0032](0032-v02-etag-and-api.md)).
 
 **ID survival:**
 - across restarts and `reindex`: IDs live in authoritative tables, and `reindex` rebuilds only
   the FTS and link tables;
-- across **external renames**: the reconciler keeps the ID **only for an unambiguous match**,
-  meaning exactly one disappeared path and exactly one new path with that hash in the same
-  pass. Any ambiguity (for example several identical template files) gives every new path a new
+- across **external renames**: the reconciler keeps the ID **only when two signals agree**
+  ([ADR-0031](0031-v02-file-identity.md)): the same hash, `(device, inode)` and mtime as the
+  missing path (a `mv`, kept even among identical files), or the same hash with exactly one
+  disappeared path and exactly one new path with that hash (the new path waits, pending,
+  for the second pass). Any other ambiguity (for example several identical template files) gives every new path a new
   ID and tombstones the old IDs. Open tabs on a tombstoned ID see `410` with a "file moved or
   deleted externally" dialog;
 - across **brief absences**: editors and sync tools replace files by rename, so one scan can
@@ -103,6 +107,7 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   |---|---|---|
   | Absent | Any | Not applied: remove the temp, drop the intent |
   | Present, hash = intended | Absent, or present (`link` done, unlink not) | Applied: remove any temp; roll forward (insert the ID, generation 1) |
+  | Present, hash = intended | Present, **same inode** as the destination (a power loss undid the temp folder's side of a `rename-noreplace`) | Applied: unlink the temp name, roll forward ([ADR-0033](0033-v02-intents.md)) |
   | Present, other content | Any | Appeared externally (the no-clobber step failed or never ran): keep a complete temp in recovery, drop the intent; the reconciler gives the file a new ID |
 
   **Delete: files and folders (subtrees) alike.** Nothing is deleted in place. A delete
@@ -126,6 +131,7 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
   | `moving` | Same inode | Absent | Absent | Not applied: drop the intent, IDs unchanged |
   | `moving` | Same inode | Present, empty | Absent | Not applied (crash after `mkdir`): remove `<op-id>/`, drop the intent |
   | `moving` | Absent | Present | Same inode | Applied: tombstone **every recorded ID** in one transaction; state → `trashed` |
+  | `moving` | Same inode | Present | Same inode | A power loss kept both entries (ADR-0022's duplicate). A **file**: unlink the source name, then as "Applied". A folder: interference ([ADR-0033](0033-v02-intents.md)) |
   | `moving` | Other inode | Present | Same inode | Applied, then recreated externally: roll forward the tombstones; the new path is reconciled as **new** (new IDs) |
   | `moving` | Absent | Any | Absent | Interference: flag it, keep the IDs untombstoned, and ask the user (nothing to copy) |
   | `trashed` / `purging` | Any | Present | Fully or partly present | Already applied: tombstones exist; **resume the purge** when retention expires (removal is idempotent and works bottom-up) |
@@ -201,11 +207,20 @@ with identical bytes gets a **new ID** and an old autosave fails with `412`/`410
 
 The API addresses files **by ID** after creation. Paths are resolved to IDs on open.
 
+**v0.2** ([ADR-0032](0032-v02-etag-and-api.md)) builds a subset of this table: create is
+`PUT …/notes/{path}` with `If-None-Match: *` (`201`, with the ID in `PostelMD-File-ID`);
+saves are `PUT …/files/{id}` (or the path alias `PUT …/notes/{path}`) and answer **`204`**
+where this table says `200`; delete, folder operations, move and trash restore keep their
+v0.1 path routes, with an optional `If-Match`, until v0.3. A missing or suspect path answers
+`412 {"code": "file-missing"}` without an ETag.
+
 ### 4. Locking (server)
 - One **vault-level mutex** serializes structural changes (create, move, folder ops) and git
   operations that touch the working tree (ADR-0016).
-- **Per-file locks** for content updates. Multi-path operations take locks in a **fixed
-  order**: vault lock first, then file locks sorted by path.
+- **One vault mutex for content updates too**, as in the MVP (ADR-0020) and v0.2
+  ([ADR-0033](0033-v02-intents.md)): no per-file locks. If measurements ever call for them,
+  multi-path operations take locks in a **fixed order**: vault lock first, then file locks
+  sorted by path.
 - Saves wait (bounded, 5 s) behind a running git operation, then fail with
   `503 Retry-After`. The client retries; nothing is lost because the draft persists.
 
@@ -240,6 +255,8 @@ the temp path. It holds no content: until the client gets a `200`, its draft is 
    `.postelmd-tmp/`.
 5. Run the **synchronous secret scan** on the new content (bounded by the 5 MB note size
    limit; target < 20 ms p95). Findings are returned **in the save response** (ADR-0010).
+   Deferred in v0.2 until the secrets slice (ADR-0033): until then step 6 records no
+   findings.
 6. In one SQLite transaction: bump the generation, record the new hash and the findings, add
    an **outbox** row (`file.updated`, generation N), and clear the intent.
 7. Publish the event to the bus **explicitly from the outbox**. The watcher's own echo of
@@ -254,7 +271,8 @@ partly written temp never counts as the new content):
 |---|---|---|
 | Base hash | Any | Not applied: remove the temp, drop the intent. The client's retry succeeds. |
 | New hash | Absent | Applied: roll forward (scan, generation, hash, findings, outbox) and clear the intent in one transaction |
-| New hash | Present, new hash | An external writer installed the same bytes: remove the temp, drop the intent; the reconciler records an external change |
+| New hash | Present, **same inode** as the target | Applied: a power loss undid the temp folder's side of the rename. Unlink the temp name, then roll forward ([ADR-0033](0033-v02-intents.md)) |
+| New hash | Present, new hash, another inode | An external writer installed the same bytes: remove the temp, drop the intent; the reconciler records an external change |
 | Other content | Present, new hash | Interference: move the temp to `.postelmd/recovery/<op-id>/`, drop the intent, flag it to the user; the reconciler records the external change |
 | Other content | Absent or partial | Interference: remove any temp, drop the intent; the reconciler records the external change. Nothing is lost: the client never got a `200`, so its retry gets `412` and the conflict view shows its draft |
 | Absent | Present, new hash | External delete or move: keep the temp in recovery as above; the reconciler handles the absence (ADR-0004) |
