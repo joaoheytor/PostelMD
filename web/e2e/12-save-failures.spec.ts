@@ -101,6 +101,25 @@ async function stallFirstSave(page: Page, landed: boolean): Promise<{ saves: () 
   };
 }
 
+/**
+ * Makes the save timeout 3 s instead of 15 s in page, from the test side only: the app is the
+ * production build, and the 15 s value is the unit test's (api-save.test.ts). Returns how many
+ * timers it shortened, so a test can check it touched every save's.
+ */
+async function shortSaveTimeout(page: Page): Promise<() => Promise<number>> {
+  await page.addInitScript(() => {
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const w = window as unknown as { __shortened: number };
+    w.__shortened = 0;
+    AbortSignal.timeout = (ms: number) => {
+      if (ms !== 15_000) return timeout(ms);
+      w.__shortened++;
+      return timeout(3_000);
+    };
+  });
+  return () => page.evaluate(() => (window as unknown as { __shortened: number }).__shortened);
+}
+
 const stalls = [
   { name: "stuck.md", landed: false, more: "", what: "it hadn't landed" },
   // The retry sends the same bytes: the server answers 204 (ADR-0027).
@@ -111,10 +130,10 @@ const stalls = [
 
 for (const { name, landed, more, what } of stalls) {
   test(`a save that never answers says it is retrying, then saves (${what})`, async ({ page }) => {
-    test.setTimeout(60_000); // the save gives up after 15 s
     writeFileSync(vault(name), "# Stuck\n");
     let stall: Awaited<ReturnType<typeof stallFirstSave>> | undefined;
     try {
+      const shortened = await shortSaveTimeout(page);
       await login(page);
       await page.getByRole("button", { name }).click();
       stall = await stallFirstSave(page, landed);
@@ -122,11 +141,13 @@ for (const { name, landed, more, what } of stalls) {
       const status = saveStatus(page);
       await expect(status).toHaveText("Saving…");
       if (more) await page.keyboard.type(more);
-      await expect(status).toHaveText("Saving is taking too long; retrying", { timeout: 20_000 });
+      await expect(status).toHaveText("Saving is taking too long; retrying", { timeout: 10_000 });
       if (!landed) expect(readFileSync(vault(name), "utf8")).toBe("# Stuck\n");
       await expect.poll(() => readFileSync(vault(name), "utf8")).toBe(`# Stuck\nscale the deployment${more}`);
       await expect(status).toHaveText("Saved");
       expect(stall.saves()).toBe(more ? 3 : 2);
+      // Every save the server saw ran under the shortened timer, not the production one.
+      expect(await shortened()).toBeGreaterThanOrEqual(stall.saves());
       await expect(page.getByRole("button", { name: "Keep my version" })).toHaveCount(0);
     } finally {
       await stall?.release();

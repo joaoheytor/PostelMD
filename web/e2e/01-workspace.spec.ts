@@ -62,7 +62,7 @@ test("create a note, edit it, and the edit is on disk after a reload", async ({ 
   await text.press("ControlOrMeta+End");
   await text.pressSequentially("Saved by the browser.");
   await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
-  expect(readFileSync(join(env("PM_E2E_VAULT"), "hello.md"), "utf8")).toContain("Saved by the browser.");
+  await expect.poll(() => readFileSync(join(env("PM_E2E_VAULT"), "hello.md"), "utf8")).toContain("Saved by the browser.");
 
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Text of hello.md" })).toContainText("Saved by the browser.");
@@ -85,7 +85,7 @@ test("an edit made outside the editor is a conflict, not an overwrite", async ({
 
   await page.getByRole("button", { name: "Keep my version" }).click();
   await expect(page.getByRole("status", { name: "Save status" })).toHaveText("Saved");
-  expect(readFileSync(file, "utf8")).toContain("and in the browser");
+  await expect.poll(() => readFileSync(file, "utf8")).toContain("and in the browser");
 });
 
 test("rename the open note into a folder; it stays open at its new path", async ({ page }) => {

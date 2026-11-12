@@ -3,7 +3,7 @@ import type { DiagramReply, DiagramRequest } from "../diagram/protocol";
 import { Diagrams } from "./diagrams";
 
 // DOMPurify needs a DOM, which these tests don't have; the sanitizer has its own e2e test
-// (3-diagrams). The blob URL still goes through URL.createObjectURL, which the tests count.
+// (03-diagrams). The blob URL still goes through URL.createObjectURL, which the tests count.
 vi.mock("./svg", () => ({ svgBlobURL: (svg: string) => URL.createObjectURL(new Blob([svg])) }));
 
 /**

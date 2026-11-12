@@ -31,9 +31,12 @@ test("a YAML file with a byte order mark and CRLF lines is highlighted, and save
     await page.getByRole("button", { name: "deploy.yaml" }).click();
     const text = page.getByRole("textbox", { name: "Text of deploy.yaml" });
     await expect(text).toContainText("kind: Pod");
-    // The YAML mode loaded (lazily): its tokens are spans with a highlight class. The editor's
-    // inner structure has no role, so this one check reads it directly.
-    await expect.poll(() => text.evaluate((el) => el.querySelectorAll(".cm-line span[class]").length)).toBeGreaterThan(0);
+    // The YAML mode loaded (lazily): the key "kind" becomes its own token, in the key colour,
+    // not the text's. Highlighted tokens have no role or label (they are just styled text), so
+    // this finds the key by its text inside the role-located textbox and compares colours.
+    const key = text.getByText("kind", { exact: true });
+    await expect(key).toBeVisible();
+    await expect(key).not.toHaveCSS("color", await text.evaluate((el) => getComputedStyle(el).color));
 
     await typeAtEnd(page, "deploy.yaml", "metadata:");
     await page.keyboard.press("Enter");
@@ -192,13 +195,15 @@ test("only a Markdown note has a preview", async ({ page }) => {
     writeFileSync(vault("plan.md"), "# Plan\n");
     await login(page);
     await page.getByRole("button", { name: "plan.md" }).click();
-    await expect(page.getByRole("button", { name: "Preview" })).toBeVisible();
-    await page.getByRole("button", { name: "Preview" }).click();
+    // exact: 02-preview leaves a note named preview.md in the tree.
+    const preview = page.getByRole("button", { name: "Preview", exact: true });
+    await expect(preview).toBeVisible();
+    await preview.click();
     await expect(page.getByLabel("Preview of plan.md")).toBeVisible();
 
     await page.getByRole("button", { name: "compose.yml" }).click();
     await expect(page.getByRole("textbox", { name: "Text of compose.yml" })).toContainText("image: nginx");
-    await expect(page.getByRole("button", { name: "Preview" })).toHaveCount(0);
+    await expect(preview).toHaveCount(0);
     await expect(page.getByLabel("Preview of compose.yml")).toHaveCount(0);
   });
 });

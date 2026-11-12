@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { batchHTML, intact, keyAttr, newKey, type NodeLike } from "./blocks";
 
-// The DOM parsing itself has an e2e test (2-preview); these check what the preview decides
+// The DOM parsing itself has an e2e test (02-preview); these check what the preview decides
 // from the nodes a batch produced. There is no DOM here, so nodes are plain objects.
 
 function el(attrs: Record<string, string>, name = "DIV"): NodeLike {

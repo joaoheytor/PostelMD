@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, expect, login, noSeriousA11yViolations, test } from "./helpers";
 
-// Runs after 1-workspace.spec.ts, on the vault it set up.
+// Runs after 01-workspace.spec.ts, on the vault it set up.
 test.describe.configure({ mode: "serial" });
 
 test("the preview renders the note as you type, and stays on after a reload", async ({ page }) => {

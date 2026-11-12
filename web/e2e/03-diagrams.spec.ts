@@ -58,7 +58,9 @@ test("a hostile diagram stays inside the sandboxed renderer", async ({ page }) =
     ].join("\n"),
   );
   await expect(preview.getByRole("img", { name: "Diagram: flowchart" })).toBeVisible();
-  const frame = page.locator("iframe.pm-diagram-frame");
+  // The renderer frame is aria-hidden and an iframe has no ARIA role, so no role or label can
+  // reach it; its title is the one user-facing name it has.
+  const frame = page.getByTitle("Diagram renderer");
   await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
   // The frame's origin is opaque: the app can't read its document, so it can't read the app's.
   expect(await frame.evaluate((f: HTMLIFrameElement) => f.contentDocument)).toBeNull();
