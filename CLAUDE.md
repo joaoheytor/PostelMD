@@ -25,6 +25,7 @@ internal/
   audit/               security-relevant events: DB + external sink (rule 15)
   egress/              the single outbound HTTP client (rule 13)
   vault/ sync/ gitvault/ secrets/ index/ auth/ keys/ plugins/ config/ setup/
+  errattr/             log attributes for errors without the user text they quote (rule 15)
 web/
   src/core/            framework-free: doc store, save queue, sync engine, plugin host
   src/editor/          CodeMirror 6 setup and extensions
@@ -92,7 +93,7 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
     detections never stand in for authorization decisions (ADR-0010). Security-relevant
     actions go through the audit package, which writes to the DB **and** the external sink
     (the MVP has no DB: stdout only; ADR-0020). Log unexpected errors with `pathless`
-    (`internal/http/pathless.go`), never `err.Error()`: it quotes paths (CodeQL
+    (`internal/http/pathless.go`; below `http`, `errattr.Pathless`), never `err.Error()`: it quotes paths (CodeQL
     go/log-injection, #109).
 16. **Authorization per request:** check membership and role on every request and every SSE
     event delivery. Never cache roles in sessions (ADR-0018). In the MVP (one user), check the
