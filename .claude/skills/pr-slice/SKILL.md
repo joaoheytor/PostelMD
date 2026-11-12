@@ -39,7 +39,8 @@ without the maintainer's explicit go-ahead in the conversation.
 7. **Commit**, signed off, with a Conventional Commit subject:
    `git commit -s` and end the message with the trailer line
    `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-8. **Push and open the PR** (both are permission prompts for the maintainer):
+8. **Push and open the PR** (no prompts for a non-main branch; the guard hook still asks
+   for pushes to main, force pushes without a lease and any other remote):
    `git push -u origin <branch>`, then `gh pr create` with
    - a Conventional Commit title (`feat(editor): …`, `fix!: …`);
    - a body with **What** (the change and why), **Tests** (what they cover, and the

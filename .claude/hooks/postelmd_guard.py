@@ -9,16 +9,20 @@ Modes (first CLI argument):
   adr      Write/Edit: ask before changing the Decision section of an ADR that is Accepted
            on main (at the merge base of HEAD and origin/main, or at origin/main's tip; HEAD
            without origin/main). scripts/adr-immutable.sh is the enforced check (pre-commit, CI).
-  git      Bash: outward-facing commands (push, tags, releases, PRs, issues, repo
-           settings, mutating API calls) always get a human permission prompt ("ask");
-           enforce DCO sign-off + Conventional Commit subjects; forbid skipping hooks;
-           ask before shell writes to repository files (bash_writes.py).
+  git      Bash: enforce DCO sign-off + Conventional Commit subjects; forbid skipping hooks;
+           routine branch and PR work passes (pushes of a non-main branch to origin, PR and
+           issue create/edit/comment, a squash merge pinned to the reviewed head, run reruns;
+           outward.py); everything else outward-facing (pushes to main/master, force, tags,
+           releases, closing or reviewing PRs, repo settings, mutating API calls) gets a human
+           permission prompt ("ask"); ask before shell writes to repository files (bash_writes.py).
 
-These are guardrails for an agent, not a security boundary: CI is the hard gate.
+These are guardrails for an agent, not a security boundary: CI and branch protection are the
+hard gates.
 
 The hook reads the tool call as JSON on stdin and answers with a
-hookSpecificOutput JSON object (deny/ask) or exits 0 silently to allow.
-Only the Python standard library is used. Tests: postelmd_guard_test.py (make test-scripts).
+hookSpecificOutput JSON object (deny/ask) or exits 0 silently, leaving the decision to the
+permission rules in .claude/settings.json.
+Only the Python standard library is used. Tests: *_test.py here (make test-scripts).
 """
 import json
 import os
@@ -27,14 +31,8 @@ import subprocess
 import sys
 
 from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets
+from outward import CMD_START, GH, GIT, check as check_outward
 
-# A command position: start of the command, or after ; & | ( or a newline, optionally after
-# VAR=value assignments or sudo/env/command/xargs. Anchoring here keeps text inside
-# heredocs, strings and file contents ("git commit -s" in docs) from matching.
-CMD_START = r"(?:^|[;&|(]|\n)\s*(?:\w+=\S*\s+)*(?:(?:sudo|env|command|xargs)\s+)*"
-# `git` followed by global options (-C dir, -c k=v, --git-dir=..., --no-pager, ...)
-GIT = CMD_START + r"git(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-[pP]))*\s+"
-GH = CMD_START + r"gh\s+"
 CONVENTIONAL = r"(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S"
 
 SECRET_PATTERNS = [
@@ -201,31 +199,29 @@ def check_adr(tool_input):
                        "a dated Clarification may only add rationale, links or typo fixes.")
 
 
-def check_git(tool_input):
-    cmd = tool_input.get("command") or ""
-    if not re.search(r"\b(git|gh)\b", cmd):
-        return
+# Outward-facing commands that always need the maintainer. Pushes and `gh pr merge` are
+# judged by outward.py; PR/issue create, edit and comment, and `gh run rerun`, pass.
+GATED = [
+    (GIT + r"tag\b(?!\s+(-l|--list)\b)\s+\S", "creating/changing git tags"),
+    (GH + r"release\b", "GitHub releases"),
+    (GH + r"repo\s+(create|edit|delete|rename|archive|fork)\b", "creating or changing repositories"),
+    (GH + r"(secret|variable|ruleset|label|gist)\s+(?!list\b|view\b)\S", "repo secrets/variables/rulesets/labels or gists"),
+    (GH + r"pr\s+(close|review|reopen)\b", "closing, reopening or reviewing pull requests"),
+    (GH + r"issue\s+(reopen|delete|transfer)\b", "reopening, deleting or transferring issues"),
+    (GH + r"(pr\s+(create|ready|edit|comment|merge)|issue\s+(create|comment|edit|close)|run\s+rerun)"
+          r"\b[^;&|\n]*(\s-R|--repo\b)", "acting on another repository"),
+    (GH + r"(workflow\s+(run|enable|disable)|run\s+(cancel|delete))\b", "running or changing workflows"),
+    (GH + r"api\b[^;&|\n]*(-X\s*|--method[=\s]+)(POST|PUT|PATCH|DELETE)\b", "mutating GitHub API calls"),
+    (GH + r"api\b[^;&|\n]*(\s-[fF]\b|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
+]
+
+
+def check_commit(cmd):
     if re.search(GIT + r"(commit|push|merge|rebase|am|cherry-pick)\b[^;&|\n]*--no-verify", cmd) \
             or re.search(GIT + r"commit\b[^;&|\n]*\s-[a-zA-Z]*n[a-zA-Z]*\b", cmd) \
             or re.search(CMD_START + r"git\b[^;&|\n]*-c\s*core\.hooksPath", cmd):
         respond("deny", "BLOCKED: this skips or replaces the repository's git hooks "
                         "(--no-verify, commit -n, -c core.hooksPath). Fix the hook failure instead.")
-    gated = [
-        (GIT + r"push\b", "git push (publishes to the PUBLIC repository)"),
-        (GIT + r"tag\b(?!\s+(-l|--list)\b)\s+\S", "creating/changing git tags"),
-        (GH + r"release\b", "GitHub releases"),
-        (GH + r"repo\s+(create|edit|delete|rename|archive|fork)\b", "creating or changing repositories"),
-        (GH + r"(secret|variable|ruleset|label|gist)\s+(?!list\b|view\b)\S", "repo secrets/variables/rulesets/labels or gists"),
-        (GH + r"pr\s+(create|merge|close|ready|comment|review|edit|reopen)\b", "public pull request actions"),
-        (GH + r"issue\s+(create|close|comment|edit|reopen|delete|transfer)\b", "public issue actions"),
-        (GH + r"(workflow\s+(run|enable|disable)|run\s+(rerun|cancel|delete))\b", "running or changing workflows"),
-        (GH + r"api\b[^;&|\n]*(-X\s*|--method[=\s]+)(POST|PUT|PATCH|DELETE)\b", "mutating GitHub API calls"),
-        (GH + r"api\b[^;&|\n]*(\s-[fF]\b|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
-    ]
-    for pattern, label in gated:
-        if re.search(pattern, cmd):
-            respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
-                           "maintainer asked for exactly this in the conversation.")
     if re.search(GIT + r"commit\b", cmd) and not re.search(r"--amend\b.*--no-edit", cmd):
         if not re.search(r"(\s-s\b|\s--signoff\b|\s-[a-zA-Z]*s[a-zA-Z]*\b)", cmd):
             respond("deny", "BLOCKED: commits need a DCO sign-off. Add -s (git commit -s ...).")
@@ -233,6 +229,21 @@ def check_git(tool_input):
             respond("deny", "BLOCKED: the commit subject must be a Conventional Commit, e.g. "
                             "'docs(adr): clarify save protocol' (types: feat fix perf refactor docs "
                             "test build ci chore revert; '!' for breaking).")
+
+
+def check_git(tool_input, cwd):
+    cmd = tool_input.get("command") or ""
+    if not re.search(r"\b(git|gh)\b", cmd):
+        return
+    check_commit(cmd)  # denials first: `git commit -m x && git push` is still a bad commit
+    for pattern, label in GATED:
+        if re.search(pattern, cmd):
+            respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
+                           "maintainer asked for exactly this in the conversation.")
+    reason = check_outward(cmd, cwd, git_out)
+    if reason:
+        respond("ask", f"OUTWARD-FACING: {reason}. Branch pushes to origin and pinned squash "
+                       "merges pass; this needs the maintainer's go-ahead in the conversation.")
 
 
 def check_bash_writes(tool_input, cwd):
@@ -251,8 +262,9 @@ def main():
         return  # never block on a malformed payload
     tool_input = payload.get("tool_input") or {}
     if mode == "git":
-        check_git(tool_input)  # deny/ask on git and gh commands wins over the write check
-        check_bash_writes(tool_input, payload.get("cwd") or os.getcwd())
+        cwd = payload.get("cwd") or os.getcwd()
+        check_git(tool_input, cwd)  # deny/ask on git and gh commands wins over the write check
+        check_bash_writes(tool_input, cwd)
         return
     {"secrets": check_secrets, "public": check_public, "adr": check_adr}.get(
         mode, lambda _: None)(tool_input)
