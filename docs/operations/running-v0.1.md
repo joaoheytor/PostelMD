@@ -7,19 +7,18 @@ assumes the README's setup: the container is called `postelmd`, its data directo
 [Paths after a restore](#paths-after-a-restore)), and it runs as your user
 (`--user "$(id -u):$(id -g)"`).
 
-Set `IMAGE` once to the image you run, and use it below. Until the first release candidate,
-that is the candidate from `main` (signed, not for production):
+Set `IMAGE` once to the image you run, and use it below. Until the v0.1.0 release, that is
+the newest release candidate (for testing, not for production):
 
 ```sh
-IMAGE=ghcr.io/joaoheytor/postelmd:main
+IMAGE=ghcr.io/joaoheytor/postelmd:0.1.0-rc.1
 ```
 
-A release candidate, once published, is `ghcr.io/joaoheytor/postelmd:0.1.0-rc.1`; after the
-v0.1.0 release, use `docker.io/joaoheytor/postelmd:0.1`. (The blocks in this runbook have no
-trailing comments: zsh, by default, would take them as arguments.)
+After the v0.1.0 release, use `docker.io/joaoheytor/postelmd:0.1`. The candidate built from
+every merge, `ghcr.io/joaoheytor/postelmd:main`, moves with each one. (The blocks in this
+runbook have no trailing comments: zsh, by default, would take them as arguments.)
 
-`:main` moves with every merge. Note the digest of the image the container runs, so you can
-go back to it:
+Note the digest of the image the container runs, so you can go back to it:
 
 ```sh
 docker image inspect -f '{{index .RepoDigests 0}}' "$(docker inspect -f '{{.Image}}' postelmd)"

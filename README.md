@@ -41,7 +41,7 @@ mkdir -p ~/postelmd
 docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
   --log-opt max-size=10m --log-opt max-file=3 \
   -p 127.0.0.1:8080:8080 --user "$(id -u):$(id -g)" -v ~/postelmd:/data \
-  ghcr.io/joaoheytor/postelmd:main
+  ghcr.io/joaoheytor/postelmd:0.1.0-rc.1
 docker logs postelmd
 ```
 
@@ -49,10 +49,10 @@ Open http://localhost:8080/setup (the log prints this address; with another `-p`
 use yours) and paste the token from `docker logs postelmd`. The token expires after 30
 minutes; `docker restart postelmd` prints a new one.
 
-- **Which image.** Until v0.1.0 is released, `ghcr.io/joaoheytor/postelmd:main` is the
-  signed candidate built from `main`, for testers until the first release candidate (never
-  for production), and release candidates are
-  `ghcr.io/joaoheytor/postelmd:0.1.0-rc.N`. After the release, use
+- **Which image.** Until v0.1.0 is released, use the newest release candidate,
+  `ghcr.io/joaoheytor/postelmd:0.1.0-rc.N` (for testing, never for production).
+  `ghcr.io/joaoheytor/postelmd:main` is the signed candidate built from every merge to
+  `main`, and moves with each one. After the release, use
   `docker.io/joaoheytor/postelmd:0.1`. Tags: [ci-cd §4](docs/ci-cd.md#4-images-and-tags);
   verifying signatures: [verify-images](docs/operations/verify-images.md). Or build your own
   with `make image` (tagged `postelmd:dev`).
