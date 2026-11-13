@@ -45,13 +45,13 @@ const (
 
 // ErrDamaged: the file isn't a database, or quick_check found a problem. Startup refuses and
 // changes nothing. Only those causes give it: a canceled context, a busy lock, an I/O or
-// permission error are plain errors. ADR-0030's fix is `postelmd db rebuild`, which arrives
-// with data format 2; at format 1 the database holds only the boot UUID, so the fix is to
-// move its files aside, and the next start creates a new one.
+// permission error are plain errors. Until `postelmd db rebuild` arrives with data format 2,
+// the fix is to move the files aside: at format 1 the database holds only the boot UUID, and
+// the next start creates a new one (ADR-0034).
 var ErrDamaged = errors.New("sql: the database is damaged or isn't a database. With the server " +
-	"stopped, move app.db, app.db-wal and app.db-shm together out of the state folder " +
-	"(.postelmd), for example into .postelmd/damaged-<date>/, and never delete them; then start " +
-	"again. At this data format the database holds only the boot UUID, so nothing is lost (ADR-0030)")
+	"stopped, move app.db, app.db-wal and app.db-shm together into a new folder such as " +
+	".postelmd/damaged-<date>/, and never delete them; then start again. At this data format " +
+	"the database holds only the boot UUID, so nothing is lost (ADR-0030, ADR-0034)")
 
 // damaged wraps err with ErrDamaged when SQLite says the file is corrupt or not a database.
 func damaged(err error) error {

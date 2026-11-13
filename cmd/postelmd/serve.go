@@ -109,8 +109,9 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 // second writer. A normal stop is graceful (shutdownDeadline). A split brain closes the
 // listener and every connection at once, so no new request starts, and leaves the database
 // unclosed (no WAL checkpoint). A handler already running can still finish its write before
-// the process exits: for the data that is the same as a crash at that point, which the save
-// protocol and the intents' recovery (ADR-0003, ADR-0033) already cover.
+// the process exits: for the data that is the same as a crash at that point. Today the v0.1
+// save protocol covers it (each write is a temp file renamed into place, ADR-0003); with
+// v0.2's intents, their recovery will too (ADR-0033).
 func serveUntilStopped(ctx context.Context, srv *http.Server, errs chan error, in *instance, boot string, log *slog.Logger) error {
 	watch, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()

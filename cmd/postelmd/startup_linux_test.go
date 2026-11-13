@@ -38,10 +38,14 @@ func TestServeDamagedDatabaseNamesAWorkingFix(t *testing.T) {
 			t.Errorf("the refusal names `postelmd %s`, which this build doesn't have: %v", m[1], err)
 		}
 	}
-	for _, want := range []string{"app.db-wal", "app.db-shm", "never delete"} {
+	// The same fix as the runbook's: into a new folder inside .postelmd, never deleted.
+	for _, want := range []string{"app.db-wal", "app.db-shm", "never delete", "into a new folder", ".postelmd/damaged-<date>/"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal doesn't say %q: %v", want, err)
 		}
+	}
+	if strings.Contains(err.Error(), "out of") {
+		t.Errorf("the refusal says to move the files out of .postelmd, unlike its example: %v", err)
 	}
 	if b, rerr := os.ReadFile(filepath.Join(state, "app.db")); rerr != nil || !bytes.Equal(b, junk) {
 		t.Fatalf("the damaged file was changed: %v", rerr)

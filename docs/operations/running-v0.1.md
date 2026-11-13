@@ -381,8 +381,9 @@ creates `.postelmd/app.db`, the database, and migrates it; later starts check it
 server and take the [backup](#backup) before you pull the new `:main`. The data format stays
 `1`, so rolling back to rc.1 is still the digest swap below: rc.1 ignores `app.db`. If the
 start refuses because the database is damaged, stop the server and move `app.db`,
-`app.db-wal` and `app.db-shm` together out of `"$data"/.postelmd` (never delete them); at
-format 1 they hold only the start's boot ID, and the next start creates a new database.
+`app.db-wal` and `app.db-shm` together into a new folder such as
+`"$data"/.postelmd/damaged-<date>/` (never delete them); at format 1 they hold only the
+start's boot ID, and the next start creates a new database (ADR-0034).
 
 If PostelMD says `format` is **damaged** (anything but a number on one line), back up
 the data folder first. If only v0.1 ever used it, delete `"$data"/.postelmd/format` and start
@@ -535,24 +536,47 @@ Symptom: the server refuses to start with `/data/.postelmd is on a filesystem th
 POSTELMD_ALLOW_NETWORK_FS accepts`. The database can't live on NFS, SMB or another network
 filesystem (ADR-0030); the notes can, with that setting. Move only `.postelmd` to a local
 disk (ext4, XFS, Btrfs, ZFS), owned by the user the server runs as. `reset-password`
-refuses the same way once `app.db` exists. With `$data` from
-[Where your data is](#where-your-data-is):
+refuses the same way once `app.db` exists. Every copy below checks that the source holds
+`auth.json` first: copying from the wrong place would give an empty state folder, and the
+next start would offer setup to whoever opens the page first.
+
+Stop the server first: `docker stop postelmd`. Then pick the line for how `/data` is
+mounted.
+
+**`/data` is a folder on the host** (a bind mount; `$data` from
+[Where your data is](#where-your-data-is)). Run it as the files' owner, which is you if the
+server runs with `--user "$(id -u):$(id -g)"`; with NFS `root_squash` (the default) `sudo`
+can't read them:
 
 ```sh
-docker stop postelmd
-# Either a folder of yours on a local disk, for a server run with --user "$(id -u):$(id -g)":
-mkdir -m 700 ~/postelmd-state && cp -a "$data/.postelmd/." ~/postelmd-state/
-# or a named volume, owned by the image's user (65532) like a fresh /data:
-docker volume create postelmd-state
-docker run --rm -v "$data/.postelmd:/from:ro" -v postelmd-state:/to busybox:1.37 \
-  sh -c 'cp -a /from/. /to/ && chown -R 65532:65532 /to && chmod 700 /to'
+[ -f "$data/.postelmd/auth.json" ] && mkdir -m 700 ~/postelmd-state && cp -a "$data/.postelmd/." ~/postelmd-state/
 ```
 
-Don't skip the `chown`: a fresh named volume is owned by root, and the image's user couldn't
-write it. Then recreate the container with the flags you started with, plus
+**`/data` is a named volume** (Docker Desktop, or a volume on NFS). `$data` from
+`docker inspect` is useless here; copy from the volume by name, into a new local volume owned
+by the image's user. The first container reads as the files' owner (root can't read them
+under `root_squash`), the second writes as root and hands the result to `65532`:
+
+```sh
+vol=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' postelmd)
+owner=$(docker run --rm -v "$vol:/from:ro" busybox:1.37 stat -c %u:%g /from)
+docker volume create postelmd-state
+docker run --rm --user "$owner" -v "$vol:/from:ro" busybox:1.37 \
+  sh -c '[ -f /from/.postelmd/auth.json ] && tar -C /from/.postelmd -cf - .' |
+  docker run --rm -i -v postelmd-state:/to busybox:1.37 \
+  sh -c 'tar -C /to -xpf - && [ -f /to/auth.json ] && chown -R 65532:65532 /to && chmod 700 /to'
+```
+
+If `vol` is empty, `/data` is a bind mount: use the line above instead. If the last command
+fails, nothing was copied: don't start the server on `postelmd-state`. Don't skip the
+`chown`: a fresh named volume is owned by root, and the image's user couldn't write it.
+
+Then recreate the container with the flags you started with, plus
 `-v ~/postelmd-state:/data/.postelmd` (or `-v postelmd-state:/data/.postelmd`). The old
 `.postelmd` stays under the mount, unchanged: remove it once the server runs and a backup of
-the new folder exists.
+the new folder exists. The instance lock now lives on the local disk, so it no longer stops
+a PostelMD on another machine from opening the same shared notes folder: run only one
+PostelMD against it (CLAUDE.md rule 12, ADR-0014).
 
 ## Commit regularly
 

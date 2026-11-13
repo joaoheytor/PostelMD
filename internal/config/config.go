@@ -37,6 +37,10 @@ type file struct {
 	AllowedHosts       []string `yaml:"allowed_hosts"`
 }
 
+// ErrPrinted wraps a flag parsing error (flag.ErrHelp included) that the flag package has
+// already written to stderr, with the usage: the caller doesn't print it again.
+var ErrPrinted = errors.New("config: the flag package printed this error")
+
 // Load reads flags from args, the environment, then the data directory's config.yaml.
 func Load(name string, args []string, stderr io.Writer) (Config, error) {
 	return load(name, args, os.Getenv, stderr)
@@ -52,7 +56,7 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	fl.StringVar(&flagData, "data", c.DataDir, "data directory (POSTELMD_DATA_DIR)")
 	fl.StringVar(&flagListen, "listen", c.Listen, "listen address (POSTELMD_LISTEN, config.yaml listen)")
 	if err := fl.Parse(args); err != nil {
-		return c, err
+		return c, fmt.Errorf("%w: %w", ErrPrinted, err)
 	}
 	if fl.NArg() > 0 {
 		return c, fmt.Errorf("config: unexpected argument %q", fl.Arg(0))

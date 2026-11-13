@@ -74,7 +74,7 @@ func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*
 	}
 	warnLooseModes(log, stateDir, path)
 	if err := checkForeign(ctx, path); err != nil {
-		log.Error("database refused before opening", "reason", refusal(err), "damaged", errors.Is(err, ErrDamaged),
+		log.Log(ctx, failLevel(err), "database refused before opening", "reason", refusal(err), "damaged", errors.Is(err, ErrDamaged),
 			errattr.Pathless(err))
 		return nil, err
 	}
@@ -106,14 +106,14 @@ func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*
 func (db *DB) start(ctx context.Context, log *slog.Logger, fsys fs.FS) error {
 	t := time.Now()
 	if err := quickCheck(ctx, db.w); err != nil {
-		log.Error("database check failed", "check", "quick_check", "damaged", errors.Is(err, ErrDamaged),
+		log.Log(ctx, failLevel(err), "database check failed", "check", "quick_check", "damaged", errors.Is(err, ErrDamaged),
 			"duration_ms", time.Since(t).Milliseconds(), errattr.Pathless(err))
 		return err
 	}
 	log.Info("database checked", "check", "quick_check", "result", "ok", "duration_ms", time.Since(t).Milliseconds())
 	m, err := migrate(ctx, db, fsys)
 	if err != nil {
-		log.Error("database migration refused or failed", "from", m.from, "reason", refusal(err), errattr.Pathless(err))
+		log.Log(ctx, failLevel(err), "database migration refused or failed", "from", m.from, "reason", refusal(err), errattr.Pathless(err))
 		return err
 	}
 	if m.to != m.from || m.snapshot != "" {
@@ -121,6 +121,15 @@ func (db *DB) start(ctx context.Context, log *slog.Logger, fsys fs.FS) error {
 		log.Info("database migrated", "from", m.from, "to", m.to, "duration_ms", m.took.Milliseconds(), "snapshot", m.snapshot)
 	}
 	return nil
+}
+
+// failLevel is the level of a failed open step's record: INFO when a clean stop canceled
+// it (the step stopped, nothing is wrong), ERROR otherwise.
+func failLevel(err error) slog.Level {
+	if errors.Is(err, context.Canceled) {
+		return slog.LevelInfo
+	}
+	return slog.LevelError
 }
 
 // Close closes the read pool, checkpoints the WAL into the database (TRUNCATE, ADR-0030's

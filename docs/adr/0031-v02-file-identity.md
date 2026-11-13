@@ -129,7 +129,7 @@ check the ID's syntax before any lookup, check membership before choosing betwee
   is safe because no client holds an ID. `app.db` is wired into `serve` before it, at data
   format 1 (#175: the boot UUID, listen-early `/readyz`; the snapshot before migrating came
   with #173); this slice brings format 2, with `db rebuild` and `vault claim` (ADR-0030,
-  Consequences, follow-up 2, and its clarification of 2026-11-13).
+  Consequences, follow-up 2, in the parts [ADR-0034](0034-app-db-before-format-2.md) sets).
 
 ## Alternatives considered
 | Option | Why not |

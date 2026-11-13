@@ -102,7 +102,14 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   soon as it holds the data directory, and `/readyz` and
   every other page with 503 and `Retry-After` until it has finished starting.
 - A relative data directory (`--data`, `POSTELMD_DATA_DIR`) is resolved once, at start, to
-  an absolute path.
+  an absolute path. An empty `--data` is refused, and every configuration error (an empty
+  `--data`, a setting that isn't a boolean, an unreadable `config.yaml`) now says what is
+  wrong instead of exiting silently.
+- A damaged database stops the start, changing nothing, and says how to fix it: with the
+  server stopped, move `app.db`, `app.db-wal` and `app.db-shm` together into a new folder
+  such as `.postelmd/damaged-<date>/` (never delete them).
+- A stop (`docker stop`, Ctrl-C) while the server is still starting exits cleanly, with code
+  0, instead of reporting an error.
 - **Breaking:** `POSTELMD_ALLOW_NETWORK_FS` no longer covers `/data/.postelmd`: a server
   whose state folder is on NFS, SMB or another filesystem only that setting accepts refuses
   to start, because SQLite can't run there safely, and once the database exists
