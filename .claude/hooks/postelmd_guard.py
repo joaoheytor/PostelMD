@@ -17,7 +17,9 @@ Modes (first CLI argument):
            text is scanned like Write/Edit content; options that make allowed commands run
            other programs ask (codeexec.py); so do shell writes to repository files
            (bash_writes.py). Leading literal assignments (`S=/tmp/x; git -C $S log`) are
-           substituted first and the result judged as if typed (shvars.py).
+           substituted first and the result judged as if typed (shvars.py). A command that
+           mentions git, go, gh, npm, npx, make or scripts/ asks when it can't be tokenized
+           or shscan.py flags it, and when a wrapper (sudo, xargs, nice -n, ...) runs one.
 
 These are guardrails for an agent, not a security boundary: CI and branch protection are the
 hard gates.
@@ -33,11 +35,13 @@ import re
 import subprocess
 import sys
 
-from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets
+from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets, tokens
 from commitmsg import CONVENTIONAL, SUBJECT, check as check_message
 from content import has_secret, public_reasons
 from gitdir import check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
+from shparse import segments, wrapped
+from shscan import scan
 from shvars import normalize
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
@@ -178,6 +182,28 @@ def check_commit(cmd):
             respond("deny", SUBJECT)
 
 
+TOOL_WORD = re.compile(r"\b(git|go|gh|npm|npx|make)\b|scripts/")
+SCAN_FLAGS = {"ansi": "ANSI-C quoting ($'...')", "bad-heredoc": "a heredoc delimiter other "
+              "than WORD, 'WORD', \"WORD\" or \\WORD", "continued": "a heredoc line ending in "
+              "a backslash", "unbalanced": "an unbalanced quote (a quote in a # comment?)"}
+
+
+def unparsed(cmd):
+    """Why the command can't be judged, when it mentions a tool the guard checks: the
+    tokenizer gave up (every token-based check would be off) or shscan flagged it."""
+    if not TOOL_WORD.search(cmd):
+        return None
+    flags = sorted(scan(cmd).flags)
+    if flags:
+        return SCAN_FLAGS[flags[0]]
+    return None if tokens(cmd) or not cmd.strip() else "the command can't be tokenized"
+
+
+def wrapper(cmd):
+    name = wrapped(segments(cmd))
+    return f"{name} runs another command with options the guard doesn't follow" if name else None
+
+
 def check_git(tool_input, cwd):
     cmd = normalize(tool_input.get("command") or "")  # `S=lit; ... $S`: judged as typed
     check_commit(cmd)  # denials first: `git commit -m x && git push` is still a bad commit
@@ -188,6 +214,10 @@ def check_git(tool_input, cwd):
         if re.search(pattern, cmd):
             respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
                            "maintainer asked for exactly this in the conversation.")
+    why = unparsed(cmd) or wrapper(cmd)
+    if why:
+        respond("ask", f"CAN'T PARSE: {why}. The guard's checks can't see this command as "
+                       "bash will run it.")
     why = check_gitdir(cmd, cwd, git_out)
     if why:
         respond("ask", f"FOREIGN REPOSITORY: {why}.")

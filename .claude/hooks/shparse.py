@@ -6,7 +6,8 @@ Fail closed: callers pass an outward command only when strict() returns its word
 import os
 import re
 
-from bash_writes import PREFIXES, REDIRECTS, is_punct, strip_heredocs, tokens
+from bash_writes import REDIRECTS, is_punct, tokens
+from shscan import blanked, scan, stripped
 
 UNKNOWN = object()  # a directory the parser can't follow
 GIT_GLOBAL_OK = {"--no-pager"}
@@ -32,63 +33,67 @@ def segments(cmd):
     return [w for w in out if w]
 
 
-# Trailing redirects an outward command may carry, as tokens(): 2>&1 and >/dev/null.
-OUTPUT_REDIRECTS = (["2", ">&", "1"], [">", "/dev/null"])
+# The only redirects an outward command may carry, exactly as typed (unquoted, a space
+# before, nothing attached): ` 2>&1` and ` >/dev/null`. `2>/dev/null` asks: shlex splits it
+# into 2 > /dev/null, and dropping the redirect would leave `2` as an argument.
+OUTPUT_REDIRECT = re.compile(r"(?<=[ \t])(2>&1|>/dev/null)(?=[ \t|]|$)")
 NUM = r"\d+"
-FILTER_ARGS = {  # (flags, flags whose value is the next word or the rest of the flag, values)
-    "tail": (r"-[qv]|-\d+|--(lines|bytes)=\+?\d+", "nc", r"\+?\d+"),
-    "head": (r"-[qv]|-\d+|--(lines|bytes)=\d+", "nc", NUM),
-    "wc": (r"-[lcwmL]+", "", ""),
-    "cat": (r"-[nbsAvET]+", "", ""),
-    "sort": (r"-[bdfghinMRrsuVz]+", "kt", r"[\w.,:;]+"),
-    "uniq": (r"-[cdDiuz]+", "fsw", NUM),
-    "grep": (r"-[EFGivnclLqshHwxUz]+|--color(=\w+)?|--line-buffered|--", "ABCme", r"[^\n]*"),
+FILTER_ARGS = {  # (plain flags, {flag letter: its value, next word or attached})
+    "tail": (r"-[qv]|-\d+|--(lines|bytes)=\+?\d+", {"n": r"\+?\d+", "c": r"\+?\d+"}),
+    "head": (r"-[qv]|-\d+|--(lines|bytes)=\d+", {"n": NUM, "c": NUM}),
+    "wc": (r"-[lcwmL]+", {}),
+    "cat": (r"-[nbsAvET]+", {}),
+    "sort": (r"-[bdfghinMRrsuVz]+", {"k": r"[\w.,]+", "t": r"[^\w\s]"}),
+    "uniq": (r"-[cdDiuz]+", {"f": NUM, "s": NUM, "w": NUM}),
+    "grep": (r"-[EFGivnclLqshHwxUz]+|--color(=\w+)?|--line-buffered",
+             {"A": NUM, "B": NUM, "C": NUM, "m": NUM, "e": r"[^\n]*"}),
 }
 
 
 def filter_ok(words):
-    """True when words are tail/head/grep/wc/cat/sort/uniq with plain flags, numbers or (grep
-    only) one pattern: no file names (uniq and sort -o write one), no -O, no --long options
-    that run programs (sort --compress-program)."""
+    """True when words are tail/head/grep/wc/cat/sort/uniq with plain flags and option
+    values; no positional arguments (a file to read, or for uniq one to write) except grep's
+    one pattern when there is no -e. No -O, -f, -o or --long options that run programs."""
     if not words or words[0] not in FILTER_ARGS:
         return False
-    flags, valued, value = FILTER_ARGS[words[0]]
-    patterns, i = 0, 1
+    flags, valued = FILTER_ARGS[words[0]]
+    pos, has_e, i = [], False, 1
     while i < len(words):
         a = words[i]
-        if valued and re.fullmatch(f"-[{valued}]", a):
-            if i + 1 == len(words) or not re.fullmatch(value, words[i + 1]):
+        if len(a) >= 2 and a[0] == "-" and a[1] in valued:
+            val = a[2:] if len(a) > 2 else (words[i + 1] if i + 1 < len(words) else None)
+            i += len(a) == 2
+            if val is None or not re.fullmatch(valued[a[1]], val):
                 return False
-            i += 1
-        elif valued and re.fullmatch(f"-[{valued}]", a[:2]) and re.fullmatch(value, a[2:]):
-            pass
-        elif not re.fullmatch(flags, a) and (words[0] != "grep" or a.startswith("-")):
-            if not re.fullmatch(NUM, a) or words[0] not in ("tail", "head"):
+            has_e |= a[1] == "e"
+        elif not re.fullmatch(flags, a):
+            if a.startswith("-"):
                 return False
-        elif words[0] == "grep" and not a.startswith("-"):
-            patterns += 1
+            pos.append(a)
         i += 1
-    return patterns <= 1
+    return not pos or (words[0] == "grep" and len(pos) == 1 and not has_e)
 
 
 def strict(cmd):
     """The outward command's words when cmd is one simple command, optionally followed by
-    2>&1, >/dev/null and pipes into filter_ok() filters (item: trailing output filters).
-    Otherwise None: no ; && || ( ) other redirects or heredocs, and no $ or ` anywhere."""
-    toks = tokens(cmd)
-    if not toks or any("$" in t or "`" in t for t in toks) \
-            or re.search(r"(^|\s)\d+\s+[<>]", strip_heredocs(cmd)):  # `5 >x`: an argument or an fd?
+    ` 2>&1`, ` >/dev/null` and pipes into filter_ok() filters. Otherwise None: no ; && ||
+    ( ) heredocs or other redirects, no $ or ` anywhere, nothing shscan flags."""
+    s = scan(cmd)
+    if s.flags or s.starts:
+        return None
+    raw, text = stripped(s), blanked(s)
+    for m in reversed(list(OUTPUT_REDIRECT.finditer(text))):  # cut from the text as typed
+        raw, text = (t[:m.start()] + " " * len(m.group(0)) + t[m.end():] for t in (raw, text))
+    if re.search(r"[<>]", text):
+        return None
+    toks = tokens(raw)
+    if not toks or any("$" in t or "`" in t for t in toks):
         return None
     parts, part = [], []
     for t in toks + ["|"]:
         if t != "|":
             part.append(t)
             continue
-        cut = True
-        while cut:
-            cut = next((len(r) for r in OUTPUT_REDIRECTS
-                        if len(part) > len(r) and part[-len(r):] == r), 0)
-            part = part[:len(part) - cut]
         if not part or any(is_punct(w) for w in part):
             return None
         parts.append(part)
@@ -98,18 +103,47 @@ def strict(cmd):
     return parts[0]
 
 
+# Commands that run their arguments as a command. bare() drops the ones it can follow
+# exactly (no options; timeout with one duration); wrapped() finds the rest.
+STRIP = {"nice", "nohup", "time", "command", "builtin", "exec", "env", "coproc"}
+WRAPPERS = STRIP | {"timeout", "sudo", "doas", "xargs", "watch", "stdbuf", "ionice", "chrt",
+                    "taskset", "setsid", "flock", "unbuffer", "script", "strace", "ltrace",
+                    "nsenter", "chroot", "busybox", "parallel"}
+TOOLS = {"git", "go", "gh", "npm", "npx", "make"}
+
+
 def bare(words):
-    """words without leading VAR=value assignments, sudo/env/xargs/... prefixes and shell
-    keywords (`for d in x; do git -C $d status; done` runs git after `do`)."""
-    while words and (words[0] in PREFIXES or words[0] in KEYWORDS or re.match(r"\w+=", words[0])):
-        words = words[1:]
+    """words without leading VAR=value assignments, shell keywords (`for d in x; do git -C
+    $d status; done` runs git after `do`) and STRIP wrappers without options."""
+    while words:
+        nxt = words[1] if len(words) > 1 else ""
+        if words[0] in KEYWORDS or re.match(r"\w+=", words[0]):
+            words = words[1:]
+        elif words[0] in STRIP and nxt and not nxt.startswith("-"):
+            words = words[1:]
+        elif words[0] == "timeout" and re.fullmatch(r"\d+(\.\d+)?[smhd]?", nxt) \
+                and len(words) > 2 and not words[2].startswith("-"):
+            words = words[2:]
+        else:
+            return words
     return words
 
 
+def wrapped(segs):
+    """The wrapper bare() couldn't drop that runs git, go, gh, npm, npx, make or a script."""
+    for words in segs:
+        words = bare(words)
+        if words and os.path.basename(words[0]) in WRAPPERS and any(
+                os.path.basename(w) in TOOLS or re.match(r"(\./)?scripts/", w) for w in words[1:]):
+            return words[0]
+    return None
+
+
 def move(cwd, target):
+    """The directory cd or -C target leads to, symlinks resolved (L/.. may leave the tree)."""
     if cwd is UNKNOWN or not target or "$" in target or "`" in target or target == "-":
         return UNKNOWN
-    return os.path.normpath(os.path.join(cwd, os.path.expanduser(target)))
+    return os.path.realpath(os.path.join(cwd, os.path.expanduser(target)))
 
 
 def git_parts(words, cwd):

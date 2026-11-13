@@ -17,12 +17,17 @@ HOME = "/" + "home" + "/someone/notes.md"
 API = "repos/joaoheytor/PostelMD"
 
 
-class Relaxations(unittest.TestCase):
+class Fixture(unittest.TestCase):
+    """The repository and files the relaxation tests judge commands in (no tests here).
+    A local branch named `2` makes a dropped fd number look like a real refspec; {r}/L is a
+    symlink into the foreign tree {f}/wt."""
+
     @classmethod
     def setUpClass(cls):
         cls.repo = new_repo()
         git(cls.repo, "commit", "-q", "--allow-empty", "-s", "-m", "chore: init")
         git(cls.repo, "remote", "add", "origin", "https://example.com/postelmd.git")
+        git(cls.repo, "branch", "2")
         git(cls.repo, "switch", "-q", "-c", "feature")
         git(cls.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
         os.makedirs(os.path.join(cls.repo, "sub"))
@@ -31,8 +36,11 @@ class Relaxations(unittest.TestCase):
         git(cls.repo, "worktree", "add", "-q", "--detach", cls.wt)
         git(cls.files, "init", "-q", "--separate-git-dir", os.path.join(cls.files, "gd"),
             os.path.join(cls.files, "wt"))
-        with open(os.path.join(cls.files, "clean.md"), "w", encoding="utf-8") as fh:
-            fh.write("## What\nA fix.\n")
+        os.makedirs(os.path.join(cls.files, "wt", "inner"))
+        os.symlink(os.path.join(cls.files, "wt", "inner"), os.path.join(cls.repo, "L"))
+        for name, text in (("clean.md", "## What\nA fix.\n"), ("secret.md", f"chore: x\n\n{KEY}\n")):
+            with open(os.path.join(cls.files, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
 
     @classmethod
     def tearDownClass(cls):
@@ -50,6 +58,8 @@ class Relaxations(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.decide(command), want)
 
+
+class Relaxations(Fixture):
     def test_1_read_only_gh_api(self):
         self.assert_cases([
             "gh api {api}/pulls/5/comments --paginate --jq '.[].body'",
@@ -169,7 +179,7 @@ class Relaxations(unittest.TestCase):
             "git fetch -q origin pull/122/head:refs/remotes/review/pr122",
             "git fetch -q origin +pull/122/head:refs/remotes/review/pr122",
             "git fetch origin +pull/98/head:refs/scratch/pr98",
-            "git fetch origin pull/5/head:refs/heads/review-5",
+            "git fetch origin pull/5/head:pr5",
             "git fetch origin pull/116/head:pr116 2>&1 | tail -2; git log --oneline -3 pr116",
         ], None)
         self.assert_cases([

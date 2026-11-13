@@ -10,7 +10,8 @@ looking content asks.
   api    only GET on this repository: one endpoint under repos/joaoheytor/PostelMD/ (or
          repos/{owner}/{repo}/), not graphql; output flags (-q/--jq, --paginate, --cache,
          -i, ...) and -X/--method GET only; no -f/-F/--field/--raw-field, --input, -H or
-         --hostname. .claude/settings.json allows `gh api repos/joaoheytor/PostelMD/...` so
+         --hostname; a --jq/--template value only from plain characters, without env,
+         input, getpath, $, @ and the like (JQ_BANNED: they print the environment). .claude/settings.json allows `gh api repos/joaoheytor/PostelMD/...` so
          the native prompt doesn't fire; this check still asks for anything else.
 """
 import os
@@ -29,6 +30,13 @@ TEXT_BOOLS = {"--fill", "--fill-first", "--fill-verbose", "-d", "--draft", "--dr
               "--no-maintainer-edit", "--edit-last"}
 API_BOOLS = {"--paginate", "--slurp", "-i", "--include", "--silent", "--verbose"}
 API_VALUES = {"--jq", "-q", "--template", "-t", "--cache"}
+# jq and Go templates can print the environment (`env`, `$ENV`) and read more input: only
+# filters over the response, from plain characters, with none of these words.
+JQ_CHARS = re.compile(r"[\w .\[\]|,:\"(){}=<>!?+*/%-]*")
+JQ_BANNED = re.compile(r"\b(env|input|inputs|input_filename|input_line_number|getpath|paths"
+                       r"|leaf_paths|debug|stderr|halt|halt_error|import|include|modulemeta"
+                       r"|get_search_list|get_prog_origin|get_jq_origin|builtins|until|while"
+                       r"|repeat|range)\b|\$|@")
 # This repository only ({owner}/{repo} is filled in from the current directory's remote):
 # no .., //, %-escapes, # or full URLs that could reach another repository or host.
 API_ENDPOINT = re.compile(r"/?repos/(joaoheytor/PostelMD|\{owner\}/\{repo\})"
@@ -128,6 +136,9 @@ def check_api(args):
     if why:
         return why
     found, pos = parsed
+    for flag in ("--jq", "-q", "--template", "-t"):
+        if any(not JQ_CHARS.fullmatch(v) or JQ_BANNED.search(v) for v in found.get(flag, [])):
+            return f"gh api {flag} that may read the environment or other input (env, input, ...)"
     if any(m != "GET" for m in found.get("-X", []) + found.get("--method", [])):
         return "gh api with a method other than GET"
     if len(pos) != 1:

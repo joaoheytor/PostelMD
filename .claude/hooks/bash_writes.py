@@ -11,13 +11,14 @@ unexpanded variable can't be judged before the command runs.
 It asks; it doesn't block, and it is a guardrail, not a boundary. It does NOT catch: cp, mv,
 install, ln, rsync, dd of=, truncate, touch, git apply/checkout/restore, patch, editors,
 `python -c`/`node -e`/`awk` writing files, `bash -c "… > f"` and `eval` (the inner string is
-quoted text), `$var` or `$(…)` targets, and a `<<WORD` that appears inside quotes and is
-followed later by a line that is exactly WORD (that text is then skipped as a heredoc body).
+quoted text) and `$var` or `$(…)` targets. Heredocs are found by shscan.py, outside quotes.
 """
 import os
 import re
 import shlex
 import subprocess
+
+from shscan import split_heredocs
 
 # Every git call in the guard: a repository's own config must not make the hook run its
 # commands before the permission prompt (core.fsmonitor; hooks for good measure).
@@ -27,26 +28,6 @@ SAFE_GIT_ENV = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_
 
 REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
 PREFIXES = {"sudo", "env", "command", "xargs", "time", "nohup", "exec"}
-# A heredoc start, not a here-string (<<<): <<EOF, <<-EOF, <<'EOF', << "EOF"
-HEREDOC = re.compile(r"(?<!<)<<(-?)\s*(['\"]?)([\w.-]+)\2")
-
-
-def split_heredocs(cmd):
-    """(the command without heredoc bodies, [(quoted delimiter?, body)]): bodies are data, not
-    shell. A `<<WORD` with no closing WORD line isn't a heredoc (e.g. "<<EOF" in quotes)."""
-    out, bodies, lines, i = [], [], cmd.split("\n"), 0
-    while i < len(lines):
-        line = lines[i]
-        out.append(line)
-        i += 1
-        for m in HEREDOC.finditer(line):  # several heredocs on one line: bodies follow in order
-            end = i
-            while end < len(lines) and (lines[end].lstrip("\t") if m.group(1) else lines[end]) != m.group(3):
-                end += 1
-            if end < len(lines):
-                bodies.append((bool(m.group(2)), "\n".join(lines[i:end])))
-                i = end + 1
-    return "\n".join(out), bodies
 
 
 def strip_heredocs(cmd):

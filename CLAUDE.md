@@ -136,11 +136,13 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   maintainer's go-ahead for that PR, and read-only `gh api` (GET) on
   `repos/joaoheytor/PostelMD/…`. The guard fails closed: these pass only as one simple
   command (no `cd`, `&&`, `;` or `$(…)`; use `git -C` and `--body-file`) with allowlisted
-  arguments, followed at most by `2>&1`, `>/dev/null` or pipes into `tail`, `head`, `grep`,
-  `wc`, `cat`, `sort` or `uniq`; PR/issue text and commit messages (`-m`, `-F <file>`,
-  `-F - <<'EOF'`) are scanned for secrets. Local git commands may follow a literal
+  arguments, followed at most by ` 2>&1`, ` >/dev/null` (exactly; `2>/dev/null` asks) or
+  pipes into `tail`, `head`, `grep`, `wc`, `cat`, `sort` or `uniq` without file arguments;
+  PR/issue text and commit messages (`-m`, `-F <file>`, `-F - <<'EOF'` with no other stdin
+  redirect) are scanned for secrets. Local git commands may follow a literal
   `cd <dir>` (`git -C` is preferred) into this project or one of its worktrees, and
-  `git fetch origin pull/<N>/head:<branch or refs/remotes/review/…>` passes. A command may
+  `git fetch origin pull/<N>/head:<dst>` passes for `refs/remotes/review/…`,
+  `refs/scratch/…` or a new local `pr<N>…` branch. A command may
   start with literal assignments (`S=/tmp/x; git -C $S log`): the guard substitutes them
   and judges the result as typed; `export`, `$(…)` values and `S=x cmd` prefixes still ask.
   Pushes to main/master, force pushes without a lease, tags, releases, closing or reviewing

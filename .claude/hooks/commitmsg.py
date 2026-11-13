@@ -13,9 +13,12 @@ than the quoted-heredoc form, or a heredoc with an unquoted delimiter whose body
 import os
 import re
 
-from bash_writes import HEREDOC, scratch, split_heredocs, under
+from bash_writes import scratch, split_heredocs, under
 from content import has_secret, public_reasons
 from shparse import UNKNOWN, bare, git_parts, segments
+from shscan import blanked, scan
+
+SEP = re.compile(r";|\|\|?|&&|\n|\(|\)")
 
 CONVENTIONAL = r"(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S"
 QUOTED_HEREDOC = re.compile(r"\$\(cat <<-?\s*'[\w.-]+'\s*(;\s*)?\)")
@@ -26,16 +29,18 @@ SUBJECT = ("BLOCKED: the commit subject must be a Conventional Commit, e.g. "
 
 def stdin_message(cmd):
     """The body of the heredoc `git commit -F -` reads, or None: the command has exactly one
-    heredoc and it starts on the commit's line, after `git ... commit` with no ; & | between."""
-    text, bodies = split_heredocs(cmd)
-    starts = list(HEREDOC.finditer(text))
-    if len(starts) != 1 or len(bodies) != 1:
+    heredoc, nothing shscan flags, and the heredoc belongs to `git ... commit`, whose simple
+    command has no other stdin redirect (<, <&, <>, <<<, N<: the last one wins)."""
+    s = scan(cmd)
+    if s.flags or len(s.starts) != 1 or len(s.bodies) != 1:
         return None
-    m = starts[0]
-    line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
-    if not re.search(r"(^|[;&|(]\s*)\s*git\b[^;&|()]*\scommit\b[^;&|()]*$", line):
+    text, (start, end) = blanked(s), s.starts[0]
+    left = max((m.end() for m in SEP.finditer(text, 0, start)), default=0)
+    right = next((m.start() for m in SEP.finditer(text, end)), len(text))
+    before, after = text[left:start], text[end:right]
+    if "<" in before + after or not re.match(r"\s*git\b.*\scommit\b", before):
         return None
-    return bodies[0][1]
+    return s.bodies[0][1]
 
 
 def check_subject(body):
@@ -74,9 +79,12 @@ def read_message(path, cwd):
     """(text, None) or (None, reason to ask)."""
     if path == "-" or cwd is UNKNOWN and not os.path.isabs(os.path.expanduser(path)):
         return None, f"the guard can't read the message file {path}"
-    full = os.path.normpath(os.path.join(cwd if cwd is not UNKNOWN else "/",
-                                         os.path.expanduser(path)))
-    project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    given = os.path.normpath(os.path.join(cwd if cwd is not UNKNOWN else "/",
+                                          os.path.expanduser(path)))
+    full = os.path.realpath(given)  # symlinks resolved: L/.. may leave the project
+    project = os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR", "") or "/nonexistent")
+    if any(p.startswith(("/dev/", "/proc/")) or p in ("/dev", "/proc") for p in (given, full)):
+        return None, f"the message file {path} is a device or process file (stdin?)"
     if not (under(full, project) or scratch(full, (project,))):
         return None, f"the message file {path} is outside the project and temp dirs"
     try:
