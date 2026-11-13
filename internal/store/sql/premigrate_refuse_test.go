@@ -225,11 +225,12 @@ func TestMigrateInterferenceIsRefused(t *testing.T) {
 			before := files(t, dir)
 			_, had := before[AppDB]
 			db, err := openGuarded(t, dir, later)
-			if !errors.Is(err, ErrMigrateInterference) {
+			// Refused before the first side effect: plain interference, never late.
+			if !errors.Is(err, ErrMigrateInterference) || errors.Is(err, ErrMigrateLateInterference) {
 				if db != nil {
 					_ = db.Close()
 				}
-				t.Fatalf("got %v, want ErrMigrateInterference", err)
+				t.Fatalf("got %v, want ErrMigrateInterference before the first side effect", err)
 			}
 			after := files(t, dir)
 			if !had {

@@ -39,7 +39,8 @@ import (
 // opening a FIFO there blocks for good), a temp's -journal that isn't a regular file and a
 // post_migration_started path that isn't a regular file are "anything else". Those refusals
 // change nothing (ErrMigrateInterference). What a later step finds changed, only a writer
-// ignoring the instance lock could have changed: ErrMigrateLateInterference, intent kept.
+// ignoring the instance lock could have changed: ErrMigrateLateInterference, intent kept. In a
+// new migration the intent is that first side effect, so all of resume's refusals are late.
 //
 // Nothing is ever inferred from one signal: a version alone doesn't say the snapshot exists,
 // and a snapshot file alone doesn't say it is whole.
@@ -66,7 +67,9 @@ func migrateExisting(ctx context.Context, db *DB, ms []migration, from int) (mig
 	if err := writeIntent(filepath.Dir(db.path), in); err != nil {
 		return migrated{from: from, to: from}, err
 	}
-	return resume(ctx, db, ms, from, in)
+	// The intent is this open's first side effect: whatever resume refuses now is late.
+	done, err := resume(ctx, db, ms, from, in)
+	return done, asLate(err)
 }
 
 // resume takes the database at version uv from in.From to in.To by the table above.
@@ -151,7 +154,7 @@ func takeSnapshot(ctx context.Context, db *DB, snap string, from int) error {
 		}
 	}
 	v, err := db.Snapshot(ctx, tmp)
-	if errors.Is(err, ErrCopySidecar) {
+	if errors.Is(err, ErrCopySidecar) || errors.Is(err, ErrCopyReplaced) || errors.Is(err, os.ErrExist) {
 		return fmt.Errorf("%w: %w", ErrMigrateLateInterference, err)
 	} else if err != nil {
 		return err

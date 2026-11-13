@@ -64,6 +64,66 @@ func TestTakeSnapshotSidecarIsLate(t *testing.T) {
 	}
 }
 
+// A copy swapped while it was written (Snapshot's ErrCopyReplaced) is late interference too,
+// and the file put in its place is left as it was.
+func TestTakeSnapshotReplacedIsLate(t *testing.T) {
+	db, dir := newDB(t)
+	snap := filepath.Join(dir, "pre-migrate.db")
+	other := filepath.Join(dir, "other")
+	writeFile(t, other, []byte("someone else's"))
+	setKillPoint(t, func(p string) {
+		if p == "copied" {
+			if err := os.Rename(other, snap+".tmp"); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	err := takeSnapshot(context.Background(), db, snap, len(embeddedFS(t)))
+	assertLate(t, err)
+	if !errors.Is(err, ErrCopyReplaced) {
+		t.Fatalf("got %v, want ErrCopyReplaced too", err)
+	}
+	if b, err := os.ReadFile(snap + ".tmp"); err != nil || string(b) != "someone else's" { //nolint:gosec // G304: the test's own file
+		t.Fatalf("the file put at the temp: %q, %v", b, err)
+	}
+}
+
+// A fresh migration's refusals after its intent is written are late, whatever step finds
+// them, and the intent stays: a file planted once the intent is in place is refused by
+// resume's checks (checkPlanted, verifySnapshot), never with "nothing was changed".
+func TestRefusalAfterTheIntentIsLate(t *testing.T) {
+	for _, c := range []struct{ name, suffix string }{
+		{"a file at the snapshot", ""},
+		{"a file at the snapshot temp's -wal", ".tmp-wal"},
+		{"a file at the snapshot's -journal", "-journal"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := closedDB(t)
+			fsys, from := laterMigrations(t, 2)
+			snap := filepath.Join(dir, snapshotName(from, from+2))
+			setKillPoint(t, func(p string) {
+				if p == "intent-written" {
+					// open runs in openGuarded's goroutine: t.Error, not t.Fatal.
+					if err := os.WriteFile(snap+c.suffix, []byte("planted"), 0o600); err != nil {
+						t.Error(err)
+					}
+				}
+			})
+			db, err := openGuarded(t, dir, fsys)
+			if db != nil {
+				_ = db.Close()
+			}
+			assertLate(t, err)
+			if _, err := os.Lstat(filepath.Join(dir, MigrateIntent)); err != nil {
+				t.Fatalf("the intent is gone: %v", err)
+			}
+			if v := committedVersion(t, dir); v != from {
+				t.Fatalf("a refused open migrated to %d", v)
+			}
+		})
+	}
+}
+
 // takeSnapshot checks every temp path before it removes any: a FIFO at the temp's -journal
 // is refused with the stale temp still there.
 func TestTakeSnapshotChecksTempsFirst(t *testing.T) {

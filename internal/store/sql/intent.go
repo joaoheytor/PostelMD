@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -43,6 +44,29 @@ func (lateInterference) Error() string {
 }
 
 func (lateInterference) Unwrap() error { return ErrMigrateInterference }
+
+// asLate turns a plain ErrMigrateInterference into ErrMigrateLateInterference, for a refusal
+// found after a side effect: the plain error's "nothing was changed" text goes, its detail
+// and its other causes (ErrCopySidecar, ErrBadCopy, …) stay. Other errors pass unchanged.
+func asLate(err error) error {
+	if !errors.Is(err, ErrMigrateInterference) || errors.Is(err, ErrMigrateLateInterference) {
+		return err
+	}
+	detail, ok := strings.CutPrefix(err.Error(), ErrMigrateInterference.Error())
+	if !ok || strings.Contains(detail, "nothing was changed") {
+		detail = ""
+	}
+	return lateCause{cause: err, detail: detail}
+}
+
+// lateCause is asLate's error: ErrMigrateLateInterference's text and the cause's detail.
+type lateCause struct {
+	cause  error
+	detail string
+}
+
+func (e lateCause) Error() string   { return ErrMigrateLateInterference.Error() + e.detail }
+func (e lateCause) Unwrap() []error { return []error{ErrMigrateLateInterference, e.cause} }
 
 // intent is migrate.intent's content: from, to, and the snapshot's path relative to the
 // state directory (always snapshotName(from, to); recovery refuses anything else).
