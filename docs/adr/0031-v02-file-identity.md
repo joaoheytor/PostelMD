@@ -1,6 +1,6 @@
 # ADR-0031: v0.2 file identity: IDs, generations, renames and tombstones
 
-- **Status:** Proposed (Accepted with the IDs slice, the first code that depends on it)
+- **Status:** Accepted (with the IDs slice's first part, the first code that depends on it)
 - **Date:** 2026-11-12
 
 ## Context
@@ -51,7 +51,10 @@ same way (it ignores the content).
 ### The vault marker
 - `.postelmd-tmp/.created-by-postelmd` holds `postelmd-vault 1`, the vault UUID and the
   format number, one per line. It is written by temp (`.created-by-postelmd.new` in the same
-  folder), `fsync`, rename, `fsync` of the folder. `meta` stores the same UUID.
+  folder), `fsync`, rename, `fsync` of the folder. Where no marker exists yet, an empty one
+  is first created and its folder `fsync`ed, as ADR-0027's adoption does: a crash before the
+  rename must not leave a temp folder holding only the temp, which adoption would refuse as
+  the user's. `meta` stores the same UUID.
 - ADR-0030's format table says what each combination of `format`, `app.db` and marker does.
   In short, startup **refuses**, changing nothing, when the marker names another UUID (a
   swapped mount), names a UUID with no `app.db`, or is missing beside a database with live
@@ -130,6 +133,15 @@ check the ID's syntax before any lookup, check membership before choosing betwee
   format 1 (#175: the boot UUID, listen-early `/readyz`; the snapshot before migrating came
   with #173); this slice brings format 2, with `db rebuild` and `vault claim` (ADR-0030,
   Consequences, follow-up 2, in the parts [ADR-0034](0034-app-db-before-format-2.md) sets).
+  It ships in parts, and only the last writes format 2:
+  1. migration 0002 (`files`, `pending`, `tombstones`, `trash_records`; the vault UUID and the
+     "assigned" flag in `meta`), the ULIDs, the first assignment's transaction and walk, and
+     the marker's read and write; nothing assigns yet (flips this ADR);
+  2. `postelmd db rollback` (#174): migration 0002 runs against existing databases, so no
+     release ships part 1 without it (ADR-0030);
+  3. the startup scan: suspects, both rename rules, pending paths, tombstone expiry;
+  4. data format 2: the first upgrade, ADR-0030's format table, `db rebuild`, `vault claim`,
+     the runbook and the image-level upgrade smoke test (ADR-0034's done conditions).
 
 ## Alternatives considered
 | Option | Why not |

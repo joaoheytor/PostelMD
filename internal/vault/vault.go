@@ -73,7 +73,9 @@ type Vault struct {
 	afterCheck func()
 	// onWait, in tests only, runs when lock finds the mutex held, just before it waits.
 	onWait func()
-	log    *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
+	// afterHash, in tests only, runs between the survey's hash of a file and its second stat.
+	afterHash func(p string)
+	log       *slog.Logger // warnings only; never note content (CLAUDE.md rule 15)
 }
 
 // Open opens the vault at dir, refuses an adopted folder whose reserved folders hold entries

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,10 +24,11 @@ var (
 	crashDir = flag.String("sql.crash-dir", "", "state directory (crash helper only)")
 )
 
-// crashMigrations are two migrations, so the kill points inside the chain fire twice.
+// crashMigrations are this build's migrations and a test-only last one that makes
+// crash_probe: at least two, so the kill points inside the chain fire twice.
 func crashMigrations(t *testing.T) fstest.MapFS {
 	m := embeddedFS(t)
-	m["0002_notes.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE crash_probe (x INTEGER) STRICT;")}
+	m[fmt.Sprintf("%04d_crash_probe.sql", len(m)+1)] = &fstest.MapFile{Data: []byte("CREATE TABLE crash_probe (x INTEGER) STRICT;")}
 	return m
 }
 
@@ -64,7 +66,9 @@ func TestCrashHelper(t *testing.T) {
 //	| before-sql, before-version,        | uncommitted transaction;      | rolled back; migrates|
 //	| before-record (each migration),    | user_version 0, no records    | from 0               |
 //	| before-commit                      |                               |                      |
-//	| after-commit                       | user_version 2, two records   | nothing to do        |
+//	| after-commit                       | user_version N, N records     | nothing to do        |
+//
+// N is the number of crashMigrations.
 func TestMigrationCrashPoints(t *testing.T) {
 	for _, c := range []struct {
 		at        string
@@ -88,7 +92,8 @@ func TestMigrationCrashPoints(t *testing.T) {
 			if fi, err := os.Stat(filepath.Join(dir, AppDB)); err != nil || fi.Mode().Perm() != 0o600 {
 				t.Fatalf("after the crash: %v, %v", fi, err)
 			}
-			if got := committedVersion(t, dir); (got == 2) != c.committed || (got != 0 && got != 2) {
+			n := len(crashMigrations(t))
+			if got := committedVersion(t, dir); (got == n) != c.committed || (got != 0 && got != n) {
 				t.Fatalf("after the crash user_version is %d (committed: %v)", got, c.committed)
 			}
 			db, err := open(context.Background(), dir, discard, crashMigrations(t))
@@ -97,7 +102,7 @@ func TestMigrationCrashPoints(t *testing.T) {
 			}
 			defer func() { _ = db.Close() }()
 			uv, recs := state(t, db)
-			if uv != 2 || len(recs) != 2 {
+			if uv != n || len(recs) != n {
 				t.Fatalf("after recovery: user_version %d, records %v", uv, recs)
 			}
 			if _, err := db.w.Exec("INSERT INTO crash_probe (x) VALUES (1)"); err != nil {

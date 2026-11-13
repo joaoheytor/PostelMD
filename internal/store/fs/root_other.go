@@ -54,5 +54,14 @@ func (r *Root) RemoveDir(string) error { return errors.ErrUnsupported }
 // SyncFile is unsupported on this platform.
 func (r *Root) SyncFile(string) error { return errors.ErrUnsupported }
 
+// Stat is unsupported on this platform.
+func (r *Root) Stat(string) (Stat, error) { return Stat{}, errors.ErrUnsupported }
+
+// Hash is unsupported on this platform.
+func (r *Root) Hash(string) (Stat, [32]byte, error) { return Stat{}, [32]byte{}, errors.ErrUnsupported }
+
+// StatOf finds nothing on this platform.
+func StatOf(iofs.FileInfo) (Stat, bool) { return Stat{}, false }
+
 // ReadDir is unsupported on this platform.
 func (r *Root) ReadDir(string) ([]iofs.DirEntry, error) { return nil, errors.ErrUnsupported }

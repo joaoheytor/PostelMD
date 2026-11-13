@@ -1,6 +1,6 @@
 # ADR-0027: Landed retries and the adoption marker
 
-- **Status:** Accepted; its save-mismatch statement, for a file over the read limit, is superseded by [ADR-0029](0029-a-save-over-a-file-too-large-to-read.md)
+- **Status:** Accepted; its save-mismatch statement, for a file over the read limit, is superseded by [ADR-0029](0029-a-save-over-a-file-too-large-to-read.md); the words "an empty regular file" about the marker, by [ADR-0031](0031-v02-file-identity.md) (the marker carries the vault's identity; ownership still depends only on its existence)
 - **Date:** 2026-11-11
 
 ## Context

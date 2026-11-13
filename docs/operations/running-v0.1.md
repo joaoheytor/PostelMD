@@ -385,6 +385,27 @@ start refuses because the database is damaged, stop the server and move `app.db`
 `"$data"/.postelmd/damaged-<date>/` (never delete them); at format 1 they hold only the
 start's boot ID, and the next start creates a new database (ADR-0034).
 
+**Upgrading to `:main` after the file-identity tables** (the IDs slice's first part): the
+first start migrates `app.db` from version 1 to 2. It first copies the database to
+`.postelmd/pre-migrate-1-2.db` (owner-only) and, once migrated, writes
+`.postelmd/post-migration-started-1-2`; keep both with `app.db`. The new tables stay empty
+and the data format stays `1`, so rolling back to rc.1 is still the digest swap. An earlier
+`:main` refuses the migrated database (`written by a newer PostelMD`). To roll back to one,
+with the server stopped, move the database and both files together into a new folder, then
+start the older image; it creates a new database, and nothing is lost, since at format 1
+they hold only the boot ID:
+
+```sh
+d="$data/.postelmd/rolled-back-$(date +%F-%H%M%S)" && mkdir "$d" \
+  && mv "$data"/.postelmd/app.db "$data"/.postelmd/app.db-wal "$data"/.postelmd/app.db-shm \
+    "$data"/.postelmd/pre-migrate-1-2.db "$data"/.postelmd/post-migration-started-1-2 "$d"/
+```
+
+(`app.db-wal` and `app.db-shm` exist only while a server runs or after a crash; `mv` reports
+the ones that are missing.) Leaving `pre-migrate-1-2.db` behind would make the next upgrade
+refuse to migrate again: a snapshot it didn't take is in its way. `postelmd db rollback`
+(#174) replaces this step before a release ships the migration.
+
 If PostelMD says `format` is **damaged** (anything but a number on one line), back up
 the data folder first. If only v0.1 ever used it, delete `"$data"/.postelmd/format` and start
 again: the next start writes `1`. Otherwise restore the backup you took before the last

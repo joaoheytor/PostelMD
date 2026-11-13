@@ -56,11 +56,11 @@ ID + generation ETag flips it.
 | [0024](0024-restore-from-the-trash.md) | Restore from the trash | Accepted |
 | [0025](0025-data-format-version.md) | A data format number in /data | Accepted |
 | [0026](0026-nested-repositories-in-the-vault.md) | Nested repositories in the vault are left out of commits | Accepted (`.git` match: see 0028) |
-| [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted (`412` over a file too large to read: see 0029) |
+| [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted (`412` over a file too large to read: see 0029; the marker's content: see 0031) |
 | [0028](0028-dot-git-when-git-folds-case.md) | A nested repository's .git in any letter case when git folds case | Accepted |
 | [0029](0029-a-save-over-a-file-too-large-to-read.md) | A save over a file too large to read | Accepted |
 | [0030](0030-v02-storage-sqlite.md) | v0.2 storage: SQLite in /data, its driver, migrations and data format 2 | Accepted (damaged database at format 1, follow-up 2's parts: see 0034) |
-| [0031](0031-v02-file-identity.md) | v0.2 file identity: IDs, generations, renames and tombstones | Proposed |
+| [0031](0031-v02-file-identity.md) | v0.2 file identity: IDs, generations, renames and tombstones | Accepted |
 | [0032](0032-v02-etag-and-api.md) | v0.2 ETag and API: ID + generation + hash, and saves by file ID | Proposed |
 | [0033](0033-v02-intents.md) | v0.2 intents: saves, creates and structural operations | Proposed |
 | [0034](0034-app-db-before-format-2.md) | app.db in serve before data format 2 | Accepted |
