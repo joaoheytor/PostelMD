@@ -72,7 +72,7 @@ func TestRunReportsConfigErrors(t *testing.T) {
 				t.Setenv("POSTELMD_ALLOW_NETWORK_FS", tt.env)
 			}
 			stderr := runAndCheck(t, tt.args, 2, "", tt.wantStderr)
-			if strings.Count(stderr, tt.wantStderr) != 1 || strings.Contains(stderr, "postelmd serve: flag") {
+			if strings.Count(stderr, tt.wantStderr) != 1 || strings.Contains(stderr, "the flag package printed") {
 				t.Errorf("stderr = %q, want %q exactly once and no repeat of the flag package's error", stderr, tt.wantStderr)
 			}
 		})

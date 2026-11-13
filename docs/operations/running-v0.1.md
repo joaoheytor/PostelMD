@@ -558,7 +558,9 @@ by the image's user. The first container reads as the files' owner (root can't r
 under `root_squash`), the second writes as root and hands the result to `65532`:
 
 ```sh
+set -o pipefail
 vol=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' postelmd)
+[ -n "$vol" ] || { echo "/data is a bind mount: use the line above"; false; }
 owner=$(docker run --rm -v "$vol:/from:ro" busybox:1.37 stat -c %u:%g /from)
 docker volume create postelmd-state
 docker run --rm --user "$owner" -v "$vol:/from:ro" busybox:1.37 \
@@ -567,9 +569,11 @@ docker run --rm --user "$owner" -v "$vol:/from:ro" busybox:1.37 \
   sh -c 'tar -C /to -xpf - && [ -f /to/auth.json ] && chown -R 65532:65532 /to && chmod 700 /to'
 ```
 
-If `vol` is empty, `/data` is a bind mount: use the line above instead. If the last command
-fails, nothing was copied: don't start the server on `postelmd-state`. Don't skip the
-`chown`: a fresh named volume is owned by root, and the image's user couldn't write it.
+Run the lines one by one, or as one script, in bash or zsh: `set -o pipefail` makes the copy
+fail when the reading side skips a file it can't read. If any line fails, the copy may be
+partial: run `docker volume rm postelmd-state`, fix the cause, start again from the top, and
+don't start the server on it. Don't skip the `chown`: a fresh named volume is owned by root,
+and the image's user couldn't write it.
 
 Then recreate the container with the flags you started with, plus
 `-v ~/postelmd-state:/data/.postelmd` (or `-v postelmd-state:/data/.postelmd`). The old
