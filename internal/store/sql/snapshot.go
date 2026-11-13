@@ -116,7 +116,12 @@ func sameFile(f *os.File, path string) bool {
 // noCopySidecars refuses a -journal, -wal or -shm beside a copy: none is ever left by
 // VACUUM INTO or a mode=ro check, and SQLite opening one that is a FIFO blocks for good.
 func noCopySidecars(dest string) error {
-	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+	return noSidecars(dest, "-journal", "-wal", "-shm")
+}
+
+// noSidecars refuses a file of any type at dest+suffix for each suffix.
+func noSidecars(dest string, suffixes ...string) error {
+	for _, suffix := range suffixes {
 		_, err := os.Lstat(dest + suffix)
 		if err == nil {
 			return fmt.Errorf("%w (%s)", ErrCopySidecar, suffix)

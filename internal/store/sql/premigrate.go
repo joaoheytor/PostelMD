@@ -35,15 +35,18 @@ import (
 //	| snapshot fails verification or isn't a regular file) | refuse, change nothing    |
 //
 // Before the first side effect, in both a new migration and a resumed one, a -journal, -wal
-// or -shm beside the snapshot (no step leaves one, and SQLite opening a FIFO there blocks for
-// good) and a post_migration_started path that isn't a regular file are "anything else".
+// or -shm beside the snapshot, a -wal or -shm beside its temp (no step leaves one, and SQLite
+// opening a FIFO there blocks for good), a temp's -journal that isn't a regular file and a
+// post_migration_started path that isn't a regular file are "anything else". Those refusals
+// change nothing (ErrMigrateInterference). What a later step finds changed, only a writer
+// ignoring the instance lock could have changed: ErrMigrateLateInterference, intent kept.
 //
 // Nothing is ever inferred from one signal: a version alone doesn't say the snapshot exists,
 // and a snapshot file alone doesn't say it is whole.
 
 // migrateExisting starts a migration of an existing database at version from to the last of
-// ms. A snapshot, its temp or either's -journal already there without an intent isn't this
-// run's: refused, as is a post_migration_started path that isn't a regular file.
+// ms. A snapshot, its temp or a sidecar of either already there without an intent isn't
+// this run's: refused, as is a post_migration_started path that isn't a regular file.
 func migrateExisting(ctx context.Context, db *DB, ms []migration, from int) (migrated, error) {
 	to := len(ms)
 	in := intent{From: from, To: to, Snapshot: snapshotName(from, to)}
@@ -129,26 +132,39 @@ func resume(ctx context.Context, db *DB, ms []migration, uv int, in intent) (mig
 // takeSnapshot removes a partial temp, then copies the database to snap's temp (Snapshot:
 // created 0600, fsynced, integrity_check), checks its version is from, renames it into place
 // and fsyncs the folder. Migrations start only after that (ADR-0015).
+//
+// It runs after the intent is written: what it finds only a writer ignoring the instance
+// lock could have put there, so its refusals are ErrMigrateLateInterference.
 func takeSnapshot(ctx context.Context, db *DB, snap string, from int) error {
 	tmp := snap + ".tmp"
-	for _, p := range []string{tmp, tmp + "-journal"} {
+	stale := []string{tmp, tmp + "-journal"}
+	for _, p := range stale { // all checked before any is removed
+		if _, err := present(p); errors.Is(err, ErrMigrateInterference) {
+			return fmt.Errorf("%w (a snapshot temp isn't a regular file)", ErrMigrateLateInterference)
+		} else if err != nil {
+			return err
+		}
+	}
+	for _, p := range stale {
 		if err := removeRegular(p); err != nil {
 			return err
 		}
 	}
 	v, err := db.Snapshot(ctx, tmp)
-	if err != nil {
+	if errors.Is(err, ErrCopySidecar) {
+		return fmt.Errorf("%w: %w", ErrMigrateLateInterference, err)
+	} else if err != nil {
 		return err
 	}
 	if v != from {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("%w (the snapshot has version %d, not %d)", ErrMigrateInterference, v, from)
+		return fmt.Errorf("%w (the snapshot has version %d, not %d)", ErrMigrateLateInterference, v, from)
 	}
 	killPoint("snapshot-verified")
 	// Under the instance lock nothing else writes the state directory, and present(snap)
 	// was false just before: the rename replaces nothing, and RENAME_NOREPLACE makes sure.
 	if err := renameNoReplace(tmp, snap); errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("%w (a file appeared at the snapshot's name)", ErrMigrateInterference)
+		return fmt.Errorf("%w (a file appeared at the snapshot's name)", ErrMigrateLateInterference)
 	} else if err != nil {
 		return fmt.Errorf("sql: put the snapshot in place: %w", err)
 	}
@@ -182,15 +198,27 @@ func verifySnapshot(ctx context.Context, snap string, from int) error {
 }
 
 // checkPlanted refuses, before the migration's first side effect, what none of its steps
-// leaves: a file beside the snapshot that SQLite would open with it (a FIFO there would block
-// the open for good), and a post_migration_started path that isn't a regular file (found
-// only after the migrations committed, it couldn't be refused with nothing changed).
+// leaves: a file beside the snapshot or its temp that SQLite would open with it (a FIFO there
+// would block the open for good), and a post_migration_started path that isn't a regular file
+// (found only after the migrations committed, it couldn't be refused with nothing changed).
+// The temp's -journal is the one exception: a crashed copy can leave it, so a regular file
+// there is takeSnapshot's to remove; only another type is refused here. A -wal or -shm beside
+// the temp is refused even with an intent: the copy and its check use a rollback journal, so
+// no step, crashed or not, leaves one, and the runner removes only what its own steps leave.
 func checkPlanted(stateDir string, in intent) error {
-	if err := noCopySidecars(filepath.Join(stateDir, in.Snapshot)); err != nil {
+	snap := filepath.Join(stateDir, in.Snapshot)
+	if err := noCopySidecars(snap); err != nil {
 		return errors.Join(ErrMigrateInterference, err)
 	}
-	_, err := present(filepath.Join(stateDir, markerName(in.From, in.To)))
-	return err
+	if err := noSidecars(snap+".tmp", "-wal", "-shm"); err != nil {
+		return errors.Join(ErrMigrateInterference, err)
+	}
+	for _, p := range []string{snap + ".tmp-journal", filepath.Join(stateDir, markerName(in.From, in.To))} {
+		if _, err := present(p); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // renameNoReplace renames from to to, failing with os.ErrExist if to exists. Only a kernel
@@ -224,13 +252,15 @@ func markStarted(ctx context.Context, db *DB, in intent) error {
 	f, err := createExclusive(path, "post_migration_started file") // empty, fsynced, folder fsynced
 	if errors.Is(err, os.ErrExist) {
 		// checkPlanted refused anything but a regular file before the first side effect;
-		// this check stays as a defence. present's own error already says interference.
+		// this check stays as a defence, and finds only late interference.
 		ok, perr := present(path)
-		if perr != nil {
+		if errors.Is(perr, ErrMigrateInterference) {
+			return fmt.Errorf("%w (the post_migration_started file isn't a regular file)", ErrMigrateLateInterference)
+		} else if perr != nil {
 			return perr
 		}
 		if !ok {
-			return fmt.Errorf("%w (the post_migration_started file went away)", ErrMigrateInterference)
+			return fmt.Errorf("%w (the post_migration_started file went away)", ErrMigrateLateInterference)
 		}
 	} else if err != nil {
 		return err // createExclusive's error names the file

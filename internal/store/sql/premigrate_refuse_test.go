@@ -6,13 +6,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// files reads every regular file in dir except the -wal and -shm a refused open may create.
+// files reads every file in dir except app.db's -wal and -shm, which a refused open may
+// create: a regular file by its bytes, a symlink by its target, anything else by its type.
 func files(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	es, err := os.ReadDir(dir)
@@ -22,12 +23,16 @@ func files(t *testing.T, dir string) map[string]string {
 	m := map[string]string{}
 	for _, e := range es {
 		n := e.Name()
-		if strings.HasSuffix(n, "-wal") || strings.HasSuffix(n, "-shm") {
+		if n == AppDB+"-wal" || n == AppDB+"-shm" {
+			continue
+		}
+		if e.Type()&fs.ModeSymlink != 0 {
+			l, _ := os.Readlink(filepath.Join(dir, n))
+			m[n] = "link " + l
 			continue
 		}
 		if !e.Type().IsRegular() {
-			l, _ := os.Readlink(filepath.Join(dir, n))
-			m[n] = "link " + l
+			m[n] = "type " + e.Type().String()
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(dir, n)) //nolint:gosec // G304: the test's own files
@@ -159,6 +164,23 @@ func TestMigrateInterferenceIsRefused(t *testing.T) {
 		{"no intent, the snapshot temp's -journal already there", func(t *testing.T, dir string) {
 			writeFile(t, filepath.Join(dir, snap+".tmp-journal"), []byte("stale"))
 		}},
+		// No step leaves a -wal or -shm beside the snapshot's temp (VACUUM INTO's output and
+		// the read-only check use a rollback journal): refused with or without an intent.
+		{"no intent, a file at the snapshot temp's -wal", func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, snap+".tmp-wal"), []byte("planted"))
+		}},
+		{"no intent, a file at the snapshot temp's -shm", func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, snap+".tmp-shm"), []byte("planted"))
+		}},
+		{"at from, a file at the snapshot temp's -wal", func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, snap+".tmp-wal"), []byte("planted"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"at from, a temp and a FIFO at its -shm", func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, snap+".tmp"), []byte("partial"))
+			mustMkfifo(t, filepath.Join(dir, snap+".tmp-shm"))
+			writeIntentFile(t, dir, in)
+		}},
 		// The post_migration_started file is checked before the first side effect, not after
 		// the migrations committed.
 		{"at from, a folder at the post_migration_started file", func(t *testing.T, dir string) {
@@ -213,8 +235,8 @@ func TestMigrateInterferenceIsRefused(t *testing.T) {
 			if !had {
 				delete(after, AppDB) // the open created an empty one, and refused the intent
 			}
-			for _, n := range []string{MigrateIntent, snap, snap + ".tmp", snap + ".tmp-journal", snap + "-journal", markerName(from, to), AppDB} {
-				if before[n] != after[n] {
+			for n, b := range before {
+				if a, ok := after[n]; !ok || a != b {
 					t.Fatalf("a refused open changed %s", n)
 				}
 			}

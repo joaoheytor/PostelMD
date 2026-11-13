@@ -93,21 +93,6 @@ func TestStaleSnapshotTempJournalIsRemoved(t *testing.T) {
 	assertMigrated(t, db, dir, from, from+2)
 }
 
-// The snapshot's rename never replaces a file already at its name (RENAME_NOREPLACE): one
-// that appeared there is interference, left as it was.
-func TestTakeSnapshotNeverReplaces(t *testing.T) {
-	db, dir := newDB(t)
-	snap := filepath.Join(dir, "pre-migrate.db")
-	writeFile(t, snap, []byte("someone else's"))
-	err := takeSnapshot(context.Background(), db, snap, len(embeddedFS(t)))
-	if !errors.Is(err, ErrMigrateInterference) {
-		t.Fatalf("got %v, want ErrMigrateInterference", err)
-	}
-	if b, err := os.ReadFile(snap); err != nil || string(b) != "someone else's" { //nolint:gosec // G304: the test's own file
-		t.Fatalf("the file at the snapshot's name was replaced: %q, %v", b, err)
-	}
-}
-
 // A snapshot replaced while it was verified is refused: the file checked must be the file
 // still there.
 func TestSnapshotReplacedWhileVerified(t *testing.T) {
@@ -215,17 +200,6 @@ func TestReadIntent(t *testing.T) {
 	_, err := readIntent(dir)
 	if !errors.Is(err, fs.ErrPermission) || errors.Is(err, ErrMigrateInterference) || strings.Contains(err.Error(), dir) {
 		t.Fatalf("an unreadable intent: got %v, want a permission error without the path", err)
-	}
-}
-
-// markStarted's late check (a defence: checkPlanted refuses first) reports interference once.
-func TestMarkStartedRefusesAFolderOnce(t *testing.T) {
-	db, dir := newDB(t)
-	in := intent{From: 1, To: 2, Snapshot: snapshotName(1, 2)}
-	mustMkdir(t, filepath.Join(dir, markerName(1, 2)))
-	err := markStarted(context.Background(), db, in)
-	if !errors.Is(err, ErrMigrateInterference) || strings.Count(err.Error(), ErrMigrateInterference.Error()) != 1 {
-		t.Fatalf("got %v, want ErrMigrateInterference once", err)
 	}
 }
 

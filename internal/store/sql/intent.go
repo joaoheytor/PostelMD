@@ -24,10 +24,25 @@ const (
 
 // ErrMigrateInterference: an interrupted migration's intent doesn't match the database or its
 // snapshot (ADR-0015's "anything else" row), or a snapshot this migration would take already
-// exists without an intent. Nothing was changed; the admin uses the upgrade runbook.
+// exists without an intent. Found before the migration's first side effect: nothing was
+// changed; the admin uses the upgrade runbook. Found later: ErrMigrateLateInterference.
 var ErrMigrateInterference = errors.New("sql: an interrupted migration's state (migrate.intent, " +
 	"the database's version or the pre-migration snapshot) doesn't match; nothing was changed; " +
 	"follow the upgrade runbook (ADR-0015)")
+
+// ErrMigrateLateInterference: a migration file changed after the migration's first side
+// effect, which only a writer ignoring the instance lock can do. Something may have changed,
+// so it doesn't say otherwise; errors.Is(err, ErrMigrateInterference) still holds.
+var ErrMigrateLateInterference error = lateInterference{}
+
+type lateInterference struct{}
+
+func (lateInterference) Error() string {
+	return "sql: a migration file changed while the migration ran; the migration's intent stays " +
+		"in place; follow the upgrade runbook (ADR-0015)"
+}
+
+func (lateInterference) Unwrap() error { return ErrMigrateInterference }
 
 // intent is migrate.intent's content: from, to, and the snapshot's path relative to the
 // state directory (always snapshotName(from, to); recovery refuses anything else).
@@ -125,7 +140,11 @@ func writeIntent(stateDir string, in intent) error {
 		return fmt.Errorf("sql: write the migration intent: %w", err)
 	}
 	killPoint("intent-synced")
-	if err := os.Rename(tmp, path); err != nil {
+	// The caller found no intent under the instance lock: RENAME_NOREPLACE makes sure.
+	if err := renameNoReplace(tmp, path); errors.Is(err, os.ErrExist) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("%w (an intent appeared at its name)", ErrMigrateInterference)
+	} else if err != nil {
 		return fmt.Errorf("sql: write the migration intent: %w", err)
 	}
 	if err := syncDir(path); err != nil {

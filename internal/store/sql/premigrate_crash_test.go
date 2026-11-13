@@ -115,6 +115,15 @@ func TestPreMigrateCrashPoints(t *testing.T) {
 	row2 := onDisk{intent: true, snap: true}        // from, snapshot present
 	row3 := onDisk{intent: true, snap: true, uv: 1} // between, snapshot present
 	row4 := onDisk{intent: true, snap: true, uv: 2} // to, snapshot present
+	// The crash points only a resumed migration reaches, with the state each starts from.
+	setups := map[string]func(t *testing.T, dir string, from int){
+		// Row 2 planted (the intent and a verified snapshot at from): verified again.
+		"snapshot-rechecked:1": func(t *testing.T, dir string, from int) {
+			in := intent{From: from, To: from + 2, Snapshot: snapshotName(from, from+2)}
+			snapshotAt(t, embeddedFS(t), filepath.Join(dir, in.Snapshot))
+			writeIntentFile(t, dir, in)
+		},
+	}
 	for _, c := range []struct {
 		at   string
 		want onDisk
@@ -132,10 +141,14 @@ func TestPreMigrateCrashPoints(t *testing.T) {
 		{"marked-db:1", onDisk{intent: true, snap: true, uv: 2, markerRow: true}},
 		{"marked:1", onDisk{intent: true, snap: true, uv: 2, markerRow: true, markerFile: true}},
 		{"intent-removed:1", onDisk{snap: true, uv: 2, markerRow: true, markerFile: true}}, // done
+		{"snapshot-rechecked:1", row2},
 	} {
 		t.Run(c.at, func(t *testing.T) {
 			dir := closedDB(t)
 			fsys, from := laterMigrations(t, 2)
+			if setup := setups[c.at]; setup != nil {
+				setup(t, dir, from)
+			}
 			out, err := runHelper(t, dir, "-sql.crash-at="+c.at)
 			var ee *exec.ExitError
 			if !errors.As(err, &ee) || ee.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
