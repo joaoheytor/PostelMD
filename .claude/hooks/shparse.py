@@ -1,15 +1,16 @@
 """Shell parsing shared by the guard's outward-command rules (outward.py, gh_rules.py, codeexec.py).
 
 Built on bash_writes.tokens (shlex: quotes, heredoc bodies stripped, `#` not a comment).
-Fail closed: callers pass an outward command only when single() returns its words.
+Fail closed: callers pass an outward command only when strict() returns its words.
 """
 import os
 import re
 
-from bash_writes import PREFIXES, REDIRECTS, is_punct, tokens
+from bash_writes import PREFIXES, REDIRECTS, is_punct, strip_heredocs, tokens
 
 UNKNOWN = object()  # a directory the parser can't follow
 GIT_GLOBAL_OK = {"--no-pager"}
+KEYWORDS = {"do", "then", "else", "elif", "if", "while", "until", "{", "!"}
 
 
 def segments(cmd):
@@ -31,18 +32,76 @@ def segments(cmd):
     return [w for w in out if w]
 
 
-def single(cmd):
-    """cmd's words when it is exactly one simple command: no ; && || | ( ) redirects or
-    heredocs, and no $ or ` anywhere (variables, $(...), backticks). Otherwise None."""
+# Trailing redirects an outward command may carry, as tokens(): 2>&1 and >/dev/null.
+OUTPUT_REDIRECTS = (["2", ">&", "1"], [">", "/dev/null"])
+NUM = r"\d+"
+FILTER_ARGS = {  # (flags, flags whose value is the next word or the rest of the flag, values)
+    "tail": (r"-[qv]|-\d+|--(lines|bytes)=\+?\d+", "nc", r"\+?\d+"),
+    "head": (r"-[qv]|-\d+|--(lines|bytes)=\d+", "nc", NUM),
+    "wc": (r"-[lcwmL]+", "", ""),
+    "cat": (r"-[nbsAvET]+", "", ""),
+    "sort": (r"-[bdfghinMRrsuVz]+", "kt", r"[\w.,:;]+"),
+    "uniq": (r"-[cdDiuz]+", "fsw", NUM),
+    "grep": (r"-[EFGivnclLqshHwxUz]+|--color(=\w+)?|--line-buffered|--", "ABCme", r"[^\n]*"),
+}
+
+
+def filter_ok(words):
+    """True when words are tail/head/grep/wc/cat/sort/uniq with plain flags, numbers or (grep
+    only) one pattern: no file names (uniq and sort -o write one), no -O, no --long options
+    that run programs (sort --compress-program)."""
+    if not words or words[0] not in FILTER_ARGS:
+        return False
+    flags, valued, value = FILTER_ARGS[words[0]]
+    patterns, i = 0, 1
+    while i < len(words):
+        a = words[i]
+        if valued and re.fullmatch(f"-[{valued}]", a):
+            if i + 1 == len(words) or not re.fullmatch(value, words[i + 1]):
+                return False
+            i += 1
+        elif valued and re.fullmatch(f"-[{valued}]", a[:2]) and re.fullmatch(value, a[2:]):
+            pass
+        elif not re.fullmatch(flags, a) and (words[0] != "grep" or a.startswith("-")):
+            if not re.fullmatch(NUM, a) or words[0] not in ("tail", "head"):
+                return False
+        elif words[0] == "grep" and not a.startswith("-"):
+            patterns += 1
+        i += 1
+    return patterns <= 1
+
+
+def strict(cmd):
+    """The outward command's words when cmd is one simple command, optionally followed by
+    2>&1, >/dev/null and pipes into filter_ok() filters (item: trailing output filters).
+    Otherwise None: no ; && || ( ) other redirects or heredocs, and no $ or ` anywhere."""
     toks = tokens(cmd)
-    if not toks or any(is_punct(t) or "$" in t or "`" in t for t in toks):
+    if not toks or any("$" in t or "`" in t for t in toks) \
+            or re.search(r"(^|\s)\d+\s+[<>]", strip_heredocs(cmd)):  # `5 >x`: an argument or an fd?
         return None
-    return toks
+    parts, part = [], []
+    for t in toks + ["|"]:
+        if t != "|":
+            part.append(t)
+            continue
+        cut = True
+        while cut:
+            cut = next((len(r) for r in OUTPUT_REDIRECTS
+                        if len(part) > len(r) and part[-len(r):] == r), 0)
+            part = part[:len(part) - cut]
+        if not part or any(is_punct(w) for w in part):
+            return None
+        parts.append(part)
+        part = []
+    if not all(filter_ok(p) for p in parts[1:]):
+        return None
+    return parts[0]
 
 
 def bare(words):
-    """words without leading VAR=value assignments and sudo/env/xargs/... prefixes."""
-    while words and (words[0] in PREFIXES or re.match(r"\w+=", words[0])):
+    """words without leading VAR=value assignments, sudo/env/xargs/... prefixes and shell
+    keywords (`for d in x; do git -C $d status; done` runs git after `do`)."""
+    while words and (words[0] in PREFIXES or words[0] in KEYWORDS or re.match(r"\w+=", words[0])):
         words = words[1:]
     return words
 

@@ -76,7 +76,12 @@
       "Bash(gh run view:*)",
       "Bash(gh run list:*)",
       "Bash(gh run watch:*)",
-      "Bash(gh run rerun:*)"
+      "Bash(gh run rerun:*)",
+      "Bash(gh api repos/joaoheytor/PostelMD/:*)",
+      "Bash(gh api \"repos/joaoheytor/PostelMD/:*)",
+      "Bash(gh api 'repos/joaoheytor/PostelMD/:*)",
+      "Bash(gh api repos/{owner}/{repo}/:*)",
+      "Bash(gh api \"repos/{owner}/{repo}/:*)"
     ],
     "ask": [
       "Edit(**/.claude/hooks/**)",

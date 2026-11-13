@@ -119,7 +119,7 @@ class Bypasses(unittest.TestCase):
         self.assert_cases([
             "git push origin feature; echo ok",
             "true && git push -u origin feature",
-            "git push -u origin feature | cat",
+            "git push -u origin feature | tee push.log",  # `| cat` passes now (relax_test.py)
             "git push -u origin feature 2>/dev/null",
             "gh pr merge 5 --squash --match-head-commit {sha} && echo merged",
             "gh pr create --fill && echo done",
@@ -222,7 +222,7 @@ class Bypasses(unittest.TestCase):
             "gh pr merge 5 --squash --match-head-commit {sha}",
             "gh pr comment 5 --body 'Fixed in the next commit.'",
             "gh pr create --title 'fix: x' --body-file {f}/clean.md",
-            "gh api repos/o/r/pulls --jq '.[].number'",
+            "gh api repos/joaoheytor/PostelMD/pulls --jq '.[].number'",  # repos/o/r asks now
             "go test -race ./...",
             "git rebase origin/main",
             "git diff --stat origin/main",

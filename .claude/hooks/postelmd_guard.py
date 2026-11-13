@@ -16,7 +16,8 @@ Modes (first CLI argument):
            settings, mutating API calls) gets a human permission prompt ("ask"); PR and issue
            text is scanned like Write/Edit content; options that make allowed commands run
            other programs ask (codeexec.py); so do shell writes to repository files
-           (bash_writes.py).
+           (bash_writes.py). Leading literal assignments (`S=/tmp/x; git -C $S log`) are
+           substituted first and the result judged as if typed (shvars.py).
 
 These are guardrails for an agent, not a security boundary: CI and branch protection are the
 hard gates.
@@ -33,12 +34,11 @@ import subprocess
 import sys
 
 from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets
-from commitmsg import check as check_message
+from commitmsg import CONVENTIONAL, SUBJECT, check as check_message
 from content import has_secret, public_reasons
 from gitdir import check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
-
-CONVENTIONAL = r"(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S"
+from shvars import normalize
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
 # _test.go files next to the code they cover.
@@ -175,13 +175,11 @@ def check_commit(cmd):
         if not re.search(r"(\s-s\b|\s--signoff\b|\s-[a-zA-Z]*s[a-zA-Z]*\b)", cmd):
             respond("deny", "BLOCKED: commits need a DCO sign-off. Add -s (git commit -s ...).")
         if re.search(r"\s-m\b", cmd) and not re.search(r"(-m\s+[\"']?\$?\(?(cat\s+<<-?'?EOF'?\s*)?|\n)\s*" + CONVENTIONAL, cmd):
-            respond("deny", "BLOCKED: the commit subject must be a Conventional Commit, e.g. "
-                            "'docs(adr): clarify save protocol' (types: feat fix perf refactor docs "
-                            "test build ci chore revert; '!' for breaking).")
+            respond("deny", SUBJECT)
 
 
 def check_git(tool_input, cwd):
-    cmd = tool_input.get("command") or ""
+    cmd = normalize(tool_input.get("command") or "")  # `S=lit; ... $S`: judged as typed
     check_commit(cmd)  # denials first: `git commit -m x && git push` is still a bad commit
     found = check_message(cmd, cwd)
     if found:
@@ -202,7 +200,7 @@ def check_git(tool_input, cwd):
 
 
 def check_bash_writes(tool_input, cwd):
-    targets = repo_write_targets(tool_input.get("command") or "", cwd)
+    targets = repo_write_targets(normalize(tool_input.get("command") or ""), cwd)
     if targets:
         respond("ask", "SHELL WRITE to repository file(s) " + ", ".join(targets[:5]) + ". Use "
                        "Write/Edit so the guard hook sees the change (secrets, public-repo and ADR "

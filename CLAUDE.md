@@ -133,11 +133,18 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   `.claude/settings.json`): pushing a non-main branch to origin, opening, editing and
   commenting on PRs and issues, re-running CI, and a squash merge pinned to the reviewed
   head (`gh pr merge N --squash --match-head-commit <sha>`), which agents run only after the
-  maintainer's go-ahead for that PR. The guard fails closed: these pass only as one simple
-  command (no `cd`, `&&`, pipes or `$(…)`; use `git -C` and `--body-file`) with allowlisted
-  arguments, and PR/issue text is scanned for secrets. Pushes to main/master, force pushes
-  without a lease, tags, releases, closing or reviewing PRs, `gh api` and repo settings stay
-  permission prompts.
+  maintainer's go-ahead for that PR, and read-only `gh api` (GET) on
+  `repos/joaoheytor/PostelMD/…`. The guard fails closed: these pass only as one simple
+  command (no `cd`, `&&`, `;` or `$(…)`; use `git -C` and `--body-file`) with allowlisted
+  arguments, followed at most by `2>&1`, `>/dev/null` or pipes into `tail`, `head`, `grep`,
+  `wc`, `cat`, `sort` or `uniq`; PR/issue text and commit messages (`-m`, `-F <file>`,
+  `-F - <<'EOF'`) are scanned for secrets. Local git commands may follow a literal
+  `cd <dir>` (`git -C` is preferred) into this project or one of its worktrees, and
+  `git fetch origin pull/<N>/head:<branch or refs/remotes/review/…>` passes. A command may
+  start with literal assignments (`S=/tmp/x; git -C $S log`): the guard substitutes them
+  and judges the result as typed; `export`, `$(…)` values and `S=x cmd` prefixes still ask.
+  Pushes to main/master, force pushes without a lease, tags, releases, closing or reviewing
+  PRs, any other `gh api` and repo settings stay permission prompts.
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
   acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
   in `.claude/agents/` for a PR.

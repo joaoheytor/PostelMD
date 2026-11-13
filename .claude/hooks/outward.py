@@ -1,8 +1,10 @@
 """Which outward-facing git and gh commands pass without a prompt (postelmd_guard.py, git mode).
 
 Fail closed: a `git push` or an outward gh command (gh_rules.kind) passes only when the whole
-Bash call is exactly ONE simple command (shparse.single: no cd, ;, &&, pipes, redirects,
-heredocs, $ or backticks) whose arguments are all on an allowlist. Anything else asks.
+Bash call is exactly ONE simple command (shparse.strict: no cd, ;, &&, ||, redirects,
+heredocs, $ or backticks) whose arguments are all on an allowlist. Anything else asks. Only
+output filters may follow it: 2>&1, >/dev/null and pipes into tail, head, grep, wc, cat,
+sort or uniq with plain flags, numbers or one grep pattern (shparse.filter_ok).
 
   git [-C DIR] [--no-pager] push [-u] [--force-with-lease[=<branch>[:<sha>]]] [-q] [-v]
       [origin [<branch> | <branch>:<branch> | HEAD | HEAD:<branch>]]
@@ -21,7 +23,7 @@ import re
 import codeexec
 import gh_rules
 from bash_writes import strip_heredocs, tokens
-from shparse import UNKNOWN, bare, git_parts, segments, single
+from shparse import UNKNOWN, bare, git_parts, segments, strict
 
 # A command position: start of the command, or after ; & | ( or a newline, optionally after
 # VAR=value assignments or sudo/env/command/xargs. Anchoring here keeps text inside
@@ -153,10 +155,11 @@ def check(cmd, cwd, git_out):
                 or (not tokens(cmd) and re.search(r"\b(push|gh)\b", cmd)):
             return "ask", "a git push or gh command the guard can't parse"
         return None
-    words = single(cmd)
-    if words is None or len(segs) != 1:
-        return "ask", (f"{kinds[0]} must run as one simple command (no cd, ;, &&, pipes, "
-                       "redirects, heredocs, $ or backticks; use git -C and --body-file)")
+    words = strict(cmd)
+    if words is None or len(kinds) != 1 or kind(words) != kinds[0]:
+        return "ask", (f"{kinds[0]} must run as one simple command (no cd, ;, &&, redirects, "
+                       "heredocs, $ or backticks; use git -C and --body-file); only 2>&1, "
+                       ">/dev/null and pipes into tail/head/grep/wc/cat/sort/uniq may follow")
     if words[0] != ("git" if kinds[0] == "push" else "gh"):
         return "ask", f"{kinds[0]} behind another command ({words[0]})"
     if kinds[0] == "push":

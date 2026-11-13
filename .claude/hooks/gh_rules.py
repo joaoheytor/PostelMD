@@ -7,8 +7,11 @@ looking content asks.
   merge  gh pr merge [N] --squash --match-head-commit <40-hex sha> [--delete-branch] [--auto]
   text   gh pr create|comment|edit, gh issue create|comment|edit|close
   plain  gh pr ready [N], gh run rerun [ID] [--failed] [--debug] [--job ID]
-  api    only read-only forms: one endpoint (not graphql) and output flags; no -X/--method,
-         -f/-F/--field/--raw-field, --input or -H. (.claude/settings.json allows no gh api.)
+  api    only GET on this repository: one endpoint under repos/joaoheytor/PostelMD/ (or
+         repos/{owner}/{repo}/), not graphql; output flags (-q/--jq, --paginate, --cache,
+         -i, ...) and -X/--method GET only; no -f/-F/--field/--raw-field, --input, -H or
+         --hostname. .claude/settings.json allows `gh api repos/joaoheytor/PostelMD/...` so
+         the native prompt doesn't fire; this check still asks for anything else.
 """
 import os
 import re
@@ -26,6 +29,10 @@ TEXT_BOOLS = {"--fill", "--fill-first", "--fill-verbose", "-d", "--draft", "--dr
               "--no-maintainer-edit", "--edit-last"}
 API_BOOLS = {"--paginate", "--slurp", "-i", "--include", "--silent", "--verbose"}
 API_VALUES = {"--jq", "-q", "--template", "-t", "--cache"}
+# This repository only ({owner}/{repo} is filled in from the current directory's remote):
+# no .., //, %-escapes, # or full URLs that could reach another repository or host.
+API_ENDPOINT = re.compile(r"/?repos/(joaoheytor/PostelMD|\{owner\}/\{repo\})"
+                          r"(/[A-Za-z0-9_.,:@+-]+)*/?(\?[A-Za-z0-9_.,:@+=&/-]*)?", re.I)
 
 
 def kind(words):
@@ -117,11 +124,16 @@ def check_text(args, cwd):
 def check_api(args):
     if any(a.lower() == "graphql" for a in args):
         return "gh api graphql can mutate"
-    parsed, why = options(args, API_BOOLS, API_VALUES)
+    parsed, why = options(args, API_BOOLS, API_VALUES | {"-X", "--method"})
     if why:
         return why
-    if len(parsed[1]) != 1:
+    found, pos = parsed
+    if any(m != "GET" for m in found.get("-X", []) + found.get("--method", [])):
+        return "gh api with a method other than GET"
+    if len(pos) != 1:
         return "gh api takes one endpoint"
+    if not API_ENDPOINT.fullmatch(pos[0]) or ".." in pos[0]:
+        return f"gh api endpoint {pos[0]} is not under repos/joaoheytor/PostelMD/"
     return None
 
 

@@ -6,7 +6,9 @@ something else, so the guard asks: go's -exec/-toolexec (and GOFLAGS), and -o, p
 -outputdir outside bin/ or a temp dir (they could overwrite a git hook); rebase -x; grep -O;
 a long option not on the subcommand's list (gitopts.py: --output, --open-files-in-pager,
 --exec and their abbreviations); fetch and pull in any form but
-`[-q] [--prune] [--ff-only] [origin [<branch>]]` (--upload-pack runs a command); git -c,
+`[-q] [--prune] [--ff-only] [origin [<branch>]]` (--upload-pack runs a command) or
+`git fetch [-q] origin [+]pull/<N>/head:<dst>` (pr_refspec: dst a local branch other than
+main/master/HEAD, or under refs/remotes/review/ or refs/scratch/, where + may force); git -c,
 --git-dir, ... before any subcommand, and GIT_* variables (GIT_CONFIG_*, GIT_SSH_COMMAND);
 and `..` in a scripts/ path.
 """
@@ -21,6 +23,7 @@ GO_EXEC = re.compile(r"--?(tool)?exec(=|$)")
 GO_OUT = re.compile(r"--?(?:test\.)?(o|coverprofile|cpuprofile|memprofile|blockprofile"
                     r"|mutexprofile|trace|outputdir)(?:=(.*))?$")
 FETCH_FLAGS = {"-q", "--quiet", "--prune", "-p"}
+PR_REFSPEC = re.compile(r"(\+?)pull/\d+/head:([A-Za-z0-9][A-Za-z0-9._/-]*)")
 
 
 def go_output(args, cwd):
@@ -39,14 +42,30 @@ def go_output(args, cwd):
     return None
 
 
+def pr_refspec(ref):
+    """True for pull/<N>/head:<dst> into a review ref or a local branch (not main, master,
+    HEAD or a tag); a + (force) only into refs/remotes/review/ or refs/scratch/."""
+    m = PR_REFSPEC.fullmatch(ref)
+    if not m or ".." in ref or ref.endswith((".lock", "/")) or "//" in ref:
+        return False
+    dst = m.group(2)
+    if dst.startswith(("refs/remotes/review/", "refs/scratch/")):
+        return True
+    name = dst.removeprefix("refs/heads/")
+    return not m.group(1) and not name.startswith(("refs/", "heads/", "tags/", "remotes/")) \
+        and name != "HEAD" and name.lower() not in ("main", "master")
+
+
 def fetch_form(sub, args):
     allowed = FETCH_FLAGS | ({"--ff-only"} if sub == "pull" else set())
     pos = [a for a in args if a not in allowed]
     flags = [a for a in pos if a.startswith("-")]
     if flags:
         return f"git {sub} {flags[0]} (--upload-pack and --exec run commands)"
+    if sub == "fetch" and len(pos) == 2 and pos[0] == "origin" and pr_refspec(pos[1]):
+        return None
     if pos[:1] not in ([], ["origin"]) or len(pos) > 2 or any(":" in p or "+" in p for p in pos):
-        return f"git {sub} takes only [origin [<branch>]]"
+        return f"git {sub} takes only [origin [<branch>]] or origin pull/<N>/head:<review ref>"
     return None
 
 
