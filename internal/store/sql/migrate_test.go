@@ -134,7 +134,10 @@ func TestOpenRefuses(t *testing.T) {
 		{"a newer database", "PRAGMA user_version = 99", embeddedFS(t), ErrNewerDatabase},
 		{"an edited migration", "UPDATE schema_migrations SET sha256 = 'x' WHERE version = 1", embeddedFS(t), ErrEditedMigration},
 		{"a missing record", "DELETE FROM schema_migrations", embeddedFS(t), ErrEditedMigration},
-		{"pending migrations on an existing database", "", two, ErrSnapshotRequired},
+		// The refusals come before any migration: with migrations pending, nothing is written
+		// (no intent, no snapshot).
+		{"a newer database, with migrations this build would run", "PRAGMA user_version = 99", two, ErrNewerDatabase},
+		{"an edited migration, with migrations pending", "UPDATE schema_migrations SET sha256 = 'x' WHERE version = 1", two, ErrEditedMigration},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			db, dir := newDB(t)
@@ -164,6 +167,7 @@ func TestOpenRefuses(t *testing.T) {
 			if wal, err := os.Stat(filepath.Join(dir, AppDB+"-wal")); err == nil && wal.Size() != 0 {
 				t.Fatalf("a refused open left %d bytes in the WAL", wal.Size())
 			}
+			onlyDatabaseFiles(t, dir)
 		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
@@ -36,11 +37,6 @@ var (
 	// one. Released migrations are never edited.
 	ErrEditedMigration = errors.New("sql: an applied migration differs from this build's; " +
 		"this build can't use the database (ADR-0030)")
-	// ErrSnapshotRequired: an existing database (user_version ≥ 1) has pending migrations,
-	// which need ADR-0015's pre-migration snapshot first. That ships with the first release
-	// that migrates an existing database (ADR-0030); until then the runner refuses.
-	ErrSnapshotRequired = errors.New("sql: migrating an existing database needs the " +
-		"pre-migration snapshot, which this build doesn't have (ADR-0030)")
 	// ErrForeignDatabase: user_version is 0 but the file has tables. Nothing changed.
 	ErrForeignDatabase = errors.New("sql: app.db has tables but no PostelMD version, so another " +
 		"program made it; move it out of the state directory and start again (ADR-0030)")
@@ -51,7 +47,7 @@ func refusal(err error) string {
 	for _, r := range []struct {
 		err  error
 		name string
-	}{{ErrNewerDatabase, "newer-database"}, {ErrEditedMigration, "edited-migration"}, {ErrSnapshotRequired, "snapshot-required"},
+	}{{ErrNewerDatabase, "newer-database"}, {ErrEditedMigration, "edited-migration"}, {ErrMigrateInterference, "migrate-interference"},
 		{ErrForeignDatabase, "foreign-database"}} {
 		if errors.Is(err, r.err) {
 			return r.name
@@ -127,14 +123,15 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 type migrated struct {
 	from, to int
 	took     time.Duration
+	snapshot string // the pre-migration snapshot's name in the state directory, if one was taken
 }
 
 // migrate brings the database to fsys's last migration. A new database (user_version 0 and
 // an empty sqlite_schema) gets every migration in one transaction, each setting user_version
 // and recording its row, so a crash leaves version 0 and the next start runs them again
-// (ADR-0030). A newer database, an edited migration, a foreign database (version 0 with
-// tables), or pending migrations on an existing database (they need the pre-migration
-// snapshot, not built yet) are refused, changing nothing.
+// (ADR-0030). An existing database with pending migrations, or an open migrate.intent, goes
+// through the pre-migration snapshot (premigrate.go). A newer database, an edited migration
+// or a foreign database (version 0 with tables) is refused, changing nothing.
 func migrate(ctx context.Context, db *DB, fsys fs.FS) (migrated, error) {
 	start := time.Now()
 	ms, err := loadMigrations(fsys)
@@ -146,19 +143,24 @@ func migrate(ctx context.Context, db *DB, fsys fs.FS) (migrated, error) {
 		return migrated{}, fmt.Errorf("sql: read user_version: %w", err)
 	}
 	done := migrated{from: uv, to: uv}
-	switch {
-	case uv > len(ms):
+	if uv > len(ms) {
 		return done, fmt.Errorf("%w (database version %d, this build's %d)", ErrNewerDatabase, uv, len(ms))
-	case uv > 0:
+	}
+	if uv > 0 {
 		if err := verifyApplied(ctx, db.w, ms[:uv]); err != nil {
 			return done, err
 		}
-		if uv < len(ms) {
-			return done, fmt.Errorf("%w (database version %d, this build's %d)", ErrSnapshotRequired, uv, len(ms))
-		}
+	}
+	in, err := readIntent(filepath.Dir(db.path))
+	switch {
+	case err != nil:
+		return done, err
+	case in != nil:
+		return resume(ctx, db, ms, uv, *in)
+	case uv == len(ms):
 		return done, nil
-	case len(ms) == 0:
-		return done, nil
+	case uv > 0:
+		return migrateExisting(ctx, db, ms, uv)
 	}
 	err = db.writeTx(ctx, func(tx *sql.Tx) error {
 		for _, m := range ms {

@@ -14,11 +14,12 @@ import (
 // createExclusive creates path empty, 0600, with O_CREAT|O_EXCL, and syncs it and its
 // folder, before SQLite opens or writes it: SQLite gives the -wal and -shm files the mode of
 // the database file, so all three stay 0600 (ADR-0030). It returns the open file, which the
-// caller closes. An existing path is os.ErrExist.
-func createExclusive(path string) (*os.File, error) {
+// caller closes. An existing path is os.ErrExist. Errors name what (the database file, the
+// migration intent, …), never the path.
+func createExclusive(path, what string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600) //nolint:gosec // G304: the state directory's own files
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sql: create the %s: %w", what, err)
 	}
 	// The umask can only remove bits from 0600; Fchmod makes the mode exact all the same.
 	err = f.Chmod(0o600)
@@ -31,7 +32,7 @@ func createExclusive(path string) (*os.File, error) {
 	if err != nil {
 		_ = f.Close()
 		_ = os.Remove(path) // a partial file is removed on error (ADR-0030)
-		return nil, fmt.Errorf("sql: create the database file: %w", err)
+		return nil, fmt.Errorf("sql: create the %s: %w", what, err)
 	}
 	return f, nil
 }
