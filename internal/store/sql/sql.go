@@ -116,8 +116,9 @@ func (db *DB) start(ctx context.Context, log *slog.Logger, fsys fs.FS) error {
 		log.Error("database migration refused or failed", "from", m.from, "reason", refusal(err), errattr.Pathless(err))
 		return err
 	}
-	if m.to != m.from {
-		log.Info("database migrated", "from", m.from, "to", m.to, "duration_ms", m.took.Milliseconds())
+	if m.to != m.from || m.snapshot != "" {
+		// The snapshot is named by its file name in the state directory, never by its path.
+		log.Info("database migrated", "from", m.from, "to", m.to, "duration_ms", m.took.Milliseconds(), "snapshot", m.snapshot)
 	}
 	return nil
 }

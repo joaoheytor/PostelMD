@@ -101,7 +101,7 @@ Everything else consumes their interfaces.
     admin.sock               # 0600 Unix socket for online CLI commands (ADR-0009)
     app.db                   # SQLite WAL, 0600: identity, ACLs, file IDs, findings, outbox, intent log (ADR-0030)
     index.db                 # SQLite WAL, 0600: FTS and links; derived, rebuilt by `reindex` (ADR-0030)
-    migrate.intent           # sidecar while a migration's snapshot is taken (ADR-0015)
+    migrate.intent           # sidecar from before a migration's snapshot until it ends (ADR-0015)
     rebuild.intent           # sidecar while `postelmd db rebuild` runs (ADR-0030)
     damaged-*/               # app.db files moved aside by `db rebuild`, never deleted automatically (ADR-0030)
     pre-format-2/            # 0600 copies of format, auth.json, secret.key, config.yaml as v0.1 left them (ADR-0030)
@@ -111,6 +111,7 @@ Everything else consumes their interfaces.
     plugins/<id>/<version>/  # approved plugin artifacts, hash-pinned
     templates/               # instance templates (starter pack copied on first run)
     pre-migrate-*.db         # automatic snapshots before schema migrations (ADR-0015)
+    post-migration-started-* # a migration finished: closes its database-only rollback (ADR-0015)
 ```
 
 Existing notes are mounted at `/data/vaults/<name>`, never at the root of `/data` (ADR-0009).

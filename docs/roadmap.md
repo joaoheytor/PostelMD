@@ -229,7 +229,10 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   - a migration crashed mid-transaction runs again; an edited migration, and a database
     newer than the binary, are refused;
   - the pre-migration snapshot and `migrate.intent`, crashed at each row of their recovery
-    table (ADR-0030, ADR-0015), reach that row's outcome;
+    table (ADR-0030, ADR-0015), reach that row's outcome (process-kill model done in
+    `internal/store/sql`: `TestPreMigrateCrashPoints`, `TestMigrateInterferenceIsRefused`,
+    and a failed write during the snapshot in `TestPreMigrateDiskFull`; the power-loss
+    model is still open);
   - with `POSTELMD_ALLOW_NETWORK_FS` overriding a refused filesystem for the state
     directory, a start refuses to create `app.db`, and creates nothing;
   - an outside `mv` of one of several identical files keeps its ID at once; a unique
