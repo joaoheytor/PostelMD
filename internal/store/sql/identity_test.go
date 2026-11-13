@@ -18,7 +18,8 @@ const testVaultUUID = "6f1c2a7e-3b4d-4c5e-8f90-a1b2c3d4e5f6"
 func sum(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
 
 // anAssignment is a vault of three files (one a busy writer kept from being hashed, one with
-// a name that isn't UTF-8) and a trash of two items, one per layout (ADR-0022).
+// a name that isn't UTF-8) and two trash records with op IDs of each layout, as
+// vault.TrashForImport reads them (its own test covers the layouts).
 func anAssignment(now time.Time) Assignment {
 	return Assignment{
 		VaultUUID: testVaultUUID,
@@ -224,9 +225,12 @@ func version1(t *testing.T) fstest.MapFS {
 // The runbook's rollback to a version-1 build at format 1 (running-v0.1.md): with the
 // server stopped, app.db, its -wal and -shm, the snapshot and the post_migration_started
 // file move into a new folder; the older build then starts with a new database, and the
-// next upgrade migrates again. Leaving the snapshot behind makes that upgrade refuse.
+// next upgrade migrates again. Leaving the snapshot behind makes that upgrade refuse;
+// leaving the post_migration_started file is harmless (the runbook moves it as a precaution,
+// to keep it with its database).
 func TestRunbookRollbackToAVersion1Build(t *testing.T) {
-	for _, moveSnapshot := range []bool{true, false} {
+	for _, c := range []struct{ moveSnapshot, moveMarker bool }{{true, true}, {false, true}, {true, false}} {
+		moveSnapshot := c.moveSnapshot
 		dir := filepath.Join(t.TempDir(), "state")
 		if err := os.Mkdir(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -237,7 +241,10 @@ func TestRunbookRollbackToAVersion1Build(t *testing.T) {
 		if err := os.Mkdir(aside, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		move := []string{AppDB, AppDB + "-wal", AppDB + "-shm", markerName(1, 2)}
+		move := []string{AppDB, AppDB + "-wal", AppDB + "-shm"}
+		if c.moveMarker {
+			move = append(move, markerName(1, 2))
+		}
 		if moveSnapshot {
 			move = append(move, snapshotName(1, 2))
 		}

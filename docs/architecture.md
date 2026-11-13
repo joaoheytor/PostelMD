@@ -26,8 +26,9 @@ Decisions are recorded in [`adr/`](adr/). This document describes how the pieces
 > `/readyz` is `503` until startup ends. A state directory that only
 > `POSTELMD_ALLOW_NETWORK_FS` accepts is refused. The IDs slice's first part adds migration
 > 0002 (`files`, `pending`, `tombstones`, `trash_records`), ULID file IDs, the first
-> assignment's one transaction and its stat-hash-stat walk, and the vault marker's read and
-> write (ADR-0031); nothing assigns IDs until data format 2.
+> assignment's one transaction, its stat-hash-stat walk and trash reader, and the vault
+> marker's read and write, which adopts an unmarked folder as ADR-0027 does (ADR-0031);
+> nothing assigns IDs until data format 2.
 
 ## 1. System context
 

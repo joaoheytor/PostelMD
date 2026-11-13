@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	iofs "io/fs"
+	"slices"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
@@ -32,7 +33,7 @@ func (v *Vault) Survey(ctx context.Context) ([]Observed, error) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		o, ok, err := v.observe(p)
+		o, ok, err := v.observe(ctx, p)
 		if ok {
 			out = append(out, o)
 		}
@@ -44,16 +45,14 @@ func (v *Vault) Survey(ctx context.Context) ([]Observed, error) {
 	return out, nil
 }
 
-// observe hashes p between two stats that agree with the hash's own (same file, unchanged).
-// ok is false for a file that went away.
-func (v *Vault) observe(p string) (o Observed, ok bool, err error) {
+// observe hashes p and stats it again: the hash's own stat, taken through its descriptor
+// before reading, is ADR-0031's first stat, so a file replaced at its path (another inode)
+// or changed while read (size, mtime, ctime) shows as two stats that differ. ok is false for
+// a file that went away.
+func (v *Vault) observe(ctx context.Context, p string) (o Observed, ok bool, err error) {
 	o.Path = p
 	for range hashTries {
-		before, err := v.root.Stat(p)
-		if err != nil {
-			return o, false, gone(err)
-		}
-		during, sum, err := v.root.Hash(p)
+		during, sum, err := v.root.Hash(ctx, p)
 		if err != nil {
 			return o, false, gone(err)
 		}
@@ -63,12 +62,26 @@ func (v *Vault) observe(p string) (o Observed, ok bool, err error) {
 		if o.Stat, err = v.root.Stat(p); err != nil {
 			return o, false, gone(err)
 		}
-		if before == during && during == o.Stat {
+		if during == o.Stat {
 			o.SHA256 = &sum
 			return o, true, nil
 		}
 	}
 	return o, true, nil
+}
+
+// TrashForImport returns every item in the trash, oldest first, for ADR-0031's trash import
+// at the first assignment. It reads the trash as ListTrash does (ADR-0024): a stamp folder
+// holding one entry is that entry (ADR-0022); a <stamp>-<name> entry is the old layout; empty
+// stamp folders, symlinks, special files and names no delete makes are skipped. A missing
+// trash holds nothing. It takes no lock and changes nothing.
+func (v *Vault) TrashForImport() ([]TrashItem, error) {
+	items, _, err := v.ListTrash(-1) // newest first; -1 is never reached, so no limit
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(items)
+	return items, nil
 }
 
 // gone is nil for an error that means the file isn't a regular file at its path any more.

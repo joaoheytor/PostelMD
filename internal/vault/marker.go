@@ -42,7 +42,7 @@ type Marker struct {
 
 // ReadMarker reads the marker of the vault at dir without opening the vault: Open adopts
 // the folder, which would create an empty marker where the format table must see none
-// (ADR-0030). It changes nothing.
+// (ADR-0030). It changes nothing. The caller holds the instance lock (CLAUDE.md rule 12).
 func ReadMarker(dir string, opts ...fs.Option) (Marker, error) {
 	root, err := fs.OpenRoot(dir, opts...)
 	if err != nil {
@@ -87,12 +87,18 @@ func parseMarker(b []byte) (Marker, error) {
 
 // WriteMarker writes the marker of the vault at dir with vaultUUID and format: a temp in the
 // temp folder, synced, renamed over the marker, and the folder synced (ADR-0031). It doesn't
-// open the vault. A marker that wasn't there is first created empty and made durable, as
-// adoption does (ADR-0027): a crash before the rename then leaves an adopted temp folder
-// whose sweep removes the temp, never one that adoption would refuse as the user's.
+// open the vault. The caller holds the instance lock (CLAUDE.md rule 12).
+//
+// Where there is no marker, it first adopts the folder as ADR-0027 does, refusal included:
+// reserved folders holding anything (but a leftover of its own temp) are ErrForeignReserved,
+// and nothing changes. Adopting creates the marker empty and makes it durable, so a crash
+// before the rename leaves an adopted temp folder whose sweep removes the temp, never one
+// that adoption would refuse as the user's. A marker that is a folder or another special
+// file is refused (ErrBadMarker); a symlink there is replaced, never followed.
 //
 // A crash leaves the marker as it was (or empty where there was none) or as written: the
-// rename is the one step that carries meaning, so no intent is needed (CLAUDE.md rule 14).
+// rename is the one step that carries meaning, so no intent is needed (CLAUDE.md rule 14;
+// ADR-0031's table).
 func WriteMarker(dir, vaultUUID string, format int, opts ...fs.Option) error {
 	content := markerHeader + "\n" + vaultUUID + "\n" + strconv.Itoa(format) + "\n"
 	if _, err := parseMarker([]byte(content)); err != nil {
@@ -103,16 +109,17 @@ func WriteMarker(dir, vaultUUID string, format int, opts ...fs.Option) error {
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	v := &Vault{root: root}
-	if err := v.ensureDir(TmpDir); err != nil {
-		return err
-	}
 	rel, tmp := TmpDir+"/"+ownerMarker, TmpDir+"/"+markerTemp
-	if err := root.CreateFile(rel, nil, newFilePerm); err == nil {
-		if err := root.SyncDir(TmpDir); err != nil {
+	_, err = root.Stat(rel)
+	switch {
+	case err == nil, errors.Is(err, fs.ErrSymlink):
+	case errors.Is(err, fs.ErrNotRegular):
+		return fmt.Errorf("%w: it is a folder or a special file; move it aside, then run this again", ErrBadMarker)
+	case errors.Is(err, iofs.ErrNotExist):
+		if err := adoptForMarker(&Vault{root: root}); err != nil {
 			return err
 		}
-	} else if !errors.Is(err, iofs.ErrExist) {
+	default:
 		return err
 	}
 	if err := root.Remove(tmp); err != nil && !errors.Is(err, iofs.ErrNotExist) {
@@ -125,4 +132,24 @@ func WriteMarker(dir, vaultUUID string, format int, opts ...fs.Option) error {
 		return err
 	}
 	return root.SyncDir(TmpDir)
+}
+
+// adoptForMarker is adopt for a folder without the marker, before WriteMarker's temp: the
+// same check (its own temp's leftover aside), then the empty marker, durable.
+func adoptForMarker(v *Vault) error {
+	if err := v.checkUnowned(markerTemp); err != nil {
+		return err
+	}
+	if err := v.ensureDir(TmpDir); err != nil {
+		return err
+	}
+	rel := TmpDir + "/" + ownerMarker
+	if err := v.root.CreateFile(rel, nil, newFilePerm); err != nil {
+		return err
+	}
+	// This sync orders the marker's entry before the temp's. faultfs can't show why it is
+	// needed: it undoes every unsynced entry of a folder together, so without it the two are
+	// lost or kept as one. A filesystem that keeps the later entry (the temp) and loses the
+	// earlier one (the marker) would leave a temp folder that Open's adoption refuses.
+	return v.root.SyncDir(TmpDir)
 }

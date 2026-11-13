@@ -21,10 +21,13 @@ const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 // idLen is a ULID's length: 128 bits in 5-bit characters, the first holding 3.
 const idLen = 26
 
+// idRand is NewID's source of random bits: crypto/rand, which tests replace.
+var idRand io.Reader = rand.Reader
+
 // NewID returns a new file ID with at's milliseconds. crypto/rand.Read never fails (Go 1.24),
 // so neither does NewID.
 func NewID(at time.Time) string {
-	id, err := newULID(at, rand.Reader)
+	id, err := newULID(at, idRand)
 	if err != nil {
 		panic(err) // crypto/rand's Reader doesn't return errors
 	}
@@ -80,13 +83,4 @@ func decode(c byte) int {
 		}
 	}
 	return -1
-}
-
-// idTime is the time in a valid ID's first ten characters (48 bits of milliseconds).
-func idTime(id string) time.Time {
-	var ms int64
-	for i := range 10 {
-		ms = ms<<5 | int64(decode(id[i]))
-	}
-	return time.UnixMilli(ms)
 }

@@ -51,10 +51,25 @@ same way (it ignores the content).
 ### The vault marker
 - `.postelmd-tmp/.created-by-postelmd` holds `postelmd-vault 1`, the vault UUID and the
   format number, one per line. It is written by temp (`.created-by-postelmd.new` in the same
-  folder), `fsync`, rename, `fsync` of the folder. Where no marker exists yet, an empty one
-  is first created and its folder `fsync`ed, as ADR-0027's adoption does: a crash before the
-  rename must not leave a temp folder holding only the temp, which adoption would refuse as
-  the user's. `meta` stores the same UUID.
+  folder), `fsync`, rename, `fsync` of the folder. Where no marker exists yet, the write
+  first adopts the folder as ADR-0027 does, including its refusal: reserved folders holding
+  anything but a leftover of the marker's own temp are refused and nothing changes (the next
+  start's sweep would otherwise delete a user's files from `.postelmd-tmp/`); then the empty
+  marker is created and its folder `fsync`ed, so a crash before the rename never leaves a
+  temp folder holding only the temp, which adoption would refuse as the user's. A marker
+  that is a folder or another special file is refused, never replaced. `meta` stores the
+  same UUID.
+
+  The write's recovery table (one step carries meaning, the rename, so no intent):
+
+  | Crash after | Process kill | Power loss | Next start |
+  |---|---|---|---|
+  | The adoption check, or the empty marker's create, before its folder `fsync` | Marker absent or empty | Marker absent (an unsynced entry is undone) | Adopted as before; a marker absent or empty reads alike at format 1 (ADR-0030's table) |
+  | The empty marker's folder `fsync`, or the temp's create and `fsync` | Empty marker, and maybe `.created-by-postelmd.new` | Empty marker; the temp's entry may be lost | The marker is empty: the step runs again (its stale temp removed first); Open's sweep removes a leftover temp |
+  | The rename, before the folder `fsync` | The new marker | The old marker (empty, or the earlier UUID) or the new one, never a partial one | Old: the step runs again. New: done |
+  | The folder `fsync` | The new marker | The new marker | Done |
+
+  `TestWriteMarkerSurvivesEveryCrashPoint` covers every row under both models.
 - ADR-0030's format table says what each combination of `format`, `app.db` and marker does.
   In short, startup **refuses**, changing nothing, when the marker names another UUID (a
   swapped mount), names a UUID with no `app.db`, or is missing beside a database with live
@@ -135,13 +150,27 @@ check the ID's syntax before any lookup, check membership before choosing betwee
   Consequences, follow-up 2, in the parts [ADR-0034](0034-app-db-before-format-2.md) sets).
   It ships in parts, and only the last writes format 2:
   1. migration 0002 (`files`, `pending`, `tombstones`, `trash_records`; the vault UUID and the
-     "assigned" flag in `meta`), the ULIDs, the first assignment's transaction and walk, and
-     the marker's read and write; nothing assigns yet (flips this ADR);
+     "assigned" flag in `meta`), the ULIDs, the first assignment's transaction, its walk
+     (stat, hash, stat) and its trash reader, and the marker's read and write; nothing
+     assigns yet (flips this ADR);
   2. `postelmd db rollback` (#174): migration 0002 runs against existing databases, so no
      release ships part 1 without it (ADR-0030);
-  3. the startup scan: suspects, both rename rules, pending paths, tombstone expiry;
-  4. data format 2: the first upgrade, ADR-0030's format table, `db rebuild`, `vault claim`,
-     the runbook and the image-level upgrade smoke test (ADR-0034's done conditions).
+  3. the startup scan: suspects and the second pass at least 10 s later, both rename rules,
+     pending paths (a read before the 10 s answers `503` with `Retry-After`), the tombstones'
+     background expiry, and a read or `git status` that gives an unseen path its ID;
+  4. data format 2: the first upgrade's five steps with `pre-format-2/`, ADR-0030's format
+     table with the identity check, `db rebuild` with its intent and rebuild UUID,
+     `vault claim`, `/readyz`'s `read-only` state, the runbook and the image-level upgrade
+     smoke test (ADR-0034's done conditions).
+
+  Two schema facts the later parts build on:
+  - The states and reasons are SQL `CHECK`s (`files.state`, `tombstones.reason`,
+    `trash_records.kind` and `.state`). SQLite can't alter a `CHECK`, so a new value costs a
+    migration that rebuilds the table, which needs its own design first (ADR-0030).
+  - `files.path` is `UNIQUE`, and a suspect row keeps its path. ADR-0033's create, and
+    anything else that gives a path an ID, must resolve a suspect row on the same path (its
+    suspicion cleared, or its ID moved or tombstoned) in the same transaction that inserts
+    the new row.
 
 ## Alternatives considered
 | Option | Why not |

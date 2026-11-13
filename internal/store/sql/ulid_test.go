@@ -48,6 +48,18 @@ func TestULIDIsNotMonotonic(t *testing.T) {
 	}
 }
 
+// The same through NewID itself: with its source giving the same 80 bits twice, two IDs in
+// one millisecond are equal. A monotonic NewID would make the second the first plus one.
+func TestNewIDIsNotMonotonic(t *testing.T) {
+	old := idRand
+	t.Cleanup(func() { idRand = old })
+	idRand = bytes.NewReader(bytes.Repeat([]byte{0x42}, 20))
+	at := time.UnixMilli(1_700_000_000_000)
+	if a, b := NewID(at), NewID(at); a != b {
+		t.Fatalf("NewID(%v) twice from the same random bits = %q, %q: the second derived from the first", at, a, b)
+	}
+}
+
 func TestULIDRandomness(t *testing.T) {
 	seen := map[string]bool{}
 	for range 10_000 {
@@ -88,6 +100,15 @@ func TestValidID(t *testing.T) {
 			t.Errorf("ValidID(%q) = %v, want %v", id, got, want)
 		}
 	}
+}
+
+// idTime is the time in a valid ID's first ten characters (48 bits of milliseconds).
+func idTime(id string) time.Time {
+	var ms int64
+	for i := range 10 {
+		ms = ms<<5 | int64(decode(id[i]))
+	}
+	return time.UnixMilli(ms)
 }
 
 var errBroken = errors.New("broken")

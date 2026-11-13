@@ -106,7 +106,7 @@ func TestMigrationCrashPoints(t *testing.T) {
 				t.Fatalf("after recovery: user_version %d, records %v", uv, recs)
 			}
 			if _, err := db.w.Exec("INSERT INTO crash_probe (x) VALUES (1)"); err != nil {
-				t.Fatalf("migration 2's table: %v", err)
+				t.Fatalf("the last (test-only) migration's table: %v", err)
 			}
 		})
 	}

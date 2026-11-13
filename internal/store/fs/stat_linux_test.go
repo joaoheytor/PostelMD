@@ -4,8 +4,10 @@ package fs
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
+	"io"
 	iofs "io/fs"
 	"os"
 	"path/filepath"
@@ -41,31 +43,47 @@ func TestStat(t *testing.T) {
 	}
 }
 
-// StatOf reads a listed entry's Info the same way Stat reads the file.
-func TestStatOf(t *testing.T) {
-	r, _ := newVault(t)
-	es, err := r.ReadDir("dir")
+// A canceled hash stops within one chunk, whatever the file's size: asserted by the bytes
+// read, never by time (CLAUDE.md, Testing conventions).
+func TestHashStopsWhenCanceled(t *testing.T) {
+	r, vault := newVault(t)
+	f, err := os.Create(filepath.Join(vault, "huge.bin"))
 	mustDo(t, err)
-	info, err := es[0].Info()
-	mustDo(t, err)
-	got, ok := StatOf(info)
-	want, err := r.Stat("dir/note.md")
-	mustDo(t, err)
-	if !ok || got != want {
-		t.Fatalf("StatOf = %+v, %v; Stat = %+v", got, ok, want)
+	mustDo(t, errors.Join(f.Truncate(8<<30), f.Close())) // sparse: 8 GiB that cost nothing
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := r.Hash(ctx, "huge.bin"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Hash = %v, want context.Canceled", err)
 	}
-	if _, ok := StatOf(fakeInfo{}); ok {
-		t.Fatal("StatOf took an Info that isn't from ReadDir")
+	// The copy itself: canceled during the first chunk, it reads at most one more.
+	ctx, cancel = context.WithCancel(context.Background())
+	src := &endless{cancelAt: 1, cancel: cancel}
+	n, err := copyCtx(ctx, io.Discard, src)
+	if !errors.Is(err, context.Canceled) || n > 2*hashChunk || src.read != n {
+		t.Fatalf("copyCtx = %d bytes, %v; want context.Canceled within two chunks", n, err)
+	}
+	if n, err := copyCtx(context.Background(), io.Discard, bytes.NewReader(make([]byte, hashChunk+1))); err != nil || n != hashChunk+1 {
+		t.Fatalf("copyCtx of a chunk and a byte = %d, %v", n, err)
 	}
 }
 
-type fakeInfo struct{ iofs.FileInfo }
+// endless is a reader that never ends; it calls cancel once it has served cancelAt bytes.
+type endless struct {
+	read, cancelAt int64
+	cancel         func()
+}
 
-func (fakeInfo) Sys() any { return nil }
+func (e *endless) Read(p []byte) (int, error) {
+	e.read += int64(len(p))
+	if e.read >= e.cancelAt {
+		e.cancel()
+	}
+	return len(p), nil
+}
 
 func TestHash(t *testing.T) {
 	r, vault := newVault(t)
-	st, sum, err := r.Hash("dir/note.md")
+	st, sum, err := r.Hash(context.Background(), "dir/note.md")
 	mustDo(t, err)
 	if want := sha256.Sum256([]byte("inside")); sum != want {
 		t.Fatalf("Hash = %x, want %x", sum, want)
@@ -76,7 +94,7 @@ func TestHash(t *testing.T) {
 	// Past the read limit, streamed like any other (ADR-0031).
 	big := bytes.Repeat([]byte("x"), MaxFileSize+1)
 	mustDo(t, os.WriteFile(filepath.Join(vault, "big.bin"), big, 0o600))
-	_, sum, err = r.Hash("big.bin")
+	_, sum, err = r.Hash(context.Background(), "big.bin")
 	mustDo(t, err)
 	if want := sha256.Sum256(big); sum != want {
 		t.Fatal("Hash of a file over the read limit is wrong")
@@ -88,7 +106,7 @@ func TestHash(t *testing.T) {
 		"fifo":        ErrNotRegular, // opened without blocking, then refused
 		"missing.md":  iofs.ErrNotExist,
 	} {
-		if _, _, err := r.Hash(p); !errors.Is(err, wantErr) {
+		if _, _, err := r.Hash(context.Background(), p); !errors.Is(err, wantErr) {
 			t.Errorf("Hash(%q) = %v, want %v", p, err, wantErr)
 		}
 	}

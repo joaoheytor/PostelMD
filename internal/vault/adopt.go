@@ -38,17 +38,8 @@ func (v *Vault) adopt() error {
 	if !errors.Is(err, iofs.ErrNotExist) {
 		return fmt.Errorf("vault: check %s: %w", TmpDir, err)
 	}
-	for _, d := range []string{TmpDir, TrashDir} {
-		entries, err := v.root.ReadDir(d)
-		if errors.Is(err, iofs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("vault: check %s: %w", d, err)
-		}
-		if len(entries) > 0 {
-			return foreignReserved(d)
-		}
+	if err := v.checkUnowned(""); err != nil {
+		return err
 	}
 	if err := v.ensureDir(TmpDir); err != nil {
 		return err
@@ -57,6 +48,27 @@ func (v *Vault) adopt() error {
 		return err
 	}
 	return v.root.SyncDir(TmpDir)
+}
+
+// checkUnowned is adoption's check of a folder without the marker (ADR-0027): each reserved
+// folder must be missing or empty, else ErrForeignReserved and nothing changes. tmpLeftover,
+// if set, is a name the temp folder may hold as a regular file (the marker write's own temp).
+func (v *Vault) checkUnowned(tmpLeftover string) error {
+	for _, d := range []string{TmpDir, TrashDir} {
+		entries, err := v.root.ReadDir(d)
+		if errors.Is(err, iofs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("vault: check %s: %w", d, err)
+		}
+		for _, e := range entries {
+			if d != TmpDir || tmpLeftover == "" || e.Name() != tmpLeftover || !e.Type().IsRegular() {
+				return foreignReserved(d)
+			}
+		}
+	}
+	return nil
 }
 
 // sweepTemps removes every leftover temp file, apart from the marker: a save that didn't

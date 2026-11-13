@@ -20,10 +20,22 @@ The maintainer's steps for a release candidate and a release. The design is in
   the first push never creates it private).
 - The GHCR `postelmd` package is public and linked to the repository.
 
+## Release blockers
+
+Check these before tagging anything, release candidates included. `verify-release-tag.sh`
+fails a tag that breaks one of them, but only after you pushed it, and a tag is never moved
+or reused.
+
+- **No `v*` tag on a commit that contains `internal/store/sql/migrations/0002_*` until
+  `postelmd db rollback` (#174) is on `main`** (ADR-0030: the first release whose migrations
+  run against existing databases ships the rollback). Check with
+  `git ls-tree -r --name-only <commit> -- internal/store/sql/migrations/` and
+  `postelmd help`.
+
 ## 1. Release candidate
 
-1. Pick a `main` commit whose `ci` and `candidate` runs passed. `prerelease.yaml` checks the
-   `ci` run itself and fails with "no ci.yaml run … yet" or "still in_progress" if you were
+1. Pick a `main` commit whose `ci` and `candidate` runs passed, and check the
+   [release blockers](#release-blockers) on it. `prerelease.yaml` checks the `ci` run itself and fails with "no ci.yaml run … yet" or "still in_progress" if you were
    early: wait for `main`'s CI, then re-run.
 2. Sign and push the tag:
 
@@ -63,7 +75,9 @@ The order is: **RC → test → CHANGELOG PR → tag `vX.Y.Z` on the tested RC's
    heading (`ci.yaml`'s `changelog` check needs it). `release.yaml` reads the release notes
    from `CHANGELOG.md` **on `main`**, so this PR can merge after the RC you tested; no new RC
    is needed.
-2. Sign and push the release tag on **the commit of the RC you tested** (not `main`'s head):
+2. Check the [release blockers](#release-blockers) on the RC's commit again (a blocker
+   found since the RC still stops the release), then sign and push the release tag on
+   **the commit of the RC you tested** (not `main`'s head):
 
    ```sh
    git fetch origin --tags

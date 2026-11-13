@@ -112,7 +112,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   (database version 2), empty until file IDs arrive with data format 2. It copies the
   database to `.postelmd/pre-migrate-1-2.db` first. An earlier `:main` build refuses the
   migrated database: to roll back to one, move the files the runbook's "Upgrade and
-  rollback" section lists. Rolling back to 0.1.0-rc.1 is still the image swap.
+  rollback" section lists. Rolling back to 0.1.0-rc.1 is still the image swap. No release,
+  release candidates included, ships this before `postelmd db rollback` (#174);
+  `verify-release-tag.sh` refuses such a tag.
 - A stop (`docker stop`, Ctrl-C) while the server is still starting exits cleanly, with code
   0, instead of reporting an error.
 - **Breaking:** `POSTELMD_ALLOW_NETWORK_FS` no longer covers `/data/.postelmd`: a server

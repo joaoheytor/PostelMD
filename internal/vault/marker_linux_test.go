@@ -145,6 +145,56 @@ func TestWriteMarker(t *testing.T) {
 	}
 }
 
+// With no marker, WriteMarker adopts the folder as ADR-0027 does, refusal included: a
+// reserved folder holding entries PostelMD didn't make is refused and nothing changes, or the
+// next Open's sweep would delete the user's files from the temp folder.
+func TestWriteMarkerRefusesUnownedReservedFolders(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"the temp folder":  {TmpDir + "/mine.txt": "the user's"},
+		"the trash folder": {TrashDir + "/mine.txt": "the user's"},
+		"the temp folder, holding only a file named like the marker's temp, beside the trash": {
+			TmpDir + "/" + markerTemp: "", TrashDir + "/mine.txt": "the user's"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, files)
+			if err := WriteMarker(dir, uuidA, 2); !errors.Is(err, ErrForeignReserved) {
+				t.Fatalf("WriteMarker = %v, want ErrForeignReserved", err)
+			}
+			if _, err := os.Lstat(markerPath(dir)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("a refused WriteMarker left a marker: %v", err)
+			}
+			for p, want := range files {
+				if got := content(t, dir, p); got != want {
+					t.Fatalf("%s: %q, want %q", p, got, want)
+				}
+			}
+		})
+	}
+	// The one exception: a temp folder holding only the marker's temp (nothing else of the
+	// user's) is a crash's leftover, and is adopted.
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{TmpDir + "/" + markerTemp: "partial"})
+	must(t, WriteMarker(dir, uuidA, 2))
+	if m, err := ReadMarker(dir); err != nil || m.VaultUUID != uuidA {
+		t.Fatalf("ReadMarker = %+v, %v", m, err)
+	}
+}
+
+// A marker that is a folder (or another special file) isn't overwritten: the error says so.
+func TestWriteMarkerRefusesAMarkerThatIsAFolder(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.MkdirAll(markerPath(dir), 0o700))
+	writeFiles(t, dir, map[string]string{TmpDir + "/" + ownerMarker + "/inside": "x"})
+	err := WriteMarker(dir, uuidA, 2)
+	if !errors.Is(err, ErrBadMarker) || !strings.Contains(err.Error(), "move it aside") {
+		t.Fatalf("WriteMarker = %v, want ErrBadMarker naming the fix", err)
+	}
+	if got := content(t, dir, TmpDir+"/"+ownerMarker+"/inside"); got != "x" {
+		t.Fatalf("the folder's content changed: %q", got)
+	}
+}
+
 // TestWriteMarkerSurvivesEveryCrashPoint: WriteMarker crashed at every step, under the
 // process-kill and power-loss models, from each state the upgrade, db rebuild or vault claim
 // can find (CLAUDE.md rule 14). The marker reads as what was there before or as the new one,
@@ -158,6 +208,9 @@ func TestWriteMarkerSurvivesEveryCrashPoint(t *testing.T) {
 		},
 		"another UUID": func(t *testing.T, dir string) {
 			writeFiles(t, dir, map[string]string{TmpDir + "/" + ownerMarker: "postelmd-vault 1\n" + uuidB + "\n2\n"})
+		},
+		"an empty marker and a crash's temp": func(t *testing.T, dir string) {
+			writeFiles(t, dir, map[string]string{TmpDir + "/" + ownerMarker: "", TmpDir + "/" + markerTemp: "postelmd-vault 1\n"})
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

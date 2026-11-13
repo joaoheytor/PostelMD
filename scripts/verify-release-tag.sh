@@ -5,7 +5,8 @@
 #   2. it is an annotated tag pointing to a commit (not a lightweight tag);
 #   3. it carries a valid SSH signature from a key in .github/allowed_signers, read from
 #      origin/main (so removing a key there revokes it, and a tag can't bring its own key);
-#   4. the tagged commit is on origin/main.
+#   4. the tagged commit is on origin/main;
+#   5. release blockers: a commit with migration 0002 has `postelmd db rollback` (#174).
 # Usage: scripts/verify-release-tag.sh <tag>. Needs full history and the tag object:
 # actions/checkout can turn an annotated tag into a lightweight one, so workflows re-fetch
 #   git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" refs/heads/main:refs/remotes/origin/main
@@ -36,5 +37,14 @@ printf '%s\n' "$out" | grep -q '^Good "git" signature for ' ||
 
 git merge-base --is-ancestor "refs/tags/$tag^{commit}" origin/main ||
   fail "tagged commit is not on main"
+
+# Release blocker (ADR-0030, #174): migration 0002 is the first to run against existing
+# databases, and a release that ships it must also ship `postelmd db rollback`. That command
+# is recognized by its line in the usage text of cmd/postelmd/main.go ("  db rollback  ...").
+commit=$(git rev-parse "refs/tags/$tag^{commit}")
+if git ls-tree -r --name-only "$commit" -- internal/store/sql/migrations/ | grep -q '/0002_'; then
+  git show "$commit:cmd/postelmd/main.go" 2>/dev/null | grep -Eq '^ +db rollback +[A-Za-z]' ||
+    fail "has migration 0002 but no \`postelmd db rollback\` (#174): no release, RC included, until it is on main"
+fi
 
 echo "verify-release-tag: $tag OK ($(printf '%s\n' "$out" | grep '^Good' | head -n 1))"
