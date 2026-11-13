@@ -3,7 +3,7 @@
 package sql
 
 import (
-	"context"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -121,13 +121,88 @@ func TestMigrateInterferenceIsRefused(t *testing.T) {
 			snapshotAt(t, embeddedFS(t), filepath.Join(dir, snap))
 			writeIntentFile(t, dir, in)
 		}},
+		// A file SQLite would open beside the snapshot: a FIFO there would block it for good.
+		{"at from, a FIFO at the snapshot's -journal", func(t *testing.T, dir string) {
+			snapshotAt(t, embeddedFS(t), filepath.Join(dir, snap))
+			mustMkfifo(t, filepath.Join(dir, snap+"-journal"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"at from, a file at the snapshot's -journal", func(t *testing.T, dir string) {
+			snapshotAt(t, embeddedFS(t), filepath.Join(dir, snap))
+			writeFile(t, filepath.Join(dir, snap+"-journal"), []byte("planted"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"between from and to, a FIFO at the snapshot's -journal", func(t *testing.T, dir string) {
+			openWith(t, dir, one)
+			mustRemove(t, filepath.Join(dir, snapshotName(from, from+1)))
+			snapshotAt(t, embeddedFS(t), filepath.Join(dir, snap))
+			mustMkfifo(t, filepath.Join(dir, snap+"-journal"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"at to, a FIFO at the snapshot's -journal", func(t *testing.T, dir string) {
+			openWith(t, dir, later) // nothing opens the snapshot at to: only the early check sees it
+			mustMkfifo(t, filepath.Join(dir, snap+"-journal"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"at from, a FIFO at the snapshot's -wal", func(t *testing.T, dir string) {
+			snapshotAt(t, embeddedFS(t), filepath.Join(dir, snap))
+			mustMkfifo(t, filepath.Join(dir, snap+"-wal"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"no intent, a FIFO at the snapshot's -journal", func(t *testing.T, dir string) {
+			mustMkfifo(t, filepath.Join(dir, snap+"-journal"))
+		}},
+		{"at from, a FIFO at the snapshot temp's -journal", func(t *testing.T, dir string) {
+			mustMkfifo(t, filepath.Join(dir, snap+".tmp-journal"))
+			writeIntentFile(t, dir, in)
+		}},
+		{"no intent, the snapshot temp's -journal already there", func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, snap+".tmp-journal"), []byte("stale"))
+		}},
+		// The post_migration_started file is checked before the first side effect, not after
+		// the migrations committed.
+		{"at from, a folder at the post_migration_started file", func(t *testing.T, dir string) {
+			mustMkdir(t, filepath.Join(dir, markerName(from, to)))
+			writeIntentFile(t, dir, in)
+		}},
+		{"at from, a symlink at the post_migration_started file", func(t *testing.T, dir string) {
+			mustSymlink(t, filepath.Join(t.TempDir(), "marker"), filepath.Join(dir, markerName(from, to)))
+			writeIntentFile(t, dir, in)
+		}},
+		{"no intent, a folder at the post_migration_started file", func(t *testing.T, dir string) {
+			mustMkdir(t, filepath.Join(dir, markerName(from, to)))
+		}},
+		{"no intent, a symlink at the post_migration_started file", func(t *testing.T, dir string) {
+			mustSymlink(t, filepath.Join(t.TempDir(), "marker"), filepath.Join(dir, markerName(from, to)))
+		}},
+		// readIntent's guards.
+		{"an intent with trailing data", func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, MigrateIntent),
+				fmt.Appendf(nil, `{"from":%d,"to":%d,"snapshot":%q}{}`, from, to, snap))
+		}},
+		{"an intent from 0", func(t *testing.T, dir string) {
+			writeIntentFile(t, dir, intent{From: 0, To: to, Snapshot: snapshotName(0, to)})
+		}},
+		{"an intent with to not above from", func(t *testing.T, dir string) {
+			writeIntentFile(t, dir, intent{From: from, To: from, Snapshot: snapshotName(from, from)})
+		}},
+		{"a folder at the intent", func(t *testing.T, dir string) {
+			mustMkdir(t, filepath.Join(dir, MigrateIntent))
+		}},
+		{"a FIFO at the intent", func(t *testing.T, dir string) {
+			mustMkfifo(t, filepath.Join(dir, MigrateIntent))
+		}},
+		{"an intent over the size cap", func(t *testing.T, dir string) {
+			b := fmt.Appendf(nil, `{"from":%d,"to":%d,"snapshot":%q}`, from, to, snap)
+			writeFile(t, filepath.Join(dir, MigrateIntent), append(b, bytes.Repeat([]byte(" "), intentMax)...))
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := closedDB(t)
 			c.setup(t, dir)
 			before := files(t, dir)
 			_, had := before[AppDB]
-			db, err := open(context.Background(), dir, discard, later)
+			db, err := openGuarded(t, dir, later)
 			if !errors.Is(err, ErrMigrateInterference) {
 				if db != nil {
 					_ = db.Close()
@@ -138,7 +213,7 @@ func TestMigrateInterferenceIsRefused(t *testing.T) {
 			if !had {
 				delete(after, AppDB) // the open created an empty one, and refused the intent
 			}
-			for _, n := range []string{MigrateIntent, snap, snap + ".tmp", AppDB} {
+			for _, n := range []string{MigrateIntent, snap, snap + ".tmp", snap + ".tmp-journal", snap + "-journal", markerName(from, to), AppDB} {
 				if before[n] != after[n] {
 					t.Fatalf("a refused open changed %s", n)
 				}

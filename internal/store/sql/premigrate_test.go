@@ -89,7 +89,7 @@ func assertMigrated(t *testing.T, db *DB, dir string, from, to int) {
 	if fi, err := os.Lstat(filepath.Join(dir, markerName(from, to))); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("the post_migration_started file: %v, %v", fi, err)
 	}
-	for _, p := range []string{MigrateIntent, MigrateIntent + ".tmp", snapshotName(from, to) + ".tmp"} {
+	for _, p := range []string{MigrateIntent, MigrateIntent + ".tmp", snapshotName(from, to) + ".tmp", snapshotName(from, to) + ".tmp-journal"} {
 		if _, err := os.Lstat(filepath.Join(dir, p)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s is left: %v", p, err)
 		}

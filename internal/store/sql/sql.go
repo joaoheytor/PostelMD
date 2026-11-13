@@ -57,7 +57,7 @@ func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*
 		return nil, err
 	}
 	path := filepath.Join(stateDir, AppDB)
-	f, err := createExclusive(path)
+	f, err := createExclusive(path, "database file")
 	if err == nil {
 		err = f.Close()
 	}

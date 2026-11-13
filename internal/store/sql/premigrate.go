@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Migrating an existing database (user_version ≥ 1) follows ADR-0015's "Snapshot crash
@@ -32,16 +34,21 @@ import (
 //	| anything else (or the intent's `to` isn't this build's last migration, or the     |
 //	| snapshot fails verification or isn't a regular file) | refuse, change nothing    |
 //
+// Before the first side effect, in both a new migration and a resumed one, a -journal, -wal
+// or -shm beside the snapshot (no step leaves one, and SQLite opening a FIFO there blocks for
+// good) and a post_migration_started path that isn't a regular file are "anything else".
+//
 // Nothing is ever inferred from one signal: a version alone doesn't say the snapshot exists,
 // and a snapshot file alone doesn't say it is whole.
 
 // migrateExisting starts a migration of an existing database at version from to the last of
-// ms. A snapshot (or its temp) already there without an intent isn't this run's: refused.
+// ms. A snapshot, its temp or either's -journal already there without an intent isn't this
+// run's: refused, as is a post_migration_started path that isn't a regular file.
 func migrateExisting(ctx context.Context, db *DB, ms []migration, from int) (migrated, error) {
 	to := len(ms)
 	in := intent{From: from, To: to, Snapshot: snapshotName(from, to)}
 	snap := filepath.Join(filepath.Dir(db.path), in.Snapshot)
-	for _, p := range []string{snap, snap + ".tmp"} {
+	for _, p := range []string{snap, snap + ".tmp", snap + ".tmp-journal", snap + "-journal"} {
 		ok, err := present(p)
 		if err == nil && ok {
 			err = fmt.Errorf("%w (a pre-migration snapshot is already there without an intent)", ErrMigrateInterference)
@@ -49,6 +56,9 @@ func migrateExisting(ctx context.Context, db *DB, ms []migration, from int) (mig
 		if err != nil {
 			return migrated{from: from, to: from}, err
 		}
+	}
+	if err := checkPlanted(filepath.Dir(db.path), in); err != nil {
+		return migrated{from: from, to: from}, err
 	}
 	if err := writeIntent(filepath.Dir(db.path), in); err != nil {
 		return migrated{from: from, to: from}, err
@@ -74,6 +84,9 @@ func resume(ctx context.Context, db *DB, ms []migration, uv int, in intent) (mig
 	}
 	tmp, err := present(snap + ".tmp")
 	if err != nil {
+		return done, err
+	}
+	if err := checkPlanted(filepath.Dir(db.path), in); err != nil {
 		return done, err
 	}
 	switch {
@@ -133,8 +146,10 @@ func takeSnapshot(ctx context.Context, db *DB, snap string, from int) error {
 	}
 	killPoint("snapshot-verified")
 	// Under the instance lock nothing else writes the state directory, and present(snap)
-	// was false just before: the rename replaces nothing.
-	if err := os.Rename(tmp, snap); err != nil {
+	// was false just before: the rename replaces nothing, and RENAME_NOREPLACE makes sure.
+	if err := renameNoReplace(tmp, snap); errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%w (a file appeared at the snapshot's name)", ErrMigrateInterference)
+	} else if err != nil {
 		return fmt.Errorf("sql: put the snapshot in place: %w", err)
 	}
 	killPoint("snapshot-renamed")
@@ -145,14 +160,49 @@ func takeSnapshot(ctx context.Context, db *DB, snap string, from int) error {
 	return nil
 }
 
-// verifySnapshot checks a snapshot already in place again: integrity_check and version from.
+// verifySnapshot checks a snapshot already in place again: integrity_check and version from,
+// on the file still at snap after the check.
 func verifySnapshot(ctx context.Context, snap string, from int) error {
+	before, err := os.Lstat(snap)
+	if err != nil {
+		return fmt.Errorf("sql: the pre-migration snapshot: %w", err)
+	}
 	v, err := checkCopy(ctx, snap)
 	if err != nil {
 		return errors.Join(ErrMigrateInterference, err)
 	}
+	killPoint("snapshot-rechecked")
+	if after, err := os.Lstat(snap); err != nil || !os.SameFile(before, after) {
+		return fmt.Errorf("%w (the snapshot was replaced while it was verified)", ErrMigrateInterference)
+	}
 	if v != from {
 		return fmt.Errorf("%w (the snapshot has version %d, not %d)", ErrMigrateInterference, v, from)
+	}
+	return nil
+}
+
+// checkPlanted refuses, before the migration's first side effect, what none of its steps
+// leaves: a file beside the snapshot that SQLite would open with it (a FIFO there would block
+// the open for good), and a post_migration_started path that isn't a regular file (found
+// only after the migrations committed, it couldn't be refused with nothing changed).
+func checkPlanted(stateDir string, in intent) error {
+	if err := noCopySidecars(filepath.Join(stateDir, in.Snapshot)); err != nil {
+		return errors.Join(ErrMigrateInterference, err)
+	}
+	_, err := present(filepath.Join(stateDir, markerName(in.From, in.To)))
+	return err
+}
+
+// renameNoReplace renames from to to, failing with os.ErrExist if to exists. Only a kernel
+// or filesystem without renameat2's RENAME_NOREPLACE falls back to rename(2), which the
+// caller's checks under the instance lock make safe.
+func renameNoReplace(from, to string) error {
+	err := unix.Renameat2(unix.AT_FDCWD, from, unix.AT_FDCWD, to, unix.RENAME_NOREPLACE)
+	if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) {
+		return os.Rename(from, to)
+	}
+	if err != nil {
+		return &os.LinkError{Op: "rename", Old: from, New: to, Err: err}
 	}
 	return nil
 }
@@ -171,16 +221,20 @@ func markStarted(ctx context.Context, db *DB, in intent) error {
 	}
 	killPoint("marked-db")
 	path := filepath.Join(filepath.Dir(db.path), markerName(in.From, in.To))
-	f, err := createExclusive(path) // empty, fsynced, folder fsynced
+	f, err := createExclusive(path, "post_migration_started file") // empty, fsynced, folder fsynced
 	if errors.Is(err, os.ErrExist) {
-		if ok, perr := present(path); perr != nil || !ok {
-			return errors.Join(fmt.Errorf("%w (the post_migration_started file)", ErrMigrateInterference), perr)
+		// checkPlanted refused anything but a regular file before the first side effect;
+		// this check stays as a defence. present's own error already says interference.
+		ok, perr := present(path)
+		if perr != nil {
+			return perr
 		}
-		err = nil
-	} else if err == nil {
-		err = f.Close()
-	}
-	if err != nil {
+		if !ok {
+			return fmt.Errorf("%w (the post_migration_started file went away)", ErrMigrateInterference)
+		}
+	} else if err != nil {
+		return err // createExclusive's error names the file
+	} else if err := f.Close(); err != nil {
 		return fmt.Errorf("sql: write the post_migration_started file: %w", err)
 	}
 	killPoint("marked")

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,15 +57,24 @@ func readIntent(stateDir string) (*intent, error) {
 		return nil, fmt.Errorf("%w (the intent is a symlink)", ErrMigrateInterference)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("sql: read the migration intent: %w", err)
+		return nil, intentIOError(err)
 	}
 	defer func() { _ = f.Close() }()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || fi.Size() > intentMax {
-		return nil, errors.Join(fmt.Errorf("%w (the intent isn't a small regular file)", ErrMigrateInterference), err)
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, intentIOError(err)
 	}
-	b := make([]byte, intentMax+1)
-	n, _ := f.Read(b)
-	dec := json.NewDecoder(bytes.NewReader(b[:n]))
+	if !fi.Mode().IsRegular() || fi.Size() > intentMax {
+		return nil, fmt.Errorf("%w (the intent isn't a small regular file)", ErrMigrateInterference)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, intentMax+1))
+	if err != nil {
+		return nil, intentIOError(err)
+	}
+	if len(b) > intentMax { // it grew since the Stat
+		return nil, fmt.Errorf("%w (the intent isn't a small regular file)", ErrMigrateInterference)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var in intent
 	if err := dec.Decode(&in); err != nil || dec.More() {
@@ -74,6 +84,16 @@ func readIntent(stateDir string) (*intent, error) {
 		return nil, fmt.Errorf("%w (the intent names %d → %d)", ErrMigrateInterference, in.From, in.To)
 	}
 	return &in, nil
+}
+
+// intentIOError is an I/O error reading the intent, which isn't interference: it keeps the
+// operation and the cause, and names the file by its fixed name instead of its path.
+func intentIOError(err error) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		err = &fs.PathError{Op: pe.Op, Path: MigrateIntent, Err: pe.Err}
+	}
+	return fmt.Errorf("sql: read the migration intent: %w", err)
 }
 
 // writeIntent makes stateDir/migrate.intent durable before the migration's first side
@@ -89,7 +109,7 @@ func writeIntent(stateDir string, in intent) error {
 	if err != nil {
 		return err
 	}
-	f, err := createExclusive(tmp)
+	f, err := createExclusive(tmp, "migration intent")
 	if err != nil {
 		return err
 	}

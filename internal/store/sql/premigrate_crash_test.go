@@ -68,21 +68,42 @@ func runHelper(t *testing.T, dir string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-// onDisk is what a crash left: the intent, the committed version, the snapshot and its temp.
+// onDisk is what a crash left: the intent and its temp, the committed version, the snapshot
+// and its temp, and the post_migration_started row (in meta) and file.
 type onDisk struct {
-	intent, snap, tmp bool
-	uv                int // relative to from
+	intent, intentTmp, snap, tmp bool
+	markerRow, markerFile        bool
+	uv                           int // relative to from
 }
 
 func readOnDisk(t *testing.T, dir string, from, to int) onDisk {
 	t.Helper()
 	exists := func(n string) bool { _, err := os.Lstat(filepath.Join(dir, n)); return err == nil }
 	return onDisk{
-		intent: exists(MigrateIntent),
-		snap:   exists(snapshotName(from, to)),
-		tmp:    exists(snapshotName(from, to) + ".tmp"),
-		uv:     committedVersion(t, dir) - from,
+		intent:     exists(MigrateIntent),
+		intentTmp:  exists(MigrateIntent + ".tmp"),
+		snap:       exists(snapshotName(from, to)),
+		tmp:        exists(snapshotName(from, to) + ".tmp"),
+		markerRow:  committedMarker(t, dir, from, to),
+		markerFile: exists(markerName(from, to)),
+		uv:         committedVersion(t, dir) - from,
 	}
+}
+
+// committedMarker reports, from a read-only connection, whether the post_migration_started
+// row of from → to is committed.
+func committedMarker(t *testing.T, dir string, from, to int) bool {
+	t.Helper()
+	p, err := openPool(filepath.Join(dir, AppDB), "mode=ro", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Close() }()
+	var n int
+	if err := p.QueryRow("SELECT count(*) FROM meta WHERE key = ?", markerKey(from, to)).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n == 1
 }
 
 // Every crash point of the pre-migration path (premigrate.go), with the ADR-0015 row the
@@ -98,7 +119,7 @@ func TestPreMigrateCrashPoints(t *testing.T) {
 		at   string
 		want onDisk
 	}{
-		{"intent-synced:1", onDisk{}}, // the intent's temp only: nothing started
+		{"intent-synced:1", onDisk{intentTmp: true}}, // the intent's temp only: nothing started
 		{"intent-written:1", row1},
 		{"copied:1", row1tmp},
 		{"snapshot-verified:1", row1tmp},
@@ -108,9 +129,9 @@ func TestPreMigrateCrashPoints(t *testing.T) {
 		{"after-commit:1", row3},
 		{"before-sql:2", row3}, {"before-version:2", row3}, {"before-record:2", row3}, {"before-commit:2", row3},
 		{"after-commit:2", row4},
-		{"marked-db:1", row4},
-		{"marked:1", row4},
-		{"intent-removed:1", onDisk{snap: true, uv: 2}}, // done
+		{"marked-db:1", onDisk{intent: true, snap: true, uv: 2, markerRow: true}},
+		{"marked:1", onDisk{intent: true, snap: true, uv: 2, markerRow: true, markerFile: true}},
+		{"intent-removed:1", onDisk{snap: true, uv: 2, markerRow: true, markerFile: true}}, // done
 	} {
 		t.Run(c.at, func(t *testing.T) {
 			dir := closedDB(t)
