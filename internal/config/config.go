@@ -67,7 +67,11 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 		c.DataDir = flagData
 	}
 	// Absolute and clean, resolved once here: store/sql refuses relative database paths, and
-	// every later step and command must name the same directory (ADR-0030, follow-up 2).
+	// every later step and command must name the same directory (ADR-0030, follow-up 2). An
+	// empty one is refused: filepath.Abs would make it the working directory.
+	if c.DataDir == "" {
+		return c, errors.New("config: the data directory (--data) is empty")
+	}
 	abs, err := filepath.Abs(c.DataDir)
 	if err != nil {
 		return c, fmt.Errorf("config: the data directory: %w", err)

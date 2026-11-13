@@ -13,8 +13,11 @@ import (
 // accepts, and the database can't live there (ADR-0030).
 var ErrDatabaseOnNetworkFS = errors.New("layout: /data/.postelmd is on a filesystem that only " +
 	"POSTELMD_ALLOW_NETWORK_FS accepts, and PostelMD's database (.postelmd/app.db) can't live there: " +
-	"SQLite needs working shared memory and POSIX locks (ADR-0030). Mount a local volume at " +
-	"/data/.postelmd; the notes folder can stay where it is, and the override still applies to it")
+	"SQLite needs working shared memory and POSIX locks (ADR-0030). With the server stopped, " +
+	"copy the old .postelmd into a folder on a local disk that the server's user owns (your own " +
+	"folder with --user, or a volume chowned to 65532, the image's user), and mount it at " +
+	"/data/.postelmd; the notes can stay where they are, and the override still applies to them. " +
+	`Steps: docs/operations/running-v0.1.md, "State folder on a network filesystem"`)
 
 // checkDatabaseFS refuses a state directory whose filesystem only the network override
 // accepted, when the command opens the database (it must never create one that later starts

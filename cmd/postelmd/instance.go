@@ -24,6 +24,9 @@ type instance struct {
 // boot UUID, the auth state, go-git's transports, then the vault (adoption check, temp sweep,
 // rename probe) and its git repository. Nothing is opened before the format check.
 func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slog.Logger) (*instance, error) {
+	if err := ctx.Err(); err != nil { // stopped while the listener came up
+		return nil, err
+	}
 	if err := layout.EnsureFormat(paths.State); err != nil {
 		return nil, err
 	}

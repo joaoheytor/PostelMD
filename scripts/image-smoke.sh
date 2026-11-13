@@ -75,6 +75,7 @@ docker run -d --name "$name" --stop-timeout 60 -p "127.0.0.1:$port:8080" \
 	--user "$(id -u):$(id -g)" -v "$work/data:/data" "$image" >/dev/null
 wait_healthy
 [ -d "$work/data/vaults/notes/.git" ] || fail "no vault in the bind mount"
+check_appdb "$work/data/.postelmd"
 
 echo "9. no volume at /data: refused, unless opted in"
 docker rm -f "$name" >/dev/null
@@ -84,7 +85,7 @@ fi
 grep -q "no volume is mounted at /data" "$work/novolume.log" ||
 	fail "the container without a volume failed for another reason: $(cat "$work/novolume.log")"
 docker run -d --name "$name" -e POSTELMD_ALLOW_EPHEMERAL_DATA=true "$image" >/dev/null
-wait_healthy
+wait_healthy alive-only
 docker logs "$name" 2>&1 | grep -q "the data directory is not persistent" || fail "no warning without a volume"
 
 echo "OK"

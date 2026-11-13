@@ -53,7 +53,8 @@ type Vault interface {
 	Importer
 }
 
-func ok(w stdhttp.ResponseWriter, _ *stdhttp.Request) { w.WriteHeader(stdhttp.StatusNoContent) }
+// ok answers 200 with an empty body: /healthz and /readyz (ADR-0030, ADR-0004).
+func ok(w stdhttp.ResponseWriter, _ *stdhttp.Request) { w.WriteHeader(stdhttp.StatusOK) }
 
 // setupGate implements ADR-0009's pre-setup routing: setup and health are served, any other
 // API path is 503, and a page navigation is redirected to /setup.

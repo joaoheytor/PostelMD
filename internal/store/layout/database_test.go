@@ -47,8 +47,13 @@ func TestDatabaseRefusesNetworkFS(t *testing.T) {
 				t.Fatalf("Prepare = %v; want refused %v", err, tt.refused)
 			}
 			if tt.refused {
-				if !strings.Contains(err.Error(), "local volume") || !strings.Contains(err.Error(), "/data/.postelmd") {
-					t.Fatalf("the refusal doesn't name the fix: %v", err)
+				// The fix: copy the old folder, with the server stopped, to a local folder
+				// the server's user owns, mounted at /data/.postelmd; the runbook has the steps.
+				for _, want := range []string{"/data/.postelmd", "server stopped", "65532", "copy",
+					`"State folder on a network filesystem"`} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("the refusal doesn't say %q: %v", want, err)
+					}
 				}
 				if _, serr := os.Lstat(filepath.Join(data, ".postelmd", "app.db")); tt.appDB == errors.Is(serr, os.ErrNotExist) {
 					t.Fatalf("the refusal changed app.db: %v", serr)

@@ -61,7 +61,7 @@ Nothing important lives anywhere else:
 | `vaults/notes/` | Your notes, as `.md` files |
 | `vaults/notes/.git/` | The vault's git history (your commits) |
 | `vaults/notes/.postelmd-trash/` | Deleted notes and folders (not in git) |
-| `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one |
+| `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database |
 
 If you adopted a folder with `-v ~/notes:/data/vaults/notes`, back up `~/notes` too: it
 holds the notes, `.git` and `.postelmd-trash`, and `~/postelmd` holds the rest.
@@ -118,8 +118,8 @@ cp ~/*-backup-$s.tar /mnt/c/postelmd-backups/
 For a nightly copy, point restic or borg at the folder the container mounts. The files belong to your user
 (because of `--user`), so the backup tool needs no root. A copy taken while the server runs
 is usually fine for the notes, but stop the container first if you want a guaranteed
-consistent `.git`. From the builds after 0.1.0, which keep a database in
-`.postelmd/app.db`, stop the server for every copy (or take an atomic snapshot of the
+consistent `.git`. With `:main` after PR #175, and 0.1.0 and later, which keep a database
+in `.postelmd/app.db`, stop the server for every copy (or take an atomic snapshot of the
 volume): a file-by-file copy of a running instance can catch the database mid-write
 (ADR-0030).
 
@@ -376,6 +376,14 @@ newer`, before it changes anything. So a **rollback across a format change** mea
 the backup you took before the upgrade, not only the older image; within the same format,
 the digest swap below is enough. Never edit `format` to get past the check.
 
+**Upgrading from rc.1 to `:main` after PR #175** (and to 0.1.0 and later): the first start
+creates `.postelmd/app.db`, the database, and migrates it; later starts check it. Stop the
+server and take the [backup](#backup) before you pull the new `:main`. The data format stays
+`1`, so rolling back to rc.1 is still the digest swap below: rc.1 ignores `app.db`. If the
+start refuses because the database is damaged, stop the server and move `app.db`,
+`app.db-wal` and `app.db-shm` together out of `"$data"/.postelmd` (never delete them); at
+format 1 they hold only the start's boot ID, and the next start creates a new database.
+
 If PostelMD says `format` is **damaged** (anything but a number on one line), back up
 the data folder first. If only v0.1 ever used it, delete `"$data"/.postelmd/format` and start
 again: the next start writes `1`. Otherwise restore the backup you took before the last
@@ -520,6 +528,31 @@ Don't close the tab or clear site data until a save succeeds. Then:
 - **Permission denied:** something changed ownership, usually a `sudo` command or a `docker
   run` without `--user`. Fix it with `sudo chown -R "$(id -u):$(id -g)" "$data"` (and
   `"$notes"`, with an adopted folder).
+
+## State folder on a network filesystem
+
+Symptom: the server refuses to start with `/data/.postelmd is on a filesystem that only
+POSTELMD_ALLOW_NETWORK_FS accepts`. The database can't live on NFS, SMB or another network
+filesystem (ADR-0030); the notes can, with that setting. Move only `.postelmd` to a local
+disk (ext4, XFS, Btrfs, ZFS), owned by the user the server runs as. `reset-password`
+refuses the same way once `app.db` exists. With `$data` from
+[Where your data is](#where-your-data-is):
+
+```sh
+docker stop postelmd
+# Either a folder of yours on a local disk, for a server run with --user "$(id -u):$(id -g)":
+mkdir -m 700 ~/postelmd-state && cp -a "$data/.postelmd/." ~/postelmd-state/
+# or a named volume, owned by the image's user (65532) like a fresh /data:
+docker volume create postelmd-state
+docker run --rm -v "$data/.postelmd:/from:ro" -v postelmd-state:/to busybox:1.37 \
+  sh -c 'cp -a /from/. /to/ && chown -R 65532:65532 /to && chmod 700 /to'
+```
+
+Don't skip the `chown`: a fresh named volume is owned by root, and the image's user couldn't
+write it. Then recreate the container with the flags you started with, plus
+`-v ~/postelmd-state:/data/.postelmd` (or `-v postelmd-state:/data/.postelmd`). The old
+`.postelmd` stays under the mount, unchanged: remove it once the server runs and a backup of
+the new folder exists.
 
 ## Commit regularly
 

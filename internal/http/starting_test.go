@@ -16,8 +16,8 @@ func TestStarting(t *testing.T) {
 		s.ServeHTTP(w, httptest.NewRequest(stdhttp.MethodGet, path, nil))
 		return w
 	}
-	if w := get("/healthz"); w.Code/100 != 2 {
-		t.Fatalf("/healthz while starting = %d, want 2xx", w.Code)
+	if w := get("/healthz"); w.Code != stdhttp.StatusOK {
+		t.Fatalf("/healthz while starting = %d, want 200 (ADR-0030)", w.Code)
 	}
 	for _, p := range []string{"/readyz", "/api/v1/about", "/api/v1/setup", "/", "/setup", "/assets/x.js"} {
 		w := get(p)

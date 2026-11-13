@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,5 +43,16 @@ func TestDataDirIsAbsolute(t *testing.T) {
 				t.Fatalf("DataDir = %q, %v; want %q", c.DataDir, err, tt.want)
 			}
 		})
+	}
+}
+
+// TestEmptyDataDirIsRefused: an empty --data is refused, never resolved to the working
+// directory (filepath.Abs("") is the working directory).
+func TestEmptyDataDirIsRefused(t *testing.T) {
+	for _, args := range [][]string{{"--data", ""}, {"--data="}} {
+		c, err := load("serve", args, func(string) string { return "" }, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "data directory") {
+			t.Fatalf("load(%q) = %+v, %v; want a refusal of the empty data directory", args, c, err)
+		}
 	}
 }

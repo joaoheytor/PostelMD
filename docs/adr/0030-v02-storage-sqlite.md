@@ -328,3 +328,19 @@ generation bumps, suspects, tombstones).
    safety copy.
 3. **Hand-written queries** in v0.2; `sqlc` with v0.3's tables (ADR-0015 clarification).
 4. **`quick_check` at every start.**
+
+## Clarifications
+- **2026-11-13, follow-up 2 ships in parts.** Follow-up 2 is several PRs. The first, #175,
+  stays at data format 1: `serve` opens `app.db` under the instance lock after the format
+  check, records the boot UUID (ADR-0014), listens before opening anything (`/healthz`
+  `200`, every other route `503` until ready), refuses a state directory that only
+  `POSTELMD_ALLOW_NETWORK_FS` accepts, and `config` makes `DataDir` absolute. A database
+  created this way has no "assigned" flag, the state the format table's first-upgrade rows
+  already cover. The "done only with" conditions (the runbook, the image-level upgrade smoke
+  test, the maintainer's `.postelmd` copy before `:main`) apply to the part that writes
+  format 2. Until `db rebuild` exists, a damaged `app.db` at format 1 names the manual fix
+  instead: with the server stopped, move `app.db`, `-wal` and `-shm` aside together, never
+  deleting them (they hold only the boot UUID).
+- **2026-11-13, measured image size.** With the driver linked into `serve` (#175), the
+  `amd64` image is 38,711,508 bytes against the 40 MB budget (`docs/ci-cd.md`); the binary grew by
+  4.3 MB, from 19.0 to 23.3 MB.

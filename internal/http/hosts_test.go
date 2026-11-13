@@ -20,18 +20,18 @@ func TestAllowHosts(t *testing.T) {
 		host string
 		want int
 	}{
-		{"localhost", 204},
-		{"localhost:8080", 204},
-		{"LOCALHOST.:8080", 204},
-		{"app.localhost:8080", 204},
-		{"127.0.0.1:8080", 204},
-		{"10.1.2.3", 204},
-		{"[::1]:8080", 204},
-		{"[::1]", 204},
-		{"[fe80::1%25eth0]:8080", 204},
-		{"notes.example.org", 204},
-		{"Notes.Example.Org:443", 204},
-		{"notes.example.org.", 204},
+		{"localhost", 200},
+		{"localhost:8080", 200},
+		{"LOCALHOST.:8080", 200},
+		{"app.localhost:8080", 200},
+		{"127.0.0.1:8080", 200},
+		{"10.1.2.3", 200},
+		{"[::1]:8080", 200},
+		{"[::1]", 200},
+		{"[fe80::1%25eth0]:8080", 200},
+		{"notes.example.org", 200},
+		{"Notes.Example.Org:443", 200},
+		{"notes.example.org.", 200},
 		{"rebind.attacker.example", 421},
 		{"rebind.attacker.example:8080", 421},
 		{"example.org", 421},
@@ -63,7 +63,7 @@ func TestAllowHostsIgnoresForwardedHost(t *testing.T) {
 		want            int
 	}{
 		{"rebind.attacker.example", "localhost", 421},
-		{"localhost:8080", "rebind.attacker.example", 204},
+		{"localhost:8080", "rebind.attacker.example", 200},
 	} {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Host = tc.host

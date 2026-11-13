@@ -23,9 +23,18 @@ var discardLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 // getStatus is the status of GET url (the body is dropped).
 func getStatus(t *testing.T, url string) (int, http.Header) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	return status(t, http.MethodGet, url, "")
+}
+
+// status is the status of a bodiless request, with Host set to host if not empty.
+func status(t *testing.T, method, url, host string) (int, http.Header) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, url, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if host != "" {
+		req.Host = host
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -72,11 +81,20 @@ func TestServeListensBeforeOpeningTheDatabase(t *testing.T) {
 	probed := false
 	afterListen = func(addr string) {
 		probed = true
-		if code, _ := getStatus(t, "http://"+addr+"/healthz"); code/100 != 2 {
-			t.Errorf("/healthz while starting = %d, want 2xx", code)
+		if code, _ := getStatus(t, "http://"+addr+"/healthz"); code != http.StatusOK {
+			t.Errorf("/healthz while starting = %d, want 200", code)
 		}
 		if code, h := getStatus(t, "http://"+addr+"/readyz"); code != http.StatusServiceUnavailable || h.Get("Retry-After") == "" {
 			t.Errorf("/readyz while starting = %d (Retry-After %q), want 503 with Retry-After", code, h.Get("Retry-After"))
+		}
+		// The unauthenticated starting surface sits behind the host check (DNS rebinding,
+		// threat model S6), and setup isn't served yet.
+		if code, _ := status(t, http.MethodGet, "http://"+addr+"/healthz", "evil.example"); code != http.StatusMisdirectedRequest {
+			t.Errorf("an unknown host while starting = %d, want 421", code)
+		}
+		if code, h := status(t, http.MethodPost, "http://"+addr+"/api/v1/setup", ""); code != http.StatusServiceUnavailable ||
+			h.Get("Content-Security-Policy") == "" {
+			t.Errorf("POST /api/v1/setup while starting = %d (CSP %q), want 503 with a CSP", code, h.Get("Content-Security-Policy"))
 		}
 		if _, err := os.Lstat(appDB); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("app.db before the listener served = %v, want none yet", err)
@@ -87,8 +105,8 @@ func TestServeListensBeforeOpeningTheDatabase(t *testing.T) {
 	if !probed {
 		t.Fatal("the listener wasn't up before startup went on")
 	}
-	if code, _ := getStatus(t, r.origin+"/readyz"); code/100 != 2 {
-		t.Fatalf("/readyz once started = %d, want 2xx", code)
+	if code, _ := getStatus(t, r.origin+"/readyz"); code != http.StatusOK {
+		t.Fatalf("/readyz once started = %d, want 200", code)
 	}
 	fi, err := os.Lstat(appDB)
 	if err != nil || fi.Mode().Perm() != 0o600 || !fi.Mode().IsRegular() {

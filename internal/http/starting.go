@@ -8,7 +8,7 @@ import (
 // Starting is the HTTP surface while the server starts (ADR-0030, startup order step 1): the
 // listener is up right after the instance lock, so orchestrators see a live process during a
 // long start (a first upgrade on a large vault). Until Ready installs the router, GET or HEAD
-// /healthz answers 204, and /readyz and every other route answer 503 with Retry-After,
+// /healthz answers 200, and /readyz and every other route answer 503 with Retry-After,
 // with the usual security headers. It serves nothing else.
 type Starting struct {
 	router atomic.Pointer[stdhttp.Handler]

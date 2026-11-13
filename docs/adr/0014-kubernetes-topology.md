@@ -3,9 +3,11 @@
 - **Status:** Proposed
 - **Date:** 2026-11-09 (revised after design review)
 - **MVP scope (ADR-0020):** the MVP uses §1's instance lock (`flock`, the holder recorded,
-  refusal to start) and the filesystem checks of `/data/.postelmd` and the vault; the boot
-  UUID check in SQLite and its metric, the Kubernetes topology (§2), the fencing runbook (§3)
-  and Helm come later.
+  refusal to start) and the filesystem checks of `/data/.postelmd` and the vault. The boot
+  UUID check in SQLite arrives in v0.2 (#175): stored at each start, read back every 10 s,
+  and a mismatch stops the server; since no background worker exists yet, `serve` itself
+  runs the check. Its metric (with v0.3's `/metrics`), the Kubernetes topology (§2), the
+  fencing runbook (§3) and Helm come later.
 
 ## Context
 The maintainer runs a 4-node kubeadm cluster (K8s 1.34, arm64 + amd64) over Tailscale with

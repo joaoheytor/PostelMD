@@ -89,6 +89,12 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 	}
 	if err != nil {
 		_ = closeNow(srv, errs)
+		if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+			// The stop signal arrived during startup: a clean stop, not a failure. What a
+			// step left half done is what a crash there leaves (store/sql's recovery tables).
+			log.Info("stopped during startup")
+			return nil
+		}
 		return err
 	}
 	gate.Ready(pmhttp.NewRouter(in.auth, in.vault, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log))
@@ -99,9 +105,12 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 	return serveUntilStopped(ctx, srv, errs, in, lk.BootUUID(), log)
 }
 
-// serveUntilStopped serves until ctx ends, the server fails, or the boot UUID check finds a second writer.
-// A normal stop is graceful (shutdownDeadline); a split brain closes every connection at
-// once, so no request in flight writes on, and leaves the database unclosed.
+// serveUntilStopped serves until ctx ends, the server fails, or the boot UUID check finds a
+// second writer. A normal stop is graceful (shutdownDeadline). A split brain closes the
+// listener and every connection at once, so no new request starts, and leaves the database
+// unclosed (no WAL checkpoint). A handler already running can still finish its write before
+// the process exits: for the data that is the same as a crash at that point, which the save
+// protocol and the intents' recovery (ADR-0003, ADR-0033) already cover.
 func serveUntilStopped(ctx context.Context, srv *http.Server, errs chan error, in *instance, boot string, log *slog.Logger) error {
 	watch, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
