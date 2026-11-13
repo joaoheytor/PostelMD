@@ -65,7 +65,7 @@ class Relaxations(Fixture):
             "gh api {api}/pulls/5/comments --paginate --jq '.[].body'",
             "gh api '{api}/actions/runs?per_page=5' -q '.workflow_runs[].status'",
             "gh api -X GET {api}/dependabot/alerts --jq length",
-            "gh api --method GET repos/{{owner}}/{{repo}}/pulls/5",
+            "gh api --method GET 'repos/{{owner}}/{{repo}}/pulls/5'",  # unquoted { asks
             "gh api -i --cache 1h /{api}/commits/main",
             "gh api \"repos/{{owner}}/{{repo}}/code-scanning/alerts?ref=refs/pull/5/merge&state=open\"",
         ], None)

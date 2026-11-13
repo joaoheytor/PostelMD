@@ -10,14 +10,19 @@ looking content asks.
   api    only GET on this repository: one endpoint under repos/joaoheytor/PostelMD/ (or
          repos/{owner}/{repo}/), not graphql; output flags (-q/--jq, --paginate, --cache,
          -i, ...) and -X/--method GET only; no -f/-F/--field/--raw-field, --input, -H or
-         --hostname; a --jq/--template value only from plain characters, without env,
-         input, getpath, $, @ and the like (JQ_BANNED: they print the environment). .claude/settings.json allows `gh api repos/joaoheytor/PostelMD/...` so
-         the native prompt doesn't fire; this check still asks for anything else.
+         --hostname; --cache <N>[smh]; a --jq/--template value only from plain ASCII
+         characters, without env, input, getpath, $, @ and the like (JQ_BANNED: they print
+         the environment). .claude/settings.json allows `gh api repos/joaoheytor/PostelMD/...`
+         so the native prompt doesn't fire; this check still asks for anything else.
+Body files (--body-file/-F) follow commitmsg.read_message's rules: under the project or a
+temp dir after resolving symlinks, never /dev or /proc.
 """
 import os
 import re
 
+from commitmsg import read_message
 from content import has_secret, public_reasons
+from shparse import UNKNOWN
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 NUMBER = re.compile(r"\d+")
@@ -31,8 +36,12 @@ TEXT_BOOLS = {"--fill", "--fill-first", "--fill-verbose", "-d", "--draft", "--dr
 API_BOOLS = {"--paginate", "--slurp", "-i", "--include", "--silent", "--verbose"}
 API_VALUES = {"--jq", "-q", "--template", "-t", "--cache"}
 # jq and Go templates can print the environment (`env`, `$ENV`) and read more input: only
-# filters over the response, from plain characters, with none of these words.
-JQ_CHARS = re.compile(r"[\w .\[\]|,:\"(){}=<>!?+*/%-]*")
+# filters over the response, from plain ASCII characters (no $ @ ; & ^ ~ `), with none of
+# the JQ_BANNED words anywhere, strings included ("\(env)" interpolates). The narrower
+# [A-Za-z0-9_.| []"':,] would refuse 127 of the 178 filters agents used (select(...),
+# map(...), "\(.x)", {a: .b}, ==); the words, not the punctuation, reach the environment.
+JQ_CHARS = re.compile(r"[A-Za-z0-9_.|\s\[\]\"':,(){}=<>!+*/%#?\\-]*")
+CACHE = re.compile(r"\d+[smh]")
 JQ_BANNED = re.compile(r"\b(env|input|inputs|input_filename|input_line_number|getpath|paths"
                        r"|leaf_paths|debug|stderr|halt|halt_error|import|include|modulemeta"
                        r"|get_search_list|get_prog_origin|get_jq_origin|builtins|until|while"
@@ -96,16 +105,6 @@ def check_merge(args):
     return None
 
 
-def read_text(path, cwd):
-    if path == "-":
-        return None
-    try:
-        with open(os.path.join(cwd, os.path.expanduser(path)), encoding="utf-8") as fh:
-            return fh.read(1 << 20)
-    except (OSError, UnicodeDecodeError, TypeError):
-        return None
-
-
 def check_text(args, cwd):
     parsed, why = options(args, TEXT_BOOLS, TEXT_FLAGS | FILE_FLAGS | VALUE_FLAGS)
     if why:
@@ -115,9 +114,9 @@ def check_text(args, cwd):
         return "ask", "PR and issue commands take one number here (a URL may name another repository)"
     texts = [v for f in TEXT_FLAGS for v in found.get(f, [])]
     for path in (v for f in FILE_FLAGS for v in found.get(f, [])):
-        text = read_text(path, cwd if isinstance(cwd, str) else "/nonexistent")
-        if text is None:
-            return "ask", f"the guard can't read the body file {path} to scan it"
+        text, why = read_message(path, cwd if isinstance(cwd, str) else UNKNOWN)
+        if why:
+            return "ask", f"body file: {why}"
         texts.append(text)
     text = "\n".join(texts)
     if has_secret(text):
@@ -139,6 +138,8 @@ def check_api(args):
     for flag in ("--jq", "-q", "--template", "-t"):
         if any(not JQ_CHARS.fullmatch(v) or JQ_BANNED.search(v) for v in found.get(flag, [])):
             return f"gh api {flag} that may read the environment or other input (env, input, ...)"
+    if any(not CACHE.fullmatch(v) for v in found.get("--cache", [])):
+        return "gh api --cache takes one duration such as 1h"
     if any(m != "GET" for m in found.get("-X", []) + found.get("--method", [])):
         return "gh api with a method other than GET"
     if len(pos) != 1:

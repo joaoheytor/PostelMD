@@ -80,8 +80,8 @@
       "Bash(gh api repos/joaoheytor/PostelMD/:*)",
       "Bash(gh api \"repos/joaoheytor/PostelMD/:*)",
       "Bash(gh api 'repos/joaoheytor/PostelMD/:*)",
-      "Bash(gh api repos/{owner}/{repo}/:*)",
-      "Bash(gh api \"repos/{owner}/{repo}/:*)"
+      "Bash(gh api \"repos/{owner}/{repo}/:*)",
+      "Bash(gh api 'repos/{owner}/{repo}/:*)"
     ],
     "ask": [
       "Edit(**/.claude/hooks/**)",

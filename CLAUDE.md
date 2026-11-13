@@ -145,8 +145,14 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   `refs/scratch/…` or a new local `pr<N>…` branch. A command may
   start with literal assignments (`S=/tmp/x; git -C $S log`): the guard substitutes them
   and judges the result as typed; `export`, `$(…)` values and `S=x cmd` prefixes still ask.
+  In any command that mentions git, gh, go, npm, npx, make or `scripts/`, shell syntax the
+  guard doesn't model asks: unquoted `{ } * ? [ ] ! ~ ^` (except `HEAD~3`, `HEAD^`,
+  `${VAR}`, `$?`), a word-start `#` or `=`, a backslash or backslash-newline outside quotes,
+  `$'…'`, and non-ASCII characters; quote them (`gh api "repos/{owner}/{repo}/…"`).
   Pushes to main/master, force pushes without a lease, tags, releases, closing or reviewing
-  PRs, any other `gh api` and repo settings stay permission prompts.
+  PRs, any other `gh api` and repo settings stay permission prompts. The guard is a
+  guardrail for agents, not the gate: the allowed test runners (`make`, `go test`, `npm`)
+  can run any code, so GitHub branch protection and rulesets are the hard gate.
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
   acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
   in `.claude/agents/` for a PR.

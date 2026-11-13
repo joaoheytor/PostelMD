@@ -41,7 +41,7 @@ from content import has_secret, public_reasons
 from gitdir import check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
 from shparse import segments, wrapped
-from shscan import scan
+from shscan import mentions_tool, unmodelled
 from shvars import normalize
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
@@ -165,7 +165,7 @@ GATED = [
     (GH + r"issue\s+(reopen|delete|transfer)\b", "reopening, deleting or transferring issues"),
     (GH + r"(workflow\s+(run|enable|disable)|run\s+(cancel|delete))\b", "running or changing workflows"),
     (GH + r"api\b[^;&|\n]*(-X\s*|--method[=\s]+)(POST|PUT|PATCH|DELETE)\b", "mutating GitHub API calls"),
-    (GH + r"api\b[^;&|\n]*(\s-[fF]\b|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
+    (GH + r"api\b[^;&|\n]*([\s,{=]-[fF]|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
 ]
 
 
@@ -182,20 +182,13 @@ def check_commit(cmd):
             respond("deny", SUBJECT)
 
 
-TOOL_WORD = re.compile(r"\b(git|go|gh|npm|npx|make)\b|scripts/")
-SCAN_FLAGS = {"ansi": "ANSI-C quoting ($'...')", "bad-heredoc": "a heredoc delimiter other "
-              "than WORD, 'WORD', \"WORD\" or \\WORD", "continued": "a heredoc line ending in "
-              "a backslash", "unbalanced": "an unbalanced quote (a quote in a # comment?)"}
-
-
 def unparsed(cmd):
-    """Why the command can't be judged, when it mentions a tool the guard checks: the
-    tokenizer gave up (every token-based check would be off) or shscan flagged it."""
-    if not TOOL_WORD.search(cmd):
-        return None
-    flags = sorted(scan(cmd).flags)
-    if flags:
-        return SCAN_FLAGS[flags[0]]
+    """Why the command can't be judged, when it mentions a tool the guard checks: shell
+    syntax it doesn't model (shscan.unmodelled), or the tokenizer gave up (every
+    token-based check would be off)."""
+    why = unmodelled(cmd)
+    if why or not mentions_tool(cmd):
+        return why
     return None if tokens(cmd) or not cmd.strip() else "the command can't be tokenized"
 
 
