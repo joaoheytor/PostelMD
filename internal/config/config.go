@@ -20,7 +20,7 @@ import (
 
 // Config is the server's configuration.
 type Config struct {
-	DataDir            string // POSTELMD_DATA_DIR, --data; default /data. Not in config.yaml: it holds the file
+	DataDir            string // POSTELMD_DATA_DIR, --data; default /data; made absolute. Not in config.yaml: it holds the file
 	Listen             string // listen, POSTELMD_LISTEN, --listen; default :8080
 	AllowNetworkFS     bool   // allow_network_fs, POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
 	AllowEphemeralData bool   // allow_ephemeral_data, POSTELMD_ALLOW_EPHEMERAL_DATA: start with no volume
@@ -66,6 +66,13 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	if set["data"] {
 		c.DataDir = flagData
 	}
+	// Absolute and clean, resolved once here: store/sql refuses relative database paths, and
+	// every later step and command must name the same directory (ADR-0030, follow-up 2).
+	abs, err := filepath.Abs(c.DataDir)
+	if err != nil {
+		return c, fmt.Errorf("config: the data directory: %w", err)
+	}
+	c.DataDir = abs
 
 	if err := c.readFile(); err != nil {
 		return c, err

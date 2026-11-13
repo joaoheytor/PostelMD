@@ -118,7 +118,10 @@ cp ~/*-backup-$s.tar /mnt/c/postelmd-backups/
 For a nightly copy, point restic or borg at the folder the container mounts. The files belong to your user
 (because of `--user`), so the backup tool needs no root. A copy taken while the server runs
 is usually fine for the notes, but stop the container first if you want a guaranteed
-consistent `.git`.
+consistent `.git`. From the builds after 0.1.0, which keep a database in
+`.postelmd/app.db`, stop the server for every copy (or take an atomic snapshot of the
+volume): a file-by-file copy of a running instance can catch the database mid-write
+(ADR-0030).
 
 **A named volume** (Docker Desktop on macOS, or `-v postelmd-data:/data`) isn't a folder you
 can tar from the host, and the image has no shell. Use a helper container (it runs as root,

@@ -91,8 +91,21 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   form now has a Folder list: pick a folder, or type a path. The tree's status now says when
   something moved, and a move clears an earlier move's error. Files dragged in from outside the
   app are ignored.
+- The server keeps a database, `.postelmd/app.db` (SQLite, owner-only), for the v0.2
+  features to come; it is created at the first start and checked at every start. Each start
+  records a boot ID there, and a server that finds another process's boot ID (two instances on
+  one volume) stops serving and exits. Back up with the server stopped: a copy of a running
+  instance can catch the database mid-write.
 
 ### Changed
+- The server answers `/healthz` as soon as it holds the data directory, and `/readyz` and
+  every other page with 503 and `Retry-After` until it has finished starting.
+- A relative data directory (`--data`, `POSTELMD_DATA_DIR`) is resolved once, at start, to
+  an absolute path.
+- **Breaking:** `POSTELMD_ALLOW_NETWORK_FS` no longer covers `/data/.postelmd`: a server
+  whose state folder is on NFS, SMB or another filesystem only that setting accepts refuses
+  to start, because SQLite can't run there safely. Mount a local volume at `/data/.postelmd`;
+  the setting still applies to the notes folder.
 - A note name with a dot in it, like `nginx.conf` or `v1.2`, now makes a note
   (`nginx.conf.md`): only a trailing `.md` counts as the extension, for New note and for
   Rename or move. A note's own name can't start with a dot (New note, Rename or move and

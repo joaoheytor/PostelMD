@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -24,8 +25,12 @@ func TestSecondHolderIsRefused(t *testing.T) {
 	if !errors.As(err, &held) || !strings.Contains(held.Holder, "pid=") {
 		t.Fatalf("second Acquire = %v, want a HeldError naming the holder", err)
 	}
-	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "boot=") {
-		t.Fatalf("the holder record was damaged: %q", b)
+	// The boot UUID (ADR-0014) is a random version-4 UUID, and the holder record names it.
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(l.BootUUID()) {
+		t.Fatalf("BootUUID = %q, want a version-4 UUID", l.BootUUID())
+	}
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), " boot="+l.BootUUID()) {
+		t.Fatalf("the holder record was damaged or doesn't name the boot UUID: %q", b)
 	}
 	if out, err := exec.Command("flock", "-n", path, "true").CombinedOutput(); err == nil {
 		t.Fatalf("another process got the lock (%s)", out)

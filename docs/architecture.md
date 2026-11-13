@@ -20,7 +20,11 @@ Decisions are recorded in [`adr/`](adr/). This document describes how the pieces
 > still under one vault mutex. Credentials stay in `auth.json` until v0.3.
 > Built so far: `internal/store/sql` (opening `app.db` with ADR-0030's pragmas, the writer,
 > read pool and snapshot connections, `ATTACH` denied, `quick_check`, embedded migrations,
-> `VACUUM INTO` copies); `serve` doesn't open it yet.
+> `VACUUM INTO` copies, the snapshot before migrating an existing database). `serve` opens it
+> after the format check (data format 1 still), records its boot UUID there and stops on a
+> split brain (ADR-0014), and listens before opening anything: `/healthz` answers and
+> `/readyz` is `503` until startup ends. A state directory that only
+> `POSTELMD_ALLOW_NETWORK_FS` accepts is refused.
 
 ## 1. System context
 

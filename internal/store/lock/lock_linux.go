@@ -25,7 +25,10 @@ func (e *HeldError) Error() string {
 }
 
 // Lock is a held instance lock.
-type Lock struct{ f *os.File }
+type Lock struct {
+	f    *os.File
+	boot string
+}
 
 // Acquire takes the lock at path and records this process in it (hostname, PID, start
 // time, boot ID).
@@ -43,10 +46,9 @@ func Acquire(path string) (*Lock, error) {
 		return nil, fmt.Errorf("lock: flock %s: %w", path, err)
 	}
 	host, _ := os.Hostname()
-	var boot [8]byte
-	_, _ = rand.Read(boot[:])
+	boot := newBootUUID()
 	info := fmt.Sprintf("host=%s pid=%d started=%s boot=%s", host, os.Getpid(),
-		time.Now().UTC().Format(time.RFC3339), hex.EncodeToString(boot[:]))
+		time.Now().UTC().Format(time.RFC3339), boot)
 	if err := f.Truncate(0); err == nil {
 		_, err = f.WriteAt([]byte(info), 0)
 		if err == nil {
@@ -57,8 +59,22 @@ func Acquire(path string) (*Lock, error) {
 			return nil, fmt.Errorf("lock: record holder: %w", err)
 		}
 	}
-	return &Lock{f: f}, nil
+	return &Lock{f: f, boot: boot}, nil
 }
+
+// newBootUUID is a random version-4 UUID (crypto/rand.Read never fails).
+func newBootUUID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b[:])
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
+}
+
+// BootUUID is this start's boot UUID, recorded in the lock file and, by serve, in app.db
+// (ADR-0014).
+func (l *Lock) BootUUID() string { return l.boot }
 
 // Release drops the lock.
 func (l *Lock) Release() error { return l.f.Close() }
