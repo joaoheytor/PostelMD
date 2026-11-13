@@ -175,8 +175,13 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   depending on another open slice.
 - Agents write repository files with Write/Edit, not shell redirection, so the guard hook
   sees them (it asks before `sed -i`, `perl -pi`, `tee` and `>` into repository files).
-- If your shell is zsh, it doesn't word-split `$VAR` and expands a leading `=`: run loops and
-  word splitting under `bash -c '…'`. Machine-specific notes go in `CLAUDE.local.md` (ignored).
+- The Bash tool may run zsh (no word splitting of `$VAR`, `=cmd`, `$x:h`); the guard asks on
+  `bash -c`, `eval` and any `$` in a git/gh/go/npm/npx/make command other than a leading
+  literal `S=/path; git -C $S …`. Run git once per command with a literal `git -C <dir>`;
+  loops without those tools pass (`for f in docs/*.md; do wc -l "$f"; done`); for a loop
+  that runs them, write a script in the scratchpad and run it as its own command
+  (`bash <scratchpad>/x.sh`; not allowlisted, so it prompts). Machine-specific notes go
+  in `CLAUDE.local.md` (ignored).
 
 ## Definition of Done
 

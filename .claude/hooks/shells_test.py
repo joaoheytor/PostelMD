@@ -4,13 +4,15 @@ extendedglob, with fake git, gh, go, make, npm and npx that print their argument
 shell must run the same programs with the same arguments, or zsh nothing at all (a glob
 with no match). A command that zsh runs
 differently (=cmd, $x:s/a/b/, two-argument cd, glob qualifiers) must not be allowed.
-Skipped where zsh isn't installed. Run: make test-scripts
+Skipped where bash or zsh isn't installed, except in CI, where that fails (ci.yaml's
+test-go job installs zsh). Run: make test-scripts
 """
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import relax_test  # modules, not classes: discovery would run imported test classes twice
 import review3_test
@@ -20,6 +22,16 @@ from relax_test import API, HOME, KEY, SHA, Fixture
 FAKE = ("#!/bin/sh\n{ printf '%s in %s' \"$(basename \"$0\")\" \"$PWD\"; for a in \"$@\"; do printf ' [%s]' \"$a\"; "
         "done; echo; } >> \"$FAKE_LOG\"\n")  # a log, not stdout: redirects and pipes eat that
 SHELLS = (["bash", "-c"], ["zsh", "-f", "-c"], ["zsh", "-f", "-o", "extendedglob", "-c"])
+
+
+def require_shells(test):
+    """Skip without bash or zsh, except in CI (CI is set), where that fails: the guard's zsh
+    cases must not pass by being skipped."""
+    missing = [s for s in ("bash", "zsh") if not shutil.which(s)]
+    if missing and os.environ.get("CI"):
+        test.fail(f"{', '.join(missing)} not installed: CI must install it (ci.yaml test-go)")
+    if missing:
+        raise unittest.SkipTest(f"needs {', '.join(missing)}")
 
 
 def allowed_cases():
@@ -36,8 +48,21 @@ def allowed_cases():
     return found
 
 
-@unittest.skipUnless(shutil.which("zsh") and shutil.which("bash"), "needs bash and zsh")
+class NeedsTheShellsInCI(unittest.TestCase):
+    def test_a_missing_shell_fails_in_ci_and_skips_elsewhere(self):
+        with mock.patch.object(shutil, "which", lambda name: None):
+            with mock.patch.dict(os.environ, {"CI": "true"}):
+                with self.assertRaises(self.failureException):
+                    require_shells(self)
+            with mock.patch.dict(os.environ, {"CI": ""}):
+                with self.assertRaises(unittest.SkipTest):
+                    require_shells(self)
+
+
 class SameUnderZsh(Fixture):
+    def setUp(self):
+        require_shells(self)
+
     def run_in(self, shell, command, bin_dir, home):
         log = os.path.join(home, "fake.log")
         env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": home, "LANG": "C", "FAKE_LOG": log}
