@@ -26,6 +26,8 @@ PLAIN = re.compile(r"[A-Z][A-Z0-9_]{0,30}|[a-z][a-z0-9_]{0,30}")
 SAFE = r"[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+,=-]*"  # no leading = (zsh: =cmd is a path)
 PRELUDE = re.compile(rf"\s*({NAME})=(?:({SAFE})|'({SAFE})'|\"({SAFE})\")[ \t]*(?:;|&&|\n)")
 REF = re.compile(rf"\$\{{({NAME})\}}|\$({NAME})")
+# What may follow an unbraced $NAME: not : [ ( { (zsh modifiers, subscripts, qualifiers).
+FOLLOWER = re.compile(r"[\s;&|<>)\"'/.,@%+=-]|$")
 SPECIAL = re.compile(
     # bash: set or rewritten by the shell itself
     r"DIRSTACK|OLDPWD|PWD|RANDOM|SRANDOM|SECONDS|LINENO|HISTCMD|PPID|UID|EUID|BASH\w*"
@@ -64,11 +66,15 @@ def prelude(cmd):
 
 
 def expand(line, ctx, vals):
-    """line with $NAME/${NAME} of vals replaced where the $ is unquoted or double-quoted."""
+    """line with $NAME/${NAME} of vals replaced where the $ is unquoted or double-quoted, or
+    None when an unbraced $NAME is followed by anything but a delimiter: zsh reads
+    $x:s/a/b/, $x:h, $x[1] and $x(...) as modifiers, subscripts and qualifiers."""
     out, j = [], 0
     while j < len(line):
         m = REF.match(line, j) if line[j] == "$" and ctx[j] not in ("'", "\\") else None
         if m and (m.group(1) or m.group(2)) in vals:
+            if m.group(2) and not FOLLOWER.match(line, m.end()):
+                return None
             out.append(vals[m.group(1) or m.group(2)])
             j = m.end()
             continue
@@ -89,4 +95,5 @@ def normalize(cmd):
     s = scan(body)
     if s.flags:
         return cmd
-    return "\n".join(text if ctx is None else expand(text, ctx, vals) for text, ctx in s.lines)
+    out = [text if ctx is None else expand(text, ctx, vals) for text, ctx in s.lines]
+    return cmd if None in out else "\n".join(out)

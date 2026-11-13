@@ -144,11 +144,20 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   `git fetch origin pull/<N>/head:<dst>` passes for `refs/remotes/review/…`,
   `refs/scratch/…` or a new local `pr<N>…` branch. A command may
   start with literal assignments (`S=/tmp/x; git -C $S log`): the guard substitutes them
-  and judges the result as typed; `export`, `$(…)` values and `S=x cmd` prefixes still ask.
-  In any command that mentions git, gh, go, npm, npx, make or `scripts/`, shell syntax the
-  guard doesn't model asks: unquoted `{ } * ? [ ] ! ~ ^` (except `HEAD~3`, `HEAD^`,
-  `${VAR}`, `$?`), a word-start `#` or `=`, a backslash or backslash-newline outside quotes,
-  `$'…'`, and non-ASCII characters; quote them (`gh api "repos/{owner}/{repo}/…"`).
+  and judges the result as typed; `export`, `$(…)` values, `S=x cmd` prefixes and zsh
+  modifiers (`$S:h`, `$S[1]`) still ask. In any command that mentions git, gh, go, npm,
+  npx, make or `scripts/`, shell syntax the guard doesn't model asks: unquoted
+  `{ } * ? [ ] ! ~ ^` (except `HEAD~3`, `HEAD^` and path globs such as `docs/adr/0*.md`),
+  any `$` or backtick other than a substituted assignment, `$?`, `$!`, `$#`, `$$` and the
+  `"$(cat <<'EOF' … EOF)"` message form, `<(…)`/`>(…)`, function definitions, a backslash
+  or backslash-newline outside quotes, `$'…'` and non-ASCII characters; quote them
+  (`gh api "repos/{owner}/{repo}/…"`). In every command, a word-start `#` or `=`, `eval`,
+  `sh|bash|zsh -c`, `alias` and `source` ask; wrappers and keywords (`nohup`, `time`,
+  `exec`, `if …; then`) don't hide a gated command; a `cd` with two arguments, `+N`/`-N`
+  or `CDPATH` asks; every gh `--jq`/`--template` is checked; `make` takes only targets, a
+  few flags, `-C` into the project and the allowed variables with plain values; go's
+  `-vettool`, `-overlay`, `-modfile` and external-linker flags ask. The guard models bash
+  and `.claude/hooks/shells_test.py` checks every allowed case runs the same under zsh.
   Pushes to main/master, force pushes without a lease, tags, releases, closing or reviewing
   PRs, any other `gh api` and repo settings stay permission prompts. The guard is a
   guardrail for agents, not the gate: the allowed test runners (`make`, `go test`, `npm`)

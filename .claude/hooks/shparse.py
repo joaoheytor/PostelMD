@@ -139,6 +139,22 @@ def wrapped(segs):
     return None
 
 
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "fish", "busybox", "csh", "tcsh"}
+
+
+def indirect(segs):
+    """A command that runs text the guard sees only as a quoted string (eval, sh -c, zsh -c,
+    source, .) or that renames commands (alias), or None. Asked in any command."""
+    for words in segs:
+        words = bare(words)
+        name = os.path.basename(words[0]) if words else ""
+        if name in ("eval", "alias", "source", ".", "unalias", "hash", "enable", "trap"):
+            return name
+        if name in SHELLS and any(re.fullmatch(r"-\w*c\w*", w) for w in words[1:]):
+            return f"{name} -c"
+    return None
+
+
 def move(cwd, target):
     """The directory cd or -C target leads to, symlinks resolved (L/.. may leave the tree)."""
     if cwd is UNKNOWN or not target or "$" in target or "`" in target or target == "-":

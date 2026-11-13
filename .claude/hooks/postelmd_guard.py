@@ -40,7 +40,8 @@ from commitmsg import CONVENTIONAL, SUBJECT, check as check_message
 from content import has_secret, public_reasons
 from gitdir import check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
-from shparse import segments, wrapped
+from gh_rules import output_filters as gh_output_filters
+from shparse import bare, indirect, segments, wrapped
 from shscan import mentions_tool, unmodelled
 from shvars import normalize
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
@@ -193,8 +194,22 @@ def unparsed(cmd):
 
 
 def wrapper(cmd):
-    name = wrapped(segments(cmd))
-    return f"{name} runs another command with options the guard doesn't follow" if name else None
+    segs = segments(cmd)
+    name = indirect(segs)
+    if name:
+        return f"{name} runs text the guard sees only as a string, or renames commands"
+    name = wrapped(segs)
+    if name:
+        return f"{name} runs another command with options the guard doesn't follow"
+    return gh_output_filters(segs)
+
+
+def gated(cmd):
+    """The GATED label for cmd, also when a keyword, wrapper or =, `if …; then`, `nohup`,
+    `exec`, `>(…)` comes before the command: each segment is judged without them."""
+    texts = [cmd] + [" ".join([w[0].lstrip("=")] + w[1:])
+                     for w in (bare(s) for s in segments(cmd)) if w]
+    return next((label for t in texts for pattern, label in GATED if re.search(pattern, t)), None)
 
 
 def check_git(tool_input, cwd):
@@ -203,10 +218,10 @@ def check_git(tool_input, cwd):
     found = check_message(cmd, cwd)
     if found:
         respond(found[0], f"COMMIT MESSAGE CHECK: {found[1]}" if found[0] == "ask" else found[1])
-    for pattern, label in GATED:
-        if re.search(pattern, cmd):
-            respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
-                           "maintainer asked for exactly this in the conversation.")
+    label = gated(cmd)
+    if label:
+        respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
+                       "maintainer asked for exactly this in the conversation.")
     why = unparsed(cmd) or wrapper(cmd)
     if why:
         respond("ask", f"CAN'T PARSE: {why}. The guard's checks can't see this command as "

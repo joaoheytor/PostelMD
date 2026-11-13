@@ -22,7 +22,7 @@ import re
 
 from commitmsg import read_message
 from content import has_secret, public_reasons
-from shparse import UNKNOWN
+from shparse import UNKNOWN, bare
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 NUMBER = re.compile(r"\d+")
@@ -128,6 +128,36 @@ def check_text(args, cwd):
     return None
 
 
+def jq_ok(value):
+    return bool(JQ_CHARS.fullmatch(value)) and not JQ_BANNED.search(value)
+
+
+def output_filters(segs):
+    """A reason to ask when any gh command (pr view, run view, api, ...) has a --jq/-q or
+    --template value that may read the environment; -t is --template except for the
+    commands where it is --title."""
+    for words in segs:
+        words = [w.lstrip("=") if i == 0 else w for i, w in enumerate(bare(words))]
+        if not words or os.path.basename(words[0]) != "gh":
+            continue
+        titled = len(words) > 2 and words[2] in ("create", "edit", "comment")
+        flags = {"--jq", "-q", "--template"} | (set() if titled else {"-t"})
+        for i, a in enumerate(words[1:], 1):
+            name, eq, val = a.partition("=")
+            short = next((f for f in ("-q", "-t") if f in flags and a.startswith(f) and len(a) > 2), None)
+            if eq and name in flags and name.startswith("--"):
+                value = val
+            elif short:
+                value = a[2:]
+            elif a in flags:
+                value = words[i + 1] if i + 1 < len(words) else ""
+            else:
+                continue
+            if not jq_ok(value):
+                return f"gh {a.partition('=')[0][:10]} that may read the environment (env, input, $, @, ...)"
+    return None
+
+
 def check_api(args):
     if any(a.lower() == "graphql" for a in args):
         return "gh api graphql can mutate"
@@ -136,7 +166,7 @@ def check_api(args):
         return why
     found, pos = parsed
     for flag in ("--jq", "-q", "--template", "-t"):
-        if any(not JQ_CHARS.fullmatch(v) or JQ_BANNED.search(v) for v in found.get(flag, [])):
+        if any(not jq_ok(v) for v in found.get(flag, [])):
             return f"gh api {flag} that may read the environment or other input (env, input, ...)"
     if any(not CACHE.fullmatch(v) for v in found.get("--cache", [])):
         return "gh api --cache takes one duration such as 1h"

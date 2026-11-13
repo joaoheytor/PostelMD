@@ -154,7 +154,8 @@ def mentions_tool(cmd):
         toks = tokens(text)
         if not toks:
             return bool(TOOL_WORD.search(cmd) or TOOL_WORD.search(re.sub(r"[\\'\"$]", "", text)))
-        words += [re.sub(r"[$\\]", "", t) for t in toks]
+        words += [re.sub(r"[$\\]", "", t).lstrip("=") for t in toks]  # zsh: =gh is gh
+        words += [p for t in toks for p in re.split(r"[${}`()]+", t)]  # git${IFS}push
     return any(w.rsplit("/", 1)[-1] in TOOLS or re.match(r"(\./)?scripts/", w) for w in words)
 
 
@@ -168,22 +169,53 @@ def modelled(s):
     return MODELLED.sub(lambda x: "_" * len(x.group(0)), text)
 
 
+# In every command: a word-start # (a comment, which can hide the rest of a line from a
+# parser) or =word (zsh runs =gh as the path of gh).
+ANYWHERE = re.compile(r"(?:^|(?<=[\s;&|()<>]))(#|=(?=[\w./~-]))")
+# The only expansions a tool command may use, unquoted or in double quotes: $?, $!, $#,
+# $$, $0, $- and the quoted-heredoc message form "$(cat <<'EOF' … EOF)". Every other $ or `
+# ($VAR the guard didn't substitute, ${IFS}, $1, $@, $(…), `…`, $((…))) can build words at
+# run time (git $x, git${IFS}push, set -- push; git $1).
+DOLLAR_OK = re.compile(r"\$\(cat <<-?[ \t]*'[\w.-]+'\s*\)|\$[?!#$0-]")
+SYNTAX = [  # unquoted, in tool commands
+    (re.compile(r"[<>]\("), "process substitution <(…) or >(…)"),
+    (re.compile(r"\b\w[\w-]*\s*\(\s*\)|(?:^|(?<=[\s;&|()]))function\s"), "a function definition"),
+]
+
+
+def expandable(s):
+    """The stripped text with only the characters the shell expands (unquoted, inside $( )
+    or inside double quotes) left, everything else replaced by `_`."""
+    return "\n".join("".join(ch if k in (None, "(", '"') else "_" for ch, k in zip(text, ctx))
+                     for text, ctx in s.lines if ctx is not None)
+
+
 def unmodelled(cmd):
-    """Why the guard can't judge cmd as the shell will run it, or None. Only for commands
-    that mention a tool: refuse, rather than model, every shell feature the other checks
-    don't parse (character allowlisting; see MODELLED and UNMODELLED)."""
+    """Why the guard can't judge cmd as the shell will run it, or None. A word-start # or
+    =word asks in any command; everything else only in commands that mention a tool: refuse,
+    rather than model, every shell feature the other checks don't parse (character
+    allowlisting; see MODELLED, UNMODELLED, DOLLAR_OK and SYNTAX)."""
+    s = scan(cmd)
+    text = modelled(s)
+    m = ANYWHERE.search(text)
+    if m:
+        return f"a word-start {m.group(1)!r} (a # comment or zsh's =command): quote it"
     if not mentions_tool(cmd):
         return None
-    s = scan(cmd)
     if s.flags:
         return REASONS[sorted(s.flags)[0]]
     if any("\\" in ctx for _, ctx in s.lines if ctx):
         return "a backslash outside quotes"
-    m = UNMODELLED.search(modelled(s))
+    m = UNMODELLED.search(text)
     if m:
         return (f"{m.group(0)!r} outside quotes (globs, brace expansion, # comments, history, "
                 "~ and zsh expansions are not modelled: quote it)")
-    return None
+    m = re.search(r"[$`]", DOLLAR_OK.sub("", expandable(s)))
+    if m:
+        return (f"a {m.group(0)} expansion the guard can't follow (only literal assignments "
+                "at the start, S=x; … $S, are substituted)")
+    blank = blanked(s)
+    return next((why for pattern, why in SYNTAX if pattern.search(blank)), None)
 
 
 def split_heredocs(cmd):

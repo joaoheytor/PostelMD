@@ -8,6 +8,7 @@ follows `cd` and `-C`, keeping every directory a cd may have left (a subshell's 
 last), and fails closed: an unknown directory or a rev-parse error asks.
 """
 import os
+import re
 
 from shparse import UNKNOWN, bare, git_parts, move, segments
 
@@ -17,6 +18,19 @@ def common_dir(d, git_out, cache):
         out = git_out(d, "rev-parse", "--path-format=absolute", "--git-common-dir")
         cache[d] = os.path.realpath(out.strip()) if out and out.strip() else None
     return cache[d]
+
+
+def cd_target(d, args, cmd):
+    """Where `cd args` leads from d, or UNKNOWN: zsh's `cd old new` replaces old with new in
+    $PWD, `cd +N`/`-N` pick from the directory stack, and CDPATH searches other places."""
+    while args and args[0] in ("-L", "-P", "-e", "-@", "-q", "-s"):
+        args = args[1:]
+    if args[:1] == ["--"]:
+        args = args[1:]
+    if len(args) > 1 or (args and re.fullmatch(r"[+-]\d*", args[0])) \
+            or os.environ.get("CDPATH") or "CDPATH" in cmd:
+        return UNKNOWN
+    return move(d, args[0] if args else "$HOME")
 
 
 def check(cmd, cwd, git_out):
@@ -32,7 +46,7 @@ def check(cmd, cwd, git_out):
         if not words:
             continue
         if words[0] == "cd":
-            dirs |= {move(d, words[1] if len(words) > 1 else "$HOME") for d in dirs}
+            dirs |= {cd_target(d, words[1:], cmd) for d in dirs}
             continue
         if words[0] in ("pushd", "popd"):
             dirs.add(UNKNOWN)

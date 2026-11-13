@@ -2,7 +2,10 @@
 
 .claude/settings.json allows `go test|build|vet`, `git diff|log|show|grep|fetch|pull --ff-only`,
 `git rebase origin/main` and the repository's scripts by name. These options turn them into
-something else, so the guard asks: go's -exec/-toolexec (and GOFLAGS), and -o, profiles or
+something else, so the guard asks: go's -exec/-toolexec/-vettool/-overlay/-modfile, an
+-ldflags naming an external linker (and GOFLAGS); make with anything but targets, -j/-k/-s/
+-n/-B/-O, -C into the project and ENV_OK=<plain value> (make_check: -f, --eval, SHELL=
+replace the recipes); an ENV_OK value with ; $ or spaces; and go's -o, profiles or
 -outputdir outside bin/ or a temp dir (they could overwrite a git hook); rebase -x; grep -O;
 a long option not on the subcommand's list (gitopts.py: --output, --open-files-in-pager,
 --exec and their abbreviations); fetch and pull in any form but
@@ -20,6 +23,14 @@ from gitopts import bad_long
 from shparse import bare, git_parts
 
 GO_EXEC = re.compile(r"--?(tool)?exec(=|$)")
+# go flags that run or swap in programs and files: -vettool, -overlay (replaces source
+# files), -modfile, and -ldflags/-gcflags/... naming an external linker or tool.
+GO_RUNS = re.compile(r"--?(vettool|overlay|modfile)(=|$)"
+                     r"|--?(ld|gc|asm|gccgo)flags\b.*(ext|tool|plugin)", re.S)
+SAFE_VALUE = re.compile(r"[\w.:/@%+,-]*")  # IMAGE=postelmd:x; no ; $ ` spaces or quotes
+MAKE_FLAGS = re.compile(r"-j\d*|-[ksnB]+|--(keep-going|silent|no-print-directory|jobs=\d+)"
+                        r"|-O\w*|--output-sync(=\w+)?")
+MAKE_TARGET = re.compile(r"[A-Za-z0-9_][\w.-]*")
 GO_OUT = re.compile(r"--?(?:test\.)?(o|coverprofile|cpuprofile|memprofile|blockprofile"
                     r"|mutexprofile|trace|outputdir)(?:=(.*))?$")
 FETCH_FLAGS = {"-q", "--quiet", "--prune", "-p"}
@@ -108,8 +119,45 @@ def env_check(segs):
             return f"env {flags[0]} before {words[j]}"
         bad = [n for n in earlier + [ASSIGN.match(w).group(1) for w in before if ASSIGN.match(w)]
                if n not in ENV_OK]
+        bad += [w.partition("=")[0] for w in before  # IMAGE='x;id' reaches a recipe's shell
+                if ASSIGN.match(w) and not SAFE_VALUE.fullmatch(w.partition("=")[2])]
         if bad:
             return f"{bad[0]}= changes what {words[j]} reads or runs (allowed: {', '.join(sorted(ENV_OK))})"
+    return None
+
+
+def make_dir(target, cwd):
+    """True when make -C target stays in the project."""
+    project = os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR") or "/nonexistent")
+    if not target or "$" in target or not isinstance(cwd, str):
+        return False
+    return (os.path.realpath(os.path.join(cwd, target)) + "/").startswith(project + "/")
+
+
+def make_check(args, cwd):
+    """A reason to ask for make arguments: only targets, ENV_OK=<plain value>, a few flags
+    and -C into the project. -f/--file/--makefile, -E/--eval, -I, SHELL=, .SHELLFLAGS=, GO=
+    and other variables replace the recipes the Makefile runs."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-C", "--directory") or a.startswith(("-C", "--directory=")):
+            target = a.partition("=")[2] if a.startswith("--") else a[2:]
+            if a in ("-C", "--directory"):
+                target, i = (args[i + 1] if i + 1 < len(args) else ""), i + 1
+            if not make_dir(target, cwd):
+                return f"make -C {target} outside the project"
+        elif a.startswith("-"):
+            if not MAKE_FLAGS.fullmatch(a):
+                return f"make {a[:20]} (-f, --eval, -I and the like change what make runs)"
+        elif "=" in a:
+            name, _, value = a.partition("=")
+            if name not in ENV_OK or not SAFE_VALUE.fullmatch(value):
+                return (f"make {name[:20]}= replaces what the recipes run (allowed: "
+                        f"{', '.join(sorted(ENV_OK))} with plain values)")
+        elif not MAKE_TARGET.fullmatch(a):
+            return f"make target {a[:20]}"
+        i += 1
     return None
 
 
@@ -130,9 +178,12 @@ def check(segs, cwd):
             continue
         name = os.path.basename(words[0])
         if name == "go":
-            if any(GO_EXEC.match(a) for a in words[1:]):
-                return "go -exec/-toolexec runs another program"
+            if any(GO_EXEC.match(a) or GO_RUNS.match(a) for a in words[1:]):
+                return ("go -exec, -toolexec, -vettool, -overlay, -modfile or an external "
+                        "linker runs or swaps in other programs")
             why = go_output(words[1:], cwd)
+        elif name == "make":
+            why = make_check(words[1:], cwd)
         else:
             why = git_check(words, cwd) if name == "git" else None
         if why:
