@@ -20,13 +20,33 @@ smoke_workdir() {
 	mktemp -d "$parent/pm-smoke.XXXXXX"
 }
 
-# wait_healthy waits for Docker's own health check, which runs /postelmd healthcheck.
+# wait_healthy waits for Docker's own health check, which runs /postelmd healthcheck: the
+# server is alive, which it is from the instance lock on (ADR-0030). Then, unless called as
+# `wait_healthy alive-only` (a container with no published port), it waits for $base/readyz
+# to answer 200: startup has finished and every route is served.
 wait_healthy() {
 	i=0
 	while [ "$(docker inspect -f '{{.State.Health.Status}}' "$name")" != healthy ]; do
 		i=$((i + 1))
 		[ "$i" -le 60 ] || fail "not healthy after 30 s"
 		sleep 0.5
+	done
+	[ "${1:-}" = alive-only ] && return 0
+	i=0
+	while [ "$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$base/readyz")" != 200 ]; do
+		i=$((i + 1))
+		[ "$i" -le 60 ] || fail "healthy, but /readyz isn't 200 after 30 s more"
+		sleep 0.5
+	done
+}
+
+# check_appdb STATE_DIR: the database files exist, and are owner-only (ADR-0030). A running
+# server in WAL mode keeps app.db-wal and app.db-shm beside app.db.
+check_appdb() {
+	for f in "$1/app.db" "$1/app.db-wal" "$1/app.db-shm"; do
+		[ -f "$f" ] || fail "no $(basename "$f") in the state directory"
+		mode=$(stat -c %a "$f")
+		[ "$mode" = 600 ] || fail "$(basename "$f") has mode $mode, want 600"
 	done
 }
 

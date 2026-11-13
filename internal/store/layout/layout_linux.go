@@ -36,6 +36,9 @@ const (
 type Options struct {
 	AllowNetworkFS     bool // POSTELMD_ALLOW_NETWORK_FS: start on a refused filesystem; unsafe
 	AllowEphemeralData bool // POSTELMD_ALLOW_EPHEMERAL_DATA: start without a volume at /data
+	// OpensDatabase: the command opens app.db (serve), so the network override doesn't cover
+	// the state directory (ADR-0030).
+	OpensDatabase bool
 }
 
 // Filesystem magic numbers (ADR-0014 §1).
@@ -100,6 +103,9 @@ func Prepare(dataDir string, opts Options) (Paths, Durability, error) {
 	}
 	if worst == ContainerLayer && !opts.AllowEphemeralData {
 		return p, 0, ErrNoVolume
+	}
+	if err := checkDatabaseFS(p.State, opts); err != nil {
+		return p, 0, err
 	}
 	return p, worst, nil
 }

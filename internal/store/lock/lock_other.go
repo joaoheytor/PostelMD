@@ -20,5 +20,8 @@ func Acquire(path string) (*Lock, error) {
 	return nil, fmt.Errorf("lock: %s: %w", path, errors.ErrUnsupported)
 }
 
+// BootUUID is empty: there is no lock.
+func (l *Lock) BootUUID() string { return "" }
+
 // Release is a no-op.
 func (l *Lock) Release() error { return nil }

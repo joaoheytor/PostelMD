@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,6 +46,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "serve", "reset-password", "healthcheck":
 		cfg, err := config.Load(args[0], args[1:], stderr)
 		if err != nil {
+			if !errors.Is(err, config.ErrPrinted) {
+				fmt.Fprintf(stderr, "postelmd %s: %v\n", args[0], err)
+			}
 			return 2
 		}
 		return report(stderr, args[0], runCommand(args[0], cfg, stdout))

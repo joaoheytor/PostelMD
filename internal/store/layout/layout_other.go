@@ -22,7 +22,7 @@ const (
 )
 
 // Options are the operator's overrides.
-type Options struct{ AllowNetworkFS, AllowEphemeralData bool }
+type Options struct{ AllowNetworkFS, AllowEphemeralData, OpensDatabase bool }
 
 // ErrNotesAtRoot: notes were found directly in the data directory.
 var ErrNotesAtRoot = errors.New("layout: Markdown files found directly in the data directory")

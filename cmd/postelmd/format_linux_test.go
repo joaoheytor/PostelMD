@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -56,6 +57,10 @@ func TestOlderBinaryRefusesNewerData(t *testing.T) {
 	}
 	if _, err := os.Stat(leftover); err != nil {
 		t.Fatalf("the vault was opened and swept: %v", err)
+	}
+	// The database opens only after the format check (ADR-0030, CLAUDE.md rule 12).
+	if _, err := os.Lstat(filepath.Join(data, ".postelmd", "app.db")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("app.db next to newer data = %v, want none created", err)
 	}
 }
 

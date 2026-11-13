@@ -20,7 +20,7 @@ import (
 
 // Config is the server's configuration.
 type Config struct {
-	DataDir            string // POSTELMD_DATA_DIR, --data; default /data. Not in config.yaml: it holds the file
+	DataDir            string // POSTELMD_DATA_DIR, --data; default /data; made absolute. Not in config.yaml: it holds the file
 	Listen             string // listen, POSTELMD_LISTEN, --listen; default :8080
 	AllowNetworkFS     bool   // allow_network_fs, POSTELMD_ALLOW_NETWORK_FS; unsafe (ADR-0014)
 	AllowEphemeralData bool   // allow_ephemeral_data, POSTELMD_ALLOW_EPHEMERAL_DATA: start with no volume
@@ -37,6 +37,10 @@ type file struct {
 	AllowedHosts       []string `yaml:"allowed_hosts"`
 }
 
+// ErrPrinted wraps a flag parsing error (flag.ErrHelp included) that the flag package has
+// already written to stderr, with the usage: the caller doesn't print it again.
+var ErrPrinted = errors.New("config: the flag package printed this error")
+
 // Load reads flags from args, the environment, then the data directory's config.yaml.
 func Load(name string, args []string, stderr io.Writer) (Config, error) {
 	return load(name, args, os.Getenv, stderr)
@@ -52,7 +56,7 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	fl.StringVar(&flagData, "data", c.DataDir, "data directory (POSTELMD_DATA_DIR)")
 	fl.StringVar(&flagListen, "listen", c.Listen, "listen address (POSTELMD_LISTEN, config.yaml listen)")
 	if err := fl.Parse(args); err != nil {
-		return c, err
+		return c, fmt.Errorf("%w: %w", ErrPrinted, err)
 	}
 	if fl.NArg() > 0 {
 		return c, fmt.Errorf("config: unexpected argument %q", fl.Arg(0))
@@ -66,6 +70,17 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	if set["data"] {
 		c.DataDir = flagData
 	}
+	// Absolute and clean, resolved once here: store/sql refuses relative database paths, and
+	// every later step and command must name the same directory (ADR-0030, follow-up 2). An
+	// empty one is refused: filepath.Abs would make it the working directory.
+	if c.DataDir == "" {
+		return c, errors.New("config: the data directory (--data) is empty")
+	}
+	abs, err := filepath.Abs(c.DataDir)
+	if err != nil {
+		return c, fmt.Errorf("config: the data directory: %w", err)
+	}
+	c.DataDir = abs
 
 	if err := c.readFile(); err != nil {
 		return c, err

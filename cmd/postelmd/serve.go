@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoheytor/PostelMD/internal/audit"
 	"github.com/joaoheytor/PostelMD/internal/auth"
 	"github.com/joaoheytor/PostelMD/internal/config"
 	"github.com/joaoheytor/PostelMD/internal/egress"
@@ -26,9 +25,11 @@ import (
 // shutdownDeadline bounds a graceful stop (architecture §8; Docker's --stop-timeout is 60).
 const shutdownDeadline = 45 * time.Second
 
-// layoutOptions are the operator's overrides of the data directory checks.
-func layoutOptions(cfg config.Config) layout.Options {
-	return layout.Options{AllowNetworkFS: cfg.AllowNetworkFS, AllowEphemeralData: cfg.AllowEphemeralData}
+// layoutOptions are the operator's overrides of the data directory checks. opensDatabase is
+// true for a command that opens app.db (ADR-0030: the network override can't cover it).
+func layoutOptions(cfg config.Config, opensDatabase bool) layout.Options {
+	return layout.Options{AllowNetworkFS: cfg.AllowNetworkFS, AllowEphemeralData: cfg.AllowEphemeralData,
+		OpensDatabase: opensDatabase}
 }
 
 // setupURL is the setup page's address for the startup message: the listen address's host,
@@ -42,14 +43,18 @@ func setupURL(listen, actual string) string {
 	return "http://" + net.JoinHostPort(host, port) + "/setup"
 }
 
-// serve runs the server until ctx ends. The startup order is: layout and the filesystem
-// checks of the state and vault directories → instance lock → data format (ADR-0025) → auth
-// state → go-git transports (https only, through egress) → vault (adoption check, temp
-// sweep, rename probe) → the vault's git repository (adopted, or created empty) → HTTP.
-// ready, if set, gets the listening address.
+// afterListen, when a test sets it, runs once the listener serves and before the format
+// check, with the listening address.
+var afterListen func(addr string)
+
+// serve runs the server until ctx ends. The startup order (ADR-0030, as far as this build
+// goes) is: layout and the filesystem checks of the state and vault directories → instance
+// lock → the HTTP listener, which answers /healthz and 503 elsewhere (pmhttp.Starting) →
+// openInstance (format, app.db, auth, vault) → every route. ready, if set, gets the
+// listening address once every route is served.
 func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(addr string)) error {
 	log := slog.New(slog.NewJSONHandler(stdout, nil))
-	paths, durability, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg))
+	paths, durability, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
 	if err != nil {
 		return err
 	}
@@ -61,52 +66,88 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		return err
 	}
 	defer func() { _ = lk.Release() }()
-	if err := layout.EnsureFormat(paths.State); err != nil {
-		return err
-	}
-
-	svc, err := auth.OpenDir(paths.State, audit.New(log))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = svc.Close() }()
-	installGitTransports()
-	v, err := openVault(paths.Vault, log)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = v.Close() }()
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
 	}
-	if err := announceSetup(svc, cfg.Listen, ln.Addr().String(), stdout); err != nil {
-		return err
-	}
-	srv := newHTTPServer(cfg, svc, v, log)
+	gate := &pmhttp.Starting{}
+	srv := newHTTPServer(cfg, gate, log)
 	errs := make(chan error, 1)
 	go func() { errs <- srv.Serve(ln) }()
-	log.Info("listening", "addr", ln.Addr().String(), "vault", paths.Vault, "version", version, "commit", commit)
-	if ready != nil {
-		ready(ln.Addr().String())
+	addr := ln.Addr().String()
+	log.Info("listening", "addr", addr, "vault", paths.Vault, "version", version, "commit", commit)
+	if afterListen != nil {
+		afterListen(addr)
 	}
+
+	in, err := openInstance(ctx, paths, lk.BootUUID(), log)
+	if err == nil {
+		if err = announceSetup(in.auth, cfg.Listen, addr, stdout); err != nil {
+			in.close(log, true)
+		}
+	}
+	if err != nil {
+		_ = closeNow(srv, errs)
+		if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+			// The stop signal arrived during startup: a clean stop, not a failure. What a
+			// step left half done is what a crash there leaves (store/sql's recovery tables).
+			log.Info("stopped during startup")
+			return nil
+		}
+		return err
+	}
+	gate.Ready(pmhttp.NewRouter(in.auth, in.vault, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log))
+	log.Info("ready")
+	if ready != nil {
+		ready(addr)
+	}
+	return serveUntilStopped(ctx, srv, errs, in, lk.BootUUID(), log)
+}
+
+// serveUntilStopped serves until ctx ends, the server fails, or the boot UUID check finds a
+// second writer. A normal stop is graceful (shutdownDeadline). A split brain closes the
+// listener and every connection at once, so no new request starts, and leaves the database
+// unclosed (no WAL checkpoint). A handler already running can still finish its write before
+// the process exits: for the data that is the same as a crash at that point. Today the v0.1
+// save protocol covers it (each write is a temp file renamed into place, ADR-0003); with
+// v0.2's intents, their recovery will too (ADR-0033).
+func serveUntilStopped(ctx context.Context, srv *http.Server, errs chan error, in *instance, boot string, log *slog.Logger) error {
+	watch, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	split := make(chan error, 1)
+	go func() { split <- watchBoot(watch, in.db, boot, log) }()
 
 	select {
 	case err := <-errs:
+		in.close(log, true)
 		return err
+	case err := <-split:
+		if err != nil {
+			_ = closeNow(srv, errs)
+			in.close(log, false)
+			return err
+		}
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
 	stop, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
 	defer cancel()
-	if err := srv.Shutdown(stop); err != nil {
-		return err
+	err := srv.Shutdown(stop)
+	if serr := <-errs; err == nil && !errors.Is(serr, http.ErrServerClosed) {
+		err = serr
 	}
-	if err := <-errs; !errors.Is(err, http.ErrServerClosed) {
-		return err
+	in.close(log, true)
+	return err
+}
+
+// closeNow closes the listener and every connection at once, and waits for Serve to return.
+func closeNow(srv *http.Server, errs chan error) error {
+	err := srv.Close()
+	if serr := <-errs; !errors.Is(serr, http.ErrServerClosed) {
+		err = errors.Join(err, serr)
 	}
-	return nil
+	return err
 }
 
 // installGitTransports leaves go-git only the https transport, through the egress client,
@@ -153,10 +194,10 @@ func announceSetup(svc *auth.Service, listen, actual string, stdout io.Writer) e
 }
 
 // newHTTPServer is the HTTP server with its timeouts and limits, and the host check in front
-// of the router.
-func newHTTPServer(cfg config.Config, svc *auth.Service, v *vault.Vault, log *slog.Logger) *http.Server {
+// of h (the starting gate, then the router).
+func newHTTPServer(cfg config.Config, h http.Handler, log *slog.Logger) *http.Server {
 	return &http.Server{
-		Handler:           pmhttp.AllowHosts(cfg.AllowedHosts, log, pmhttp.NewRouter(svc, v, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log)),
+		Handler:           pmhttp.AllowHosts(cfg.AllowedHosts, log, h),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

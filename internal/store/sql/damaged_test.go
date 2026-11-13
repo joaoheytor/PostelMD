@@ -31,7 +31,7 @@ func setKillPoint(t *testing.T, fn func(string)) {
 	t.Cleanup(func() { killPoint = old })
 }
 
-// ErrDamaged, which points the operator to `db rebuild`, comes only from a damaged file or
+// ErrDamaged, which tells the operator to move the database's files aside, comes only from a damaged file or
 // one that isn't a database; every other failure is a plain error.
 func TestOpenErrorKinds(t *testing.T) {
 	for _, c := range []struct {

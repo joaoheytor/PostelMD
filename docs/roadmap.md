@@ -234,7 +234,7 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
     and a failed write during the snapshot in `TestPreMigrateDiskFull`; the power-loss
     model is still open);
   - with `POSTELMD_ALLOW_NETWORK_FS` overriding a refused filesystem for the state
-    directory, a start refuses to create `app.db`, and creates nothing;
+    directory, a start refuses to create `app.db`, and creates no database;
   - an outside `mv` of one of several identical files keeps its ID at once; a unique
     copy-and-delete keeps it after the second pass (pending until then); a `cp` over a freed
     inode, and a rename plus an edit, give new IDs; a path missing for one pass only keeps

@@ -20,7 +20,11 @@ Decisions are recorded in [`adr/`](adr/). This document describes how the pieces
 > still under one vault mutex. Credentials stay in `auth.json` until v0.3.
 > Built so far: `internal/store/sql` (opening `app.db` with ADR-0030's pragmas, the writer,
 > read pool and snapshot connections, `ATTACH` denied, `quick_check`, embedded migrations,
-> `VACUUM INTO` copies); `serve` doesn't open it yet.
+> `VACUUM INTO` copies, the snapshot before migrating an existing database). `serve` opens it
+> after the format check (data format 1 still), records its boot UUID there and stops on a
+> split brain (ADR-0014), and listens before opening anything: `/healthz` answers and
+> `/readyz` is `503` until startup ends. A state directory that only
+> `POSTELMD_ALLOW_NETWORK_FS` accepts is refused.
 
 ## 1. System context
 
@@ -103,7 +107,7 @@ Everything else consumes their interfaces.
     index.db                 # SQLite WAL, 0600: FTS and links; derived, rebuilt by `reindex` (ADR-0030)
     migrate.intent           # sidecar from before a migration's snapshot until it ends (ADR-0015)
     rebuild.intent           # sidecar while `postelmd db rebuild` runs (ADR-0030)
-    damaged-*/               # app.db files moved aside by `db rebuild`, never deleted automatically (ADR-0030)
+    damaged-*/               # app.db files moved aside by `db rebuild`, or by hand at format 1 (ADR-0034); never deleted automatically (ADR-0030)
     pre-format-2/            # 0600 copies of format, auth.json, secret.key, config.yaml as v0.1 left them (ADR-0030)
     pre-format-2-*/, rolled-back-*/  # set aside by a v0.2 → v0.1 rollback or a redone copy; removed by the runbook
     keys/                    # key ring, one key per purpose, versioned, 0600 (ADR-0005)

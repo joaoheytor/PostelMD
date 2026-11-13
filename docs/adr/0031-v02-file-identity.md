@@ -126,9 +126,10 @@ check the ID's syntax before any lookup, check membership before choosing betwee
   assignment, the marker, the scan with suspects, pending paths and both rename rules; data
   format 2 and its runbook (ADR-0030). IDs aren't on the wire yet, and PostelMD's own writes
   don't touch `files` until ADR-0033's slice: the next scan sees them as outside changes, which
-  is safe because no client holds an ID. The same slice wires `app.db` into `serve` (ADR-0030,
-  Consequences, follow-up 2: the boot UUID, listen-early `/readyz`, `db rebuild`, the
-  snapshot before migrating).
+  is safe because no client holds an ID. `app.db` is wired into `serve` before it, at data
+  format 1 (#175: the boot UUID, listen-early `/readyz`; the snapshot before migrating came
+  with #173); this slice brings format 2, with `db rebuild` and `vault claim` (ADR-0030,
+  Consequences, follow-up 2, in the parts [ADR-0034](0034-app-db-before-format-2.md) sets).
 
 ## Alternatives considered
 | Option | Why not |
