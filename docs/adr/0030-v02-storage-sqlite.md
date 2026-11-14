@@ -1,6 +1,6 @@
 # ADR-0030: v0.2 storage: SQLite in /data, its driver, migrations and data format 2
 
-- **Status:** Accepted; its "Checks at start" fix for a damaged database at format 1, and the order and done conditions of its follow-up 2, are superseded by [ADR-0034](0034-app-db-before-format-2.md)
+- **Status:** Accepted; its "Checks at start" fix for a damaged database at format 1, and the order and done conditions of its follow-up 2, are superseded by [ADR-0034](0034-app-db-before-format-2.md); the fix its format table names for a marker that is a symlink, a folder or a special file, and `vault claim`'s refusal of one, by [ADR-0031](0031-v02-file-identity.md) (move it aside, then run again)
 - **Date:** 2026-11-12
 
 ## Context

@@ -437,22 +437,36 @@ does no harm.
 `migrate.intent` is in `.postelmd`; with one there, a migration was interrupted: keep
 everything and follow the message):
 
-1. Note `data=` and `port=`. A container that `--restart` keeps restarting has no port
-   for `docker port`, so take it from its configuration:
+1. Note `data=`, `port=` and `IMAGE=`. A container that `--restart` keeps restarting has no
+   port for `docker port`, so take the host address and port from its configuration. Keep
+   the address: without it, `-p` publishes on every interface, not only on `127.0.0.1`. An
+   IPv6 address needs brackets for `-p` (`[::1]:8080`), which the `case` line adds:
 
    ```sh
    data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
-   port=$(docker inspect -f '{{(index (index .HostConfig.PortBindings "8080/tcp") 0).HostPort}}' postelmd)
-   echo "data=$data port=$port"
+   port=$(docker inspect -f '{{with index .HostConfig.PortBindings "8080/tcp"}}{{with index . 0}}{{if .HostIp}}{{.HostIp}}:{{end}}{{.HostPort}}{{end}}{{end}}' postelmd)
+   case $port in *:*:*) port="[${port%:*}]:${port##*:}" ;; esac
+   IMAGE=$(docker inspect -f '{{.Config.Image}}' postelmd)
+   echo "data=$data port=$port IMAGE=$IMAGE"
    ```
 
    With an adopted notes folder, also
    `notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)`.
+   If any of them printed empty, stop here: the container's configuration isn't what this
+   runbook made, so start it again by hand with the flags you used.
 2. Stop **and remove** the container: `docker stop postelmd && docker rm postelmd`.
 3. Run the **Move the database aside** block with its first line changed to
    `set -- pre-migrate-1-2.db post-migration-started-1-2`, so `app.db` stays.
-4. Only if it printed `moved into …`, run the `docker run` of the upgrade block below with
-   the same `IMAGE`, `$port` and `$data` (and `$notes`).
+4. Only if it printed `moved into …`, start it again (with an adopted notes folder, add
+   `-v "$notes":/data/vaults/notes` before `"$IMAGE"`, and `[ -n "$notes" ]` to the checks):
+
+   ```sh
+   [ -n "$data" ] && [ -n "$port" ] && [ -n "$IMAGE" ] \
+     && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+       --log-opt max-size=10m --log-opt max-file=3 \
+       -p "$port":8080 --user "$(id -u):$(id -g)" -v "$data":/data "$IMAGE" \
+     || echo "START STOPPED: data, port or IMAGE is empty, or docker run failed" >&2
+   ```
 
 If PostelMD says `format` is **damaged** (anything but a number on one line), back up
 the data folder first. If only v0.1 ever used it, delete `"$data"/.postelmd/format` and start

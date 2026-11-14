@@ -197,6 +197,32 @@ func TestWriteMarkerRefusesASymlinkedMarker(t *testing.T) {
 	}
 }
 
+// A temp folder that is a symlink to a folder outside the vault, holding a marker and a
+// user's file, is refused: nothing is written through the link, and nothing changes there.
+func TestWriteMarkerRefusesASymlinkedTempFolder(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	marker := "postelmd-vault 1\n" + uuidB + "\n2\n"
+	writeFiles(t, outside, map[string]string{ownerMarker: marker, "mine.txt": "the user's"})
+	must(t, os.Symlink(outside, filepath.Join(dir, TmpDir)))
+	err := WriteMarker(dir, uuidA, 2)
+	if !errors.Is(err, ErrBadMarker) || !strings.Contains(err.Error(), "move it aside") {
+		t.Fatalf("WriteMarker = %v, want ErrBadMarker naming the fix", err)
+	}
+	if got := content(t, outside, ownerMarker); got != marker {
+		t.Fatalf("the outside marker changed: %q", got)
+	}
+	if got := content(t, outside, "mine.txt"); got != "the user's" {
+		t.Fatalf("the outside file changed: %q", got)
+	}
+	es, err := os.ReadDir(outside)
+	if err != nil || len(es) != 2 {
+		t.Fatalf("the outside folder holds %d entries (%v), want 2", len(es), err)
+	}
+	if got, err := os.Readlink(filepath.Join(dir, TmpDir)); err != nil || got != outside {
+		t.Fatalf("the temp folder's link: %q, %v", got, err)
+	}
+}
+
 // A marker that is a folder (or another special file) isn't overwritten: the error says so.
 func TestWriteMarkerRefusesAMarkerThatIsAFolder(t *testing.T) {
 	dir := t.TempDir()
