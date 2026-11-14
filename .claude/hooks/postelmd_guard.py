@@ -16,7 +16,10 @@ Modes (first CLI argument):
            settings, mutating API calls) gets a human permission prompt ("ask"); PR and issue
            text is scanned like Write/Edit content; options that make allowed commands run
            other programs ask (codeexec.py); so do shell writes to repository files
-           (bash_writes.py).
+           (bash_writes.py). Leading literal assignments (`S=/tmp/x; git -C $S log`) are
+           substituted first and the result judged as if typed (shvars.py). A command that
+           mentions git, go, gh, npm, npx, make or scripts/ asks when it can't be tokenized
+           or shscan.py flags it, and when a wrapper (sudo, xargs, nice -n, ...) runs one.
 
 These are guardrails for an agent, not a security boundary: CI and branch protection are the
 hard gates.
@@ -32,13 +35,15 @@ import re
 import subprocess
 import sys
 
-from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets
-from commitmsg import check as check_message
+from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets, tokens
+from commitmsg import CONVENTIONAL, SUBJECT, check as check_message
 from content import has_secret, public_reasons
 from gitdir import check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
-
-CONVENTIONAL = r"(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S"
+from gh_rules import output_filters as gh_output_filters
+from shparse import bare, indirect, segments, wrapped
+from shscan import mentions_tool, unmodelled
+from shvars import normalize
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
 # _test.go files next to the code they cover.
@@ -161,7 +166,7 @@ GATED = [
     (GH + r"issue\s+(reopen|delete|transfer)\b", "reopening, deleting or transferring issues"),
     (GH + r"(workflow\s+(run|enable|disable)|run\s+(cancel|delete))\b", "running or changing workflows"),
     (GH + r"api\b[^;&|\n]*(-X\s*|--method[=\s]+)(POST|PUT|PATCH|DELETE)\b", "mutating GitHub API calls"),
-    (GH + r"api\b[^;&|\n]*(\s-[fF]\b|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
+    (GH + r"api\b[^;&|\n]*([\s,{=]-[fF]|--field\b|--raw-field\b|--input\b)", "mutating GitHub API calls (fields imply POST)"),
 ]
 
 
@@ -175,21 +180,52 @@ def check_commit(cmd):
         if not re.search(r"(\s-s\b|\s--signoff\b|\s-[a-zA-Z]*s[a-zA-Z]*\b)", cmd):
             respond("deny", "BLOCKED: commits need a DCO sign-off. Add -s (git commit -s ...).")
         if re.search(r"\s-m\b", cmd) and not re.search(r"(-m\s+[\"']?\$?\(?(cat\s+<<-?'?EOF'?\s*)?|\n)\s*" + CONVENTIONAL, cmd):
-            respond("deny", "BLOCKED: the commit subject must be a Conventional Commit, e.g. "
-                            "'docs(adr): clarify save protocol' (types: feat fix perf refactor docs "
-                            "test build ci chore revert; '!' for breaking).")
+            respond("deny", SUBJECT)
+
+
+def unparsed(cmd):
+    """Why the command can't be judged, when it mentions a tool the guard checks: shell
+    syntax it doesn't model (shscan.unmodelled), or the tokenizer gave up (every
+    token-based check would be off)."""
+    why = unmodelled(cmd)
+    if why or not mentions_tool(cmd):
+        return why
+    return None if tokens(cmd) or not cmd.strip() else "the command can't be tokenized"
+
+
+def wrapper(cmd):
+    segs = segments(cmd)
+    name = indirect(segs)
+    if name:
+        return f"{name} runs text the guard sees only as a string, or renames commands"
+    name = wrapped(segs)
+    if name:
+        return f"{name} runs another command with options the guard doesn't follow"
+    return gh_output_filters(segs)
+
+
+def gated(cmd):
+    """The GATED label for cmd, also when a keyword, wrapper or =, `if …; then`, `nohup`,
+    `exec`, `>(…)` comes before the command: each segment is judged without them."""
+    texts = [cmd] + [" ".join([w[0].lstrip("=")] + w[1:])
+                     for w in (bare(s) for s in segments(cmd)) if w]
+    return next((label for t in texts for pattern, label in GATED if re.search(pattern, t)), None)
 
 
 def check_git(tool_input, cwd):
-    cmd = tool_input.get("command") or ""
+    cmd = normalize(tool_input.get("command") or "")  # `S=lit; ... $S`: judged as typed
     check_commit(cmd)  # denials first: `git commit -m x && git push` is still a bad commit
     found = check_message(cmd, cwd)
     if found:
         respond(found[0], f"COMMIT MESSAGE CHECK: {found[1]}" if found[0] == "ask" else found[1])
-    for pattern, label in GATED:
-        if re.search(pattern, cmd):
-            respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
-                           "maintainer asked for exactly this in the conversation.")
+    label = gated(cmd)
+    if label:
+        respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
+                       "maintainer asked for exactly this in the conversation.")
+    why = unparsed(cmd) or wrapper(cmd)
+    if why:
+        respond("ask", f"CAN'T PARSE: {why}. The guard's checks can't see this command as "
+                       "bash will run it.")
     why = check_gitdir(cmd, cwd, git_out)
     if why:
         respond("ask", f"FOREIGN REPOSITORY: {why}.")
@@ -202,7 +238,7 @@ def check_git(tool_input, cwd):
 
 
 def check_bash_writes(tool_input, cwd):
-    targets = repo_write_targets(tool_input.get("command") or "", cwd)
+    targets = repo_write_targets(normalize(tool_input.get("command") or ""), cwd)
     if targets:
         respond("ask", "SHELL WRITE to repository file(s) " + ", ".join(targets[:5]) + ". Use "
                        "Write/Edit so the guard hook sees the change (secrets, public-repo and ADR "

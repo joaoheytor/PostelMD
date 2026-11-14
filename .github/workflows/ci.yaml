@@ -139,6 +139,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # The guard's shells_test runs its allowed commands under zsh too, and fails in CI
+      # when zsh is missing. Ubuntu's archive package, no third-party source.
+      - name: Install zsh for the guard's shell tests
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends zsh
       - run: make test-go test-scripts build
       - name: Short fuzz runs
         run: make fuzz

@@ -72,7 +72,7 @@ explicitly wherever a job checks out code.
 | `pr-title` | Conventional Commit format for the PR title (types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`; `!` or `BREAKING CHANGE` for breaking changes); runs only on `pull_request` | v0.0 |
 | `changelog` | `feat`, `fix`, `perf`, breaking, and security-fix PRs must add an entry under `## [Unreleased]` in `CHANGELOG.md`, unless labelled `skip-changelog`; also checks the Keep a Changelog structure | v0.0 |
 | `lint` | `golangci-lint` (with depguard/forbidigo rules for the layering and no-`os.Getenv`), `eslint`, `tsc --noEmit`, file-size check (300 warn / 500 fail), `actionlint`, `shellcheck`, `yamllint`; actionlint and shellcheck run from images pinned by digest in the Makefile (`ACTIONLINT_IMAGE`, `SHELLCHECK_IMAGE`), so `make lint` reports what CI reports | v0.0 |
-| `test-go` | `go test -race ./...` and the build; short fuzz runs (`make fuzz`, 30 s per target) | v0.0 |
+| `test-go` | `go test -race ./...`, `make test-scripts` and the build; short fuzz runs (`make fuzz`, 30 s per target). Installs `zsh` from Ubuntu's archive first: the agent guard's `shells_test.py` runs its allowed commands under bash and zsh and fails in CI when either is missing | v0.0 |
 | `test-web` | Vitest for `web/src/core` and `packages/plugin-api` | v0.0 |
 | `scenarios` | The failure-scenario suite (fault injection, real temp dirs). No separate job: the crash tests live next to the code (`internal/vault`, `internal/store/*`, harness in `internal/store/fs/faultfs`) and `test-go` runs them | v0.0 |
 | `vuln` | `govulncheck`, `npm audit --omit=dev` | v0.0 |

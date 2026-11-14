@@ -3,18 +3,50 @@
 A message is published by the next push, which passes silently, so it gets the Write/Edit
 checks: a secret denies, private-looking content asks. The text comes from -m/--message
 (also -sm), heredoc bodies in the command (`-m "$(cat <<'EOF' ...)"`), and the file of
--F/--file. It asks when it can't see the text: a file that is `-`, unreadable, or outside the
-project and temp dirs (the guard won't read ~/.config for you), or a message with $ or `
-other than the quoted-heredoc form. .githooks/commit-msg runs gitleaks on the message too.
+-F/--file, or the heredoc `git commit -F - <<'EOF'` reads (the command's only heredoc, on the
+commit's line; its first line must be a Conventional Commit subject, as with -m). It asks
+when it can't see the text: any other `-F -`, a file that is unreadable or outside the
+project and temp dirs (the guard won't read ~/.config for you), a message with $ or ` other
+than the quoted-heredoc form, or a heredoc with an unquoted delimiter whose body has $ or `.
+.githooks/commit-msg runs gitleaks on the message too.
 """
 import os
 import re
+import stat
 
 from bash_writes import scratch, split_heredocs, under
 from content import has_secret, public_reasons
 from shparse import UNKNOWN, bare, git_parts, segments
+from shscan import blanked, scan
 
+SEP = re.compile(r";|\|\|?|&&|\n|\(|\)")
+
+CONVENTIONAL = r"(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S"
 QUOTED_HEREDOC = re.compile(r"\$\(cat <<-?\s*'[\w.-]+'\s*(;\s*)?\)")
+SUBJECT = ("BLOCKED: the commit subject must be a Conventional Commit, e.g. "
+           "'docs(adr): clarify save protocol' (types: feat fix perf refactor docs "
+           "test build ci chore revert; '!' for breaking).")
+
+
+def stdin_message(cmd):
+    """The body of the heredoc `git commit -F -` reads, or None: the command has exactly one
+    heredoc, nothing shscan flags, and the heredoc belongs to `git ... commit`, whose simple
+    command has no other stdin redirect (<, <&, <>, <<<, N<: the last one wins)."""
+    s = scan(cmd)
+    if s.flags or len(s.starts) != 1 or len(s.bodies) != 1:
+        return None
+    text, (start, end) = blanked(s), s.starts[0]
+    left = max((m.end() for m in SEP.finditer(text, 0, start)), default=0)
+    right = next((m.start() for m in SEP.finditer(text, end)), len(text))
+    before, after = text[left:start], text[end:right]
+    if "<" in before + after or not re.match(r"\s*git\b.*\scommit\b", before):
+        return None
+    return s.bodies[0][1]
+
+
+def check_subject(body):
+    lines = [ln.lstrip("\t") for ln in body.split("\n") if ln.strip()]
+    return None if lines and re.match(CONVENTIONAL, lines[0]) else SUBJECT
 
 
 def sources(args):
@@ -48,21 +80,46 @@ def read_message(path, cwd):
     """(text, None) or (None, reason to ask)."""
     if path == "-" or cwd is UNKNOWN and not os.path.isabs(os.path.expanduser(path)):
         return None, f"the guard can't read the message file {path}"
-    full = os.path.normpath(os.path.join(cwd if cwd is not UNKNOWN else "/",
-                                         os.path.expanduser(path)))
-    project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    given = os.path.normpath(os.path.join(cwd if cwd is not UNKNOWN else "/",
+                                          os.path.expanduser(path)))
+    full = os.path.realpath(given)  # symlinks resolved: L/.. may leave the project
+    project = os.path.realpath(os.environ.get("CLAUDE_PROJECT_DIR", "") or "/nonexistent")
+    if any(p.startswith(("/dev/", "/proc/")) or p in ("/dev", "/proc") for p in (given, full)):
+        return None, f"the message file {path} is a device or process file (stdin?)"
     if not (under(full, project) or scratch(full, (project,))):
         return None, f"the message file {path} is outside the project and temp dirs"
+    return read_regular(full, path)
+
+
+MAX_MESSAGE = 1 << 20
+
+
+def read_regular(full, path):
+    """(text, None) for a regular file of at most MAX_MESSAGE bytes, else (None, reason). A
+    FIFO would block the hook until it timed out, and a timed-out hook doesn't decide; so
+    stat first, and open without blocking or following a link swapped in meanwhile."""
     try:
-        with open(full, encoding="utf-8") as fh:
-            return fh.read(1 << 20), None
+        fd = os.open(full, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError:
+        return None, f"the guard can't read the message file {path}"
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_MESSAGE:
+            return None, f"the message file {path} is not a regular file under 1 MiB"
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            data = fh.read(MAX_MESSAGE + 1)
+        if len(data) > MAX_MESSAGE:  # grew after the stat
+            return None, f"the message file {path} is over 1 MiB"
+        return data.decode("utf-8"), None
     except (OSError, UnicodeDecodeError):
         return None, f"the guard can't read the message file {path}"
+    finally:
+        os.close(fd)
 
 
 def check(cmd, cwd):
     """(decision, reason) for a git commit whose message needs the maintainer, or None."""
-    found, texts = False, []
+    found, texts, stdin = False, [], None
     for words in segments(cmd):
         words = bare(words)
         if not words or os.path.basename(words[0]) != "git":
@@ -77,6 +134,9 @@ def check(cmd, cwd):
                 return "ask", "a commit message built with $ or ` that the guard can't see"
             texts.append(m)
         for path in files:
+            if path == "-" and stdin is None and stdin_message(cmd) is not None:
+                stdin = stdin_message(cmd)  # its body is scanned with the other heredocs
+                continue
             text, why = read_message(path, where)
             if why:
                 return "ask", why
@@ -90,6 +150,8 @@ def check(cmd, cwd):
     text = "\n".join(texts)
     if has_secret(text):
         return "deny", "BLOCKED: secret-shaped string in the commit message (rule 15)."
+    if stdin is not None and check_subject(stdin):
+        return "deny", check_subject(stdin)
     reasons = public_reasons(text)
     if reasons:
         return "ask", "the commit message contains " + "; ".join(reasons)

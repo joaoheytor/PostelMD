@@ -133,11 +133,41 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   `.claude/settings.json`): pushing a non-main branch to origin, opening, editing and
   commenting on PRs and issues, re-running CI, and a squash merge pinned to the reviewed
   head (`gh pr merge N --squash --match-head-commit <sha>`), which agents run only after the
-  maintainer's go-ahead for that PR. The guard fails closed: these pass only as one simple
-  command (no `cd`, `&&`, pipes or `$(…)`; use `git -C` and `--body-file`) with allowlisted
-  arguments, and PR/issue text is scanned for secrets. Pushes to main/master, force pushes
-  without a lease, tags, releases, closing or reviewing PRs, `gh api` and repo settings stay
-  permission prompts.
+  maintainer's go-ahead for that PR, and read-only `gh api` (GET) on
+  `repos/joaoheytor/PostelMD/…`. The guard fails closed: these pass only as one simple
+  command (no `cd`, `&&`, `;` or `$(…)`; use `git -C` and `--body-file`) with allowlisted
+  arguments, followed at most by ` 2>&1`, ` >/dev/null` (exactly; `2>/dev/null` asks) or
+  pipes into `tail`, `head`, `grep`, `wc`, `cat`, `sort` or `uniq` without file arguments;
+  PR/issue text and commit messages (`-m`, `-F <file>`, `-F - <<'EOF'` with no other stdin
+  redirect) are scanned for secrets. Local git commands may follow a literal
+  `cd <dir>` (`git -C` is preferred) into this project or one of its worktrees, and
+  `git fetch origin pull/<N>/head:<dst>` passes for `refs/remotes/review/…`,
+  `refs/scratch/…` or a new local `pr<N>…` branch. A command may
+  start with literal assignments (`S=/tmp/x; git -C $S log`): the guard substitutes them
+  and judges the result as typed; `export`, `$(…)` values, `S=x cmd` prefixes and zsh
+  modifiers (`$S:h`, `$S[1]`) still ask. In any command that mentions git, gh, go, npm,
+  npx, make or `scripts/`, shell syntax the guard doesn't model asks: unquoted
+  `{ } * ? [ ] ! ~ ^` (except `HEAD~3`, `HEAD^` and path globs such as `docs/adr/0*.md`),
+  any `$` or backtick other than a substituted assignment, `$?`, `$!`, `$#`, `$$` and the
+  `"$(cat <<'EOF' … EOF)"` message form, `<(…)`/`>(…)`, function definitions, a backslash
+  or backslash-newline outside quotes, `$'…'` and non-ASCII characters; quote them
+  (`gh api "repos/{owner}/{repo}/…"`). In every command, a word-start `#` or `=`, a `(`
+  right after a word (zsh glob qualifiers run code), `eval`, `sh|bash|zsh -c`, `alias`,
+  `source`, `setopt`/`unsetopt`/`emulate`, `set` beyond `-euxv`/`-o pipefail`, and
+  redirects that may write a repository file (`<>`, `>>|`, `>&`, …) ask; wrappers,
+  keywords and zsh precommand words (`nohup`, `time`, `exec`, `noglob`, `repeat N`,
+  `if …; then`) don't hide a gated command; a `cd` with two arguments, `+N`/`-N` or
+  `CDPATH` asks, and both its logical and physical target must be this project; message
+  and body files must be regular files under 1 MiB; every gh `--jq`/`--template` is
+  checked; `make` takes only targets, a few flags, `-C` into the project and the allowed
+  variables with plain values; go's `-vettool`, `-overlay`, `-modfile` and external-linker
+  flags ask. The guard models bash; `.claude/hooks/shells_test.py` checks every allowed
+  case runs the same under zsh, with and without Claude Code's options. The user's own
+  shell aliases and options are not modelled (#178; the native permission prompt applies).
+  Pushes to main/master, force pushes without a lease, tags, releases, closing or reviewing
+  PRs, any other `gh api` and repo settings stay permission prompts. The guard is a
+  guardrail for agents, not the gate: the allowed test runners (`make`, `go test`, `npm`)
+  can run any code, so GitHub branch protection and rulesets are the hard gate.
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
   acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
   in `.claude/agents/` for a PR.
@@ -151,8 +181,13 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   depending on another open slice.
 - Agents write repository files with Write/Edit, not shell redirection, so the guard hook
   sees them (it asks before `sed -i`, `perl -pi`, `tee` and `>` into repository files).
-- If your shell is zsh, it doesn't word-split `$VAR` and expands a leading `=`: run loops and
-  word splitting under `bash -c '…'`. Machine-specific notes go in `CLAUDE.local.md` (ignored).
+- The Bash tool may run zsh (no word splitting of `$VAR`, `=cmd`, `$x:h`); the guard asks on
+  `bash -c`, `eval` and any `$` in a git/gh/go/npm/npx/make command other than a leading
+  literal `S=/path; git -C $S …`. Run git once per command with a literal `git -C <dir>`;
+  loops without those tools pass (`for f in docs/*.md; do wc -l "$f"; done`); for a loop
+  that runs them, write a script in the scratchpad and run it as its own command
+  (`bash <scratchpad>/x.sh`; not allowlisted, so it prompts). Machine-specific notes go
+  in `CLAUDE.local.md` (ignored).
 
 ## Definition of Done
 
