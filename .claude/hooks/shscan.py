@@ -193,13 +193,21 @@ def attached_paren(text):
     for i, ch in enumerate(text):
         if ch != "(" or (i and text[i - 1] in "$<>("):
             continue
-        before = text[:i].rstrip(" \t")
-        if not before or before[-1] in ";&|(\n":
-            continue
-        if before.rsplit(None, 1)[-1] in PAREN_AFTER:
-            continue
-        return True
+        if not command_position(text, i):
+            return True
     return False
+
+
+def command_position(text, i):
+    """True when position i starts a command: after the start, ; & | ( or a newline, or after
+    a blank and a keyword (then, do, if, time ...) that is itself in command position. A
+    keyword glued to the ( (do(e:...:)) is a word with a glob qualifier."""
+    before = text[:i].rstrip(" \t")
+    if not before or before[-1] in ";&|(\n":
+        return True
+    word = re.search(r"[^\s;&|()<>]+$", before)
+    return bool(word and word.group(0) in PAREN_AFTER and len(before) < i
+                and command_position(text, word.start()))
 
 
 def expandable(s):

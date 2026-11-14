@@ -146,6 +146,7 @@ def wrapped(segs):
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "fish", "busybox", "csh", "tcsh"}
 
 
+DECLARE = {"typeset", "local", "declare", "readonly", "export", "integer", "float", "print"}
 SET_OPTIONS = {"pipefail", "errexit", "nounset", "xtrace", "verbose"}
 
 
@@ -176,8 +177,10 @@ def indirect(segs):
         if name in ("eval", "alias", "source", ".", "unalias", "hash", "enable", "trap",
                     "setopt", "unsetopt", "emulate", "shopt"):
             return name  # option changes: bare_glob_qual, extended_glob, ... change parsing
-        if re.match(r"\w+\[", name):
+        if re.match(r"\w+\[", name) or any("options[" in w for w in words):
             return "an array element assignment (zsh options[...]=on)"
+        if name in DECLARE and any(w.startswith("options") for w in words[1:]):
+            return f"{name} options (zsh's options array sets shell options)"
         if name == "set" and not set_ok(words[1:]):
             return "set with options other than -e, -u, -x, -v and -o pipefail"
         if name in SHELLS and any(re.fullmatch(r"-\w*c\w*", w) for w in words[1:]):

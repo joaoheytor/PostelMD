@@ -54,7 +54,7 @@ def check(cmd, cwd, git_out):
         if words[0] == "cd":
             dirs |= {t for d in dirs for t in cd_targets(d, words[1:], cmd)}
             continue
-        if words[0] in ("pushd", "popd"):
+        if words[0] in ("pushd", "popd", "chdir"):  # chdir: zsh's cd, unknown to bash
             dirs.add(UNKNOWN)
             continue
         if os.path.basename(words[0]) != "git":
