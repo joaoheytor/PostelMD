@@ -90,11 +90,11 @@ func parseMarker(b []byte) (Marker, error) {
 // open the vault. The caller holds the instance lock (CLAUDE.md rule 12).
 //
 // Where there is no marker, it first adopts the folder as ADR-0027 does, refusal included:
-// reserved folders holding anything (but a leftover of its own temp) are ErrForeignReserved,
-// and nothing changes. Adopting creates the marker empty and makes it durable, so a crash
-// before the rename leaves an adopted temp folder whose sweep removes the temp, never one
-// that adoption would refuse as the user's. A marker that is a folder or another special
-// file is refused (ErrBadMarker); a symlink there is replaced, never followed.
+// reserved folders holding anything are ErrForeignReserved, and nothing changes. Adopting
+// creates the marker empty and makes it durable before the temp exists, so a crash before
+// the rename leaves an adopted temp folder whose sweep removes the temp, never one that
+// adoption would refuse as the user's. A marker that is a symlink (dangling or not), a
+// folder or another special file is refused (ErrBadMarker) and left as it is.
 //
 // A crash leaves the marker as it was (or empty where there was none) or as written: the
 // rename is the one step that carries meaning, so no intent is needed (CLAUDE.md rule 14;
@@ -112,9 +112,12 @@ func WriteMarker(dir, vaultUUID string, format int, opts ...fs.Option) error {
 	rel, tmp := TmpDir+"/"+ownerMarker, TmpDir+"/"+markerTemp
 	_, err = root.Stat(rel)
 	switch {
-	case err == nil, errors.Is(err, fs.ErrSymlink):
-	case errors.Is(err, fs.ErrNotRegular):
-		return fmt.Errorf("%w: it is a folder or a special file; move it aside, then run this again", ErrBadMarker)
+	case err == nil:
+	case errors.Is(err, fs.ErrSymlink), errors.Is(err, fs.ErrNotRegular):
+		// A symlink is refused like a folder: replacing it would mark a folder that adoption
+		// never checked, and the next sweep would delete what the user keeps beside it.
+		return fmt.Errorf("%w: it (or its folder, %s) is a symlink, a folder or a special file; "+
+			"move it aside, then run this again", ErrBadMarker, TmpDir)
 	case errors.Is(err, iofs.ErrNotExist):
 		if err := adoptForMarker(&Vault{root: root}); err != nil {
 			return err
@@ -135,9 +138,9 @@ func WriteMarker(dir, vaultUUID string, format int, opts ...fs.Option) error {
 }
 
 // adoptForMarker is adopt for a folder without the marker, before WriteMarker's temp: the
-// same check (its own temp's leftover aside), then the empty marker, durable.
+// same check, then the empty marker, durable.
 func adoptForMarker(v *Vault) error {
-	if err := v.checkUnowned(markerTemp); err != nil {
+	if err := v.checkUnowned(); err != nil {
 		return err
 	}
 	if err := v.ensureDir(TmpDir); err != nil {

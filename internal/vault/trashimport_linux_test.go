@@ -30,6 +30,8 @@ func TestTrashForImport(t *testing.T) {
 		TrashDir + "/" + s3 + "-notes/n.md":   "the old layout, a folder named notes",
 		TrashDir + "/" + s3 + "-notes/m.md":   "with two entries",
 		TrashDir + "/" + s4 + "-b.md":         "the old layout, a file",
+		TrashDir + "/" + s4 + "-3/p.md":       "a <stamp>-<n> folder with several entries:",
+		TrashDir + "/" + s4 + "-3/q.md":       "the old layout, a folder named 3",
 		TrashDir + "/not-a-stamp.md":          "no delete makes this name",
 		TrashDir + "/" + s5 + "-2/inside.txt": "",
 	})
@@ -46,6 +48,7 @@ func TestTrashForImport(t *testing.T) {
 		{ID: s1, Name: "a.md", Kind: KindFile, DeletedAt: at(s1)},
 		{ID: s1 + "-1", Name: "docs", Kind: KindFolder, DeletedAt: at(s1)},
 		{ID: s3 + "-notes", Name: "notes", Kind: KindFolder, DeletedAt: at(s3)},
+		{ID: s4 + "-3", Name: "3", Kind: KindFolder, DeletedAt: at(s4)},
 		{ID: s4 + "-b.md", Name: "b.md", Kind: KindFile, DeletedAt: at(s4)},
 	}
 	if len(got) != len(want) {

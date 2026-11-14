@@ -152,8 +152,9 @@ func TestWriteMarkerRefusesUnownedReservedFolders(t *testing.T) {
 	for name, files := range map[string]map[string]string{
 		"the temp folder":  {TmpDir + "/mine.txt": "the user's"},
 		"the trash folder": {TrashDir + "/mine.txt": "the user's"},
-		"the temp folder, holding only a file named like the marker's temp, beside the trash": {
-			TmpDir + "/" + markerTemp: "", TrashDir + "/mine.txt": "the user's"},
+		// No exception for a name like the marker's temp: the empty marker is durable before the
+		// temp is made, so no crash leaves the temp without the marker.
+		"the temp folder, holding only a file named like the marker's temp": {TmpDir + "/" + markerTemp: "the user's"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -171,13 +172,28 @@ func TestWriteMarkerRefusesUnownedReservedFolders(t *testing.T) {
 			}
 		})
 	}
-	// The one exception: a temp folder holding only the marker's temp (nothing else of the
-	// user's) is a crash's leftover, and is adopted.
-	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{TmpDir + "/" + markerTemp: "partial"})
-	must(t, WriteMarker(dir, uuidA, 2))
-	if m, err := ReadMarker(dir); err != nil || m.VaultUUID != uuidA {
-		t.Fatalf("ReadMarker = %+v, %v", m, err)
+}
+
+// A symlink at the marker's name, dangling or not, is refused like a folder: replacing it
+// would mark a folder adoption never checked, and the next sweep would delete the user's
+// files beside it. The link and the files stay as they were.
+func TestWriteMarkerRefusesASymlinkedMarker(t *testing.T) {
+	for name, target := range map[string]string{"dangling": "nowhere", "to a file": "mine.txt"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, map[string]string{TmpDir + "/mine.txt": "the user's"})
+			must(t, os.Symlink(target, markerPath(dir)))
+			err := WriteMarker(dir, uuidA, 2)
+			if !errors.Is(err, ErrBadMarker) || !strings.Contains(err.Error(), "move it aside") {
+				t.Fatalf("WriteMarker = %v, want ErrBadMarker naming the fix", err)
+			}
+			if got := content(t, dir, TmpDir+"/mine.txt"); got != "the user's" {
+				t.Fatalf("the user's file: %q", got)
+			}
+			if got, err := os.Readlink(markerPath(dir)); err != nil || got != target {
+				t.Fatalf("the symlink: %q, %v; want it untouched (%q)", got, err, target)
+			}
+		})
 	}
 }
 
@@ -203,6 +219,9 @@ func TestWriteMarkerRefusesAMarkerThatIsAFolder(t *testing.T) {
 func TestWriteMarkerSurvivesEveryCrashPoint(t *testing.T) {
 	for name, setup := range map[string]func(t *testing.T, dir string){
 		"no temp folder": func(*testing.T, string) {},
+		"an empty temp folder, no marker": func(t *testing.T, dir string) {
+			must(t, os.Mkdir(filepath.Join(dir, TmpDir), 0o700))
+		},
 		"an empty marker": func(t *testing.T, dir string) {
 			writeFiles(t, dir, map[string]string{TmpDir + "/" + ownerMarker: ""})
 		},
