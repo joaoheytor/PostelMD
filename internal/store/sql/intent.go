@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -125,9 +126,13 @@ func removeIntent(stateDir string) error {
 	return removeSidecar(stateDir, MigrateIntent, "intent-removed")
 }
 
-// present reports whether path exists as a regular file. Anything else there (a symlink, a
-// folder) is ErrMigrateInterference: none of this runner's files is ever one.
-func present(path string) (bool, error) {
+// errNotRegular: something other than a regular file is where one of the state directory's
+// own files belongs.
+var errNotRegular = errors.New("sql: not a regular file")
+
+// regularFile reports whether path is a regular file; anything else there (a symlink, a
+// folder, a FIFO) is errNotRegular, naming the file and its type.
+func regularFile(path string) (bool, error) {
 	fi, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -136,9 +141,19 @@ func present(path string) (bool, error) {
 		return false, err
 	}
 	if !fi.Mode().IsRegular() {
-		return false, fmt.Errorf("%w (a migration file isn't a regular file: %s)", ErrMigrateInterference, fi.Mode().Type())
+		return false, fmt.Errorf("%w: %s (%s)", errNotRegular, filepath.Base(path), fi.Mode().Type())
 	}
 	return true, nil
+}
+
+// present is regularFile for the migration runner: anything but a regular file is
+// ErrMigrateInterference, since none of its files is ever one.
+func present(path string) (bool, error) {
+	ok, err := regularFile(path)
+	if errors.Is(err, errNotRegular) {
+		return false, fmt.Errorf("%w (%w)", ErrMigrateInterference, err)
+	}
+	return ok, err
 }
 
 // removeRegular removes path if it is a regular file; absent is fine, anything else refuses.
@@ -148,7 +163,7 @@ func removeRegular(path string) error {
 		return err
 	}
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("sql: remove a partial migration file: %w", err)
+		return fmt.Errorf("sql: remove the leftover %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }

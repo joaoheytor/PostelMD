@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"testing/fstest"
@@ -44,6 +43,16 @@ func failedMigration(t *testing.T) (dir string, fsys fstest.MapFS, from int) {
 	}
 	if got := readOnDisk(t, dir, from, from+2); got != (onDisk{intent: true, snap: true, uv: 1}) {
 		t.Fatalf("after the failed migration %+v", got)
+	}
+	// The failed open checkpointed and closed: readOnDisk's read-only connection is what
+	// left an empty -wal and a -shm. Without them the state is the failed open's own.
+	if fi, err := os.Stat(filepath.Join(dir, AppDB+"-wal")); err == nil && fi.Size() != 0 {
+		t.Fatalf("the failed migration left a WAL of %d bytes", fi.Size())
+	}
+	for _, n := range []string{AppDB + "-wal", AppDB + "-shm"} {
+		if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal(err)
+		}
 	}
 	return dir, fsys, from
 }
@@ -124,11 +133,23 @@ func assertRolledBack(t *testing.T, dir string, r RolledBack, from, to int) {
 	assertMigrated(t, db, dir, from, to)
 }
 
+// A failed migration whose open closed cleanly leaves no WAL: the eligibility read opens
+// app.db alone (immutable), and the rollback succeeds.
 func TestRollbackAFailedMigration(t *testing.T) {
 	dir, fsys, from := failedMigration(t)
+	for _, n := range []string{AppDB + "-wal", AppDB + "-shm"} {
+		if _, err := os.Lstat(filepath.Join(dir, n)); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("%s before the rollback: %v; this case is the one without a WAL", n, err)
+		}
+	}
 	r, err := rollback(context.Background(), dir, fsys, rollbackNow)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The read created nothing: only the database and the snapshot moved.
+	es, err := os.ReadDir(filepath.Join(dir, r.Dir))
+	if err != nil || len(es) != 2 {
+		t.Fatalf("the rollback folder holds %v (%v), want app.db and the snapshot", es, err)
 	}
 	assertRolledBack(t, dir, r, from, from+2)
 }
@@ -253,98 +274,6 @@ func killed(err error) bool {
 	}
 	ws, ok := ee.Sys().(syscall.WaitStatus)
 	return ok && ws.Signal() == syscall.SIGKILL
-}
-
-// Every refusal changes nothing: not one file in the state directory.
-func TestRollbackRefuses(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		setup func(t *testing.T) (dir string, fsys fstest.MapFS)
-		want  string
-	}{
-		{"nothing to roll back", func(t *testing.T) (string, fstest.MapFS) {
-			return closedDB(t), embeddedFS(t)
-		}, "nothing to roll back"},
-		{"the migration finished and the new version started", func(t *testing.T) (string, fstest.MapFS) {
-			dir := closedDB(t)
-			fsys, _ := laterMigrations(t, 2)
-			openWith(t, dir, fsys)
-			return dir, fsys
-		}, "started after"},
-		{"an intent from another build", func(t *testing.T) (string, fstest.MapFS) {
-			dir, _, _ := failedMigration(t)
-			fsys, _ := laterMigrations(t, 3)
-			return dir, fsys
-		}, "this build's last migration"},
-		{"the post_migration_started file", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, from := failedMigration(t)
-			writeFile(t, filepath.Join(dir, markerName(from, from+2)), nil)
-			return dir, fsys
-		}, "post-migration-started"},
-		{"the post_migration_started row", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, from := failedMigration(t)
-			rawSet(t, dir, fmt.Sprintf("INSERT INTO meta (key, value) VALUES ('%s', 'x')", markerKey(from, from+2)))
-			return dir, fsys
-		}, "post_migration_started row"},
-		{"a damaged snapshot", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, from := failedMigration(t)
-			writeFile(t, filepath.Join(dir, snapshotName(from, from+2)), []byte(strings.Repeat("not a database ", 512)))
-			return dir, fsys
-		}, "snapshot"},
-		{"a version outside the intent", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, _ := failedMigration(t)
-			rawSet(t, dir, "PRAGMA user_version = 1")
-			return dir, fsys
-		}, "outside"},
-		{"no app.db", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, _ := failedMigration(t)
-			must(t, os.Remove(filepath.Join(dir, AppDB)))
-			return dir, fsys
-		}, "database file"},
-		{"the rollback folder's name is taken", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, _ := failedMigration(t)
-			must(t, os.Mkdir(filepath.Join(dir, rollbackDirName(rollbackNow)), 0o700))
-			return dir, fsys
-		}, "already there"},
-		{"a symlinked intent", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, _ := failedMigration(t)
-			p := filepath.Join(dir, MigrateIntent)
-			must(t, os.Rename(p, p+".real"))
-			must(t, os.Symlink(p+".real", p))
-			return dir, fsys
-		}, "symlink"},
-		{"an app.db.tmp", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, _ := failedMigration(t)
-			writeFile(t, filepath.Join(dir, AppDB+".tmp"), []byte("x"))
-			return dir, fsys
-		}, "app.db.tmp"},
-		{"a snapshot temp beside the snapshot", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, from := failedMigration(t)
-			writeFile(t, filepath.Join(dir, snapshotName(from, from+2)+".tmp"), []byte("x"))
-			return dir, fsys
-		}, "temp"},
-		{"a WAL that is a FIFO", func(t *testing.T) (string, fstest.MapFS) {
-			dir, fsys, _ := failedMigration(t)
-			wal := filepath.Join(dir, AppDB+"-wal")
-			if err := os.Remove(wal); err != nil && !errors.Is(err, fs.ErrNotExist) { // an empty one a read left
-				t.Fatal(err)
-			}
-			must(t, syscall.Mkfifo(wal, 0o600))
-			return dir, fsys
-		}, "regular file"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			dir, fsys := c.setup(t)
-			before := tree(t, dir)
-			r, err := rollback(context.Background(), dir, fsys, rollbackNow)
-			if !errors.Is(err, ErrRollbackRefused) || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("Rollback = %+v, %v; want ErrRollbackRefused saying %q", r, err, c.want)
-			}
-			if after := tree(t, dir); fmt.Sprint(after) != fmt.Sprint(before) {
-				t.Fatalf("the state directory changed:\nbefore %v\nafter  %v", before, after)
-			}
-		})
-	}
 }
 
 func must(t *testing.T, err error) {

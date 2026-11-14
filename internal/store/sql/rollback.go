@@ -178,7 +178,9 @@ func checkEligible(ctx context.Context, stateDir string, last int, rb *rollbackI
 		return false, errors.New("a snapshot temp is beside the snapshot")
 	}
 	if err := verifySnapshot(ctx, snap, in.From); err != nil {
-		return false, fmt.Errorf("the snapshot doesn't verify: %w", err)
+		// Not the cause's text: ErrDamaged's fix (move app.db aside) is for a start, and
+		// would leave migrate.intent behind, so the previous build would still refuse.
+		return false, errNoRestore("the pre-migration snapshot doesn't verify")
 	}
 	if _, err := os.Lstat(filepath.Join(stateDir, rb.Dir)); !errors.Is(err, fs.ErrNotExist) {
 		return false, errors.Join(fmt.Errorf("%s is already there; run this again in a second", rb.Dir), err)
@@ -213,18 +215,18 @@ func readForRollback(ctx context.Context, stateDir string, in *intent) (int, err
 	}
 	p, err := openPool(path, q, 1)
 	if err != nil {
-		return 0, err
+		return 0, errNoRestore("app.db can't be read")
 	}
 	defer func() { _ = p.Close() }()
 	var uv, rows int
 	if err := p.QueryRowContext(ctx, "PRAGMA user_version").Scan(&uv); err != nil {
-		return 0, fmt.Errorf("app.db can't be read: %w", err)
+		return 0, errNoRestore("app.db can't be read")
 	}
 	if uv < in.From || uv > in.To {
 		return 0, fmt.Errorf("app.db is at version %d, outside migrate.intent's %d → %d", uv, in.From, in.To)
 	}
 	if err := p.QueryRowContext(ctx, "SELECT count(*) FROM meta WHERE key = ?", markerKey(in.From, in.To)).Scan(&rows); err != nil {
-		return 0, fmt.Errorf("app.db can't be read: %w", err)
+		return 0, errNoRestore("app.db can't be read")
 	}
 	if rows != 0 {
 		return 0, errors.New("app.db has the post_migration_started row: the new version started after the migration")
@@ -232,20 +234,8 @@ func readForRollback(ctx context.Context, stateDir string, in *intent) (int, err
 	return uv, nil
 }
 
-// errNotRegular: something other than a regular file is where db rollback expects one.
-var errNotRegular = errors.New("sql: not a regular file")
-
-// regularFile reports whether path is a regular file; anything else there is errNotRegular.
-func regularFile(path string) (bool, error) {
-	fi, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if !fi.Mode().IsRegular() {
-		return false, fmt.Errorf("%w: %s (%s)", errNotRegular, filepath.Base(path), fi.Mode().Type())
-	}
-	return true, nil
+// errNoRestore is a refusal where nothing this command can restore is left: the fix is to
+// go forward, not back.
+func errNoRestore(what string) error {
+	return fmt.Errorf("%s: fix forward with a newer image, or follow the upgrade runbook", what)
 }
