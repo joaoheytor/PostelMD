@@ -73,6 +73,11 @@ printf 'Commands:\n  db rollback      Undo the last migration\n' >"$work/repo/cm
 g commit -q -am "db rollback" && g push -q origin main && g fetch -q origin
 sign trusted v0.6.0-rc.2
 expect pass v0.6.0-rc.2 "migration 0002 with db rollback"
+# This repository's own usage text passes the gate (#174 added its db rollback line).
+cp "$(dirname "$script")/../cmd/postelmd/main.go" "$work/repo/cmd/postelmd/main.go"
+g commit -q -am "this repository's main.go" && g push -q origin main && g fetch -q origin
+sign trusted v0.6.0-rc.3
+expect pass v0.6.0-rc.3 "migration 0002 with this repository's cmd/postelmd/main.go"
 
 # Revocation: removing the key on main makes its existing tags fail.
 : >"$work/repo/.github/allowed_signers"

@@ -216,7 +216,7 @@ func TestMigrateInterferenceIsRefused(t *testing.T) {
 		}},
 		{"an intent over the size cap", func(t *testing.T, dir string) {
 			b := fmt.Appendf(nil, `{"from":%d,"to":%d,"snapshot":%q}`, from, to, snap)
-			writeFile(t, filepath.Join(dir, MigrateIntent), append(b, bytes.Repeat([]byte(" "), intentMax)...))
+			writeFile(t, filepath.Join(dir, MigrateIntent), append(b, bytes.Repeat([]byte(" "), sidecarMax)...))
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
