@@ -26,7 +26,14 @@ SAFE_GIT = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null
 SAFE_GIT_ENV = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
                 "GIT_CONFIG_NOSYSTEM": "1"}
 
-REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
+PURE_REDIRECT = re.compile(r"&?>>?\|?|>&|<>")
+
+
+def is_redirect(tok):
+    """True for a redirect token that may open a file for writing: any unquoted run of
+    shell punctuation with a > that isn't a process substitution >( (<>, >>|, &>>, >&, ...;
+    shlex groups `;>` and `&&>` too, which then count as both)."""
+    return is_punct(tok) and ">" in tok and "(" not in tok and ")" not in tok
 PREFIXES = {"sudo", "env", "command", "xargs", "time", "nohup", "exec"}
 
 
@@ -101,15 +108,19 @@ def write_targets(cmd):
     while i < len(toks):
         tok = toks[i]
         nxt = toks[i + 1] if i + 1 < len(toks) else ""
-        if tok in REDIRECTS or tok == ">&":
-            if nxt and not is_punct(nxt) and not (tok == ">&" and re.fullmatch(r"\d+|-", nxt)):
+        if is_redirect(tok):
+            dup = tok.endswith(">&") and re.fullmatch(r"\d+|-", nxt)  # 2>&1 duplicates
+            if nxt and not is_punct(nxt) and not dup:
                 targets.append(nxt)
+            if not PURE_REDIRECT.fullmatch(tok):  # `;>` or `&&>`: also ends the command
+                targets += command_targets(words)
+                words = []
             i += 2
             continue
         if is_punct(tok):  # ; && || | ( ) >( <( and the like end a simple command
             targets += command_targets(words)
             words = []
-        elif not (re.fullmatch(r"\d+", tok) and nxt in REDIRECTS | {">&"}):
+        elif not (re.fullmatch(r"\d+", tok) and is_redirect(nxt)):
             words.append(tok)
         i += 1
     return targets + command_targets(words)

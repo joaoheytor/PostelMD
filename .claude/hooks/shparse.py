@@ -6,7 +6,7 @@ Fail closed: callers pass an outward command only when strict() returns its word
 import os
 import re
 
-from bash_writes import REDIRECTS, is_punct, tokens
+from bash_writes import PURE_REDIRECT, is_punct, is_redirect, tokens
 from shscan import blanked, scan, stripped
 
 UNKNOWN = object()  # a directory the parser can't follow
@@ -20,13 +20,13 @@ def segments(cmd):
     while i < len(toks):
         tok = toks[i]
         nxt = toks[i + 1] if i + 1 < len(toks) else ""
-        if tok in REDIRECTS or tok in (">&", "<", "<<<"):
+        if PURE_REDIRECT.fullmatch(tok) or tok in ("<", "<<<", "<&"):
             i += 2
             continue
         if is_punct(tok):
             out.append(words)
             words = []
-        elif not (re.fullmatch(r"\d+", tok) and nxt in REDIRECTS | {">&", "<"}):
+        elif not (re.fullmatch(r"\d+", tok) and (is_redirect(nxt) or nxt in ("<", "<&"))):
             words.append(tok)
         i += 1
     out.append(words)
@@ -105,7 +105,9 @@ def strict(cmd):
 
 # Commands that run their arguments as a command. bare() drops the ones it can follow
 # exactly (no options; timeout with one duration); wrapped() finds the rest.
-STRIP = {"nice", "nohup", "time", "command", "builtin", "exec", "env", "coproc"}
+# zsh precommand modifiers too: noglob, nocorrect, `-` (exec with a dash) and repeat N.
+STRIP = {"nice", "nohup", "time", "command", "builtin", "exec", "env", "coproc", "noglob",
+         "nocorrect", "-"}
 WRAPPERS = STRIP | {"timeout", "sudo", "doas", "xargs", "watch", "stdbuf", "ionice", "chrt",
                     "taskset", "setsid", "flock", "unbuffer", "script", "strace", "ltrace",
                     "nsenter", "chroot", "busybox", "parallel"}
@@ -119,8 +121,10 @@ def bare(words):
         nxt = words[1] if len(words) > 1 else ""
         if words[0] in KEYWORDS or re.match(r"\w+=", words[0]):
             words = words[1:]
-        elif words[0] in STRIP and nxt and not nxt.startswith("-"):
+        elif words[0] in STRIP and nxt and (nxt == "-" or not nxt.startswith("-")):
             words = words[1:]
+        elif words[0] == "repeat" and re.fullmatch(r"\d+", nxt) and len(words) > 2:
+            words = words[2:]
         elif words[0] == "timeout" and re.fullmatch(r"\d+(\.\d+)?[smhd]?", nxt) \
                 and len(words) > 2 and not words[2].startswith("-"):
             words = words[2:]
@@ -142,24 +146,52 @@ def wrapped(segs):
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "fish", "busybox", "csh", "tcsh"}
 
 
+SET_OPTIONS = {"pipefail", "errexit", "nounset", "xtrace", "verbose"}
+
+
+def set_ok(args):
+    """True for `set` with only -e/-u/-x/-v and -o of SET_OPTIONS (set -euo pipefail), or
+    positional words after --."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return True
+        if not re.fullmatch(r"[-+][euxvo]+", a):
+            return False
+        if "o" in a:
+            i += 1
+            if i >= len(args) or args[i] not in SET_OPTIONS:
+                return False
+        i += 1
+    return True
+
+
 def indirect(segs):
     """A command that runs text the guard sees only as a quoted string (eval, sh -c, zsh -c,
     source, .) or that renames commands (alias), or None. Asked in any command."""
     for words in segs:
         words = bare(words)
         name = os.path.basename(words[0]) if words else ""
-        if name in ("eval", "alias", "source", ".", "unalias", "hash", "enable", "trap"):
-            return name
+        if name in ("eval", "alias", "source", ".", "unalias", "hash", "enable", "trap",
+                    "setopt", "unsetopt", "emulate", "shopt"):
+            return name  # option changes: bare_glob_qual, extended_glob, ... change parsing
+        if re.match(r"\w+\[", name):
+            return "an array element assignment (zsh options[...]=on)"
+        if name == "set" and not set_ok(words[1:]):
+            return "set with options other than -e, -u, -x, -v and -o pipefail"
         if name in SHELLS and any(re.fullmatch(r"-\w*c\w*", w) for w in words[1:]):
             return f"{name} -c"
     return None
 
 
-def move(cwd, target):
-    """The directory cd or -C target leads to, symlinks resolved (L/.. may leave the tree)."""
+def move(cwd, target, logical=False):
+    """The directory git -C or cd -P target leads to, symlinks resolved (L/.. may leave the
+    tree); with logical, the one a plain cd leads to (L/.. resolved as text)."""
     if cwd is UNKNOWN or not target or "$" in target or "`" in target or target == "-":
         return UNKNOWN
-    return os.path.realpath(os.path.join(cwd, os.path.expanduser(target)))
+    path = os.path.join(cwd, os.path.expanduser(target))
+    return os.path.normpath(path) if logical else os.path.realpath(path)
 
 
 def git_parts(words, cwd):

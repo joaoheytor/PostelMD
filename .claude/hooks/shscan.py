@@ -183,6 +183,25 @@ SYNTAX = [  # unquoted, in tool commands
 ]
 
 
+PAREN_AFTER = {"then", "do", "else", "elif", "if", "while", "until", "!", "{", "time"}
+
+
+def attached_paren(text):
+    """True when the blanked text has an unquoted ( that doesn't open a subshell, $( ),
+    $(( )), <( ) or >( ): after a word it is a zsh glob qualifier, README.md(e+'cmd'+),
+    which runs code (bare_glob_qual is on by default and options can turn it on)."""
+    for i, ch in enumerate(text):
+        if ch != "(" or (i and text[i - 1] in "$<>("):
+            continue
+        before = text[:i].rstrip(" \t")
+        if not before or before[-1] in ";&|(\n":
+            continue
+        if before.rsplit(None, 1)[-1] in PAREN_AFTER:
+            continue
+        return True
+    return False
+
+
 def expandable(s):
     """The stripped text with only the characters the shell expands (unquoted, inside $( )
     or inside double quotes) left, everything else replaced by `_`."""
@@ -200,6 +219,8 @@ def unmodelled(cmd):
     m = ANYWHERE.search(text)
     if m:
         return f"a word-start {m.group(1)!r} (a # comment or zsh's =command): quote it"
+    if attached_paren(blanked(s)):
+        return "an unquoted ( after a word (a zsh glob qualifier such as x(e+cmd+) runs code)"
     if not mentions_tool(cmd):
         return None
     if s.flags:

@@ -12,6 +12,7 @@ than the quoted-heredoc form, or a heredoc with an unquoted delimiter whose body
 """
 import os
 import re
+import stat
 
 from bash_writes import scratch, split_heredocs, under
 from content import has_secret, public_reasons
@@ -87,11 +88,33 @@ def read_message(path, cwd):
         return None, f"the message file {path} is a device or process file (stdin?)"
     if not (under(full, project) or scratch(full, (project,))):
         return None, f"the message file {path} is outside the project and temp dirs"
+    return read_regular(full, path)
+
+
+MAX_MESSAGE = 1 << 20
+
+
+def read_regular(full, path):
+    """(text, None) for a regular file of at most MAX_MESSAGE bytes, else (None, reason). A
+    FIFO would block the hook until it timed out, and a timed-out hook doesn't decide; so
+    stat first, and open without blocking or following a link swapped in meanwhile."""
     try:
-        with open(full, encoding="utf-8") as fh:
-            return fh.read(1 << 20), None
+        fd = os.open(full, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError:
+        return None, f"the guard can't read the message file {path}"
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_MESSAGE:
+            return None, f"the message file {path} is not a regular file under 1 MiB"
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            data = fh.read(MAX_MESSAGE + 1)
+        if len(data) > MAX_MESSAGE:  # grew after the stat
+            return None, f"the message file {path} is over 1 MiB"
+        return data.decode("utf-8"), None
     except (OSError, UnicodeDecodeError):
         return None, f"the guard can't read the message file {path}"
+    finally:
+        os.close(fd)
 
 
 def check(cmd, cwd):

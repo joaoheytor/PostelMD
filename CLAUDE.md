@@ -151,13 +151,19 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   any `$` or backtick other than a substituted assignment, `$?`, `$!`, `$#`, `$$` and the
   `"$(cat <<'EOF' … EOF)"` message form, `<(…)`/`>(…)`, function definitions, a backslash
   or backslash-newline outside quotes, `$'…'` and non-ASCII characters; quote them
-  (`gh api "repos/{owner}/{repo}/…"`). In every command, a word-start `#` or `=`, `eval`,
-  `sh|bash|zsh -c`, `alias` and `source` ask; wrappers and keywords (`nohup`, `time`,
-  `exec`, `if …; then`) don't hide a gated command; a `cd` with two arguments, `+N`/`-N`
-  or `CDPATH` asks; every gh `--jq`/`--template` is checked; `make` takes only targets, a
-  few flags, `-C` into the project and the allowed variables with plain values; go's
-  `-vettool`, `-overlay`, `-modfile` and external-linker flags ask. The guard models bash
-  and `.claude/hooks/shells_test.py` checks every allowed case runs the same under zsh.
+  (`gh api "repos/{owner}/{repo}/…"`). In every command, a word-start `#` or `=`, a `(`
+  right after a word (zsh glob qualifiers run code), `eval`, `sh|bash|zsh -c`, `alias`,
+  `source`, `setopt`/`unsetopt`/`emulate`, `set` beyond `-euxv`/`-o pipefail`, and
+  redirects that may write a repository file (`<>`, `>>|`, `>&`, …) ask; wrappers,
+  keywords and zsh precommand words (`nohup`, `time`, `exec`, `noglob`, `repeat N`,
+  `if …; then`) don't hide a gated command; a `cd` with two arguments, `+N`/`-N` or
+  `CDPATH` asks, and both its logical and physical target must be this project; message
+  and body files must be regular files under 1 MiB; every gh `--jq`/`--template` is
+  checked; `make` takes only targets, a few flags, `-C` into the project and the allowed
+  variables with plain values; go's `-vettool`, `-overlay`, `-modfile` and external-linker
+  flags ask. The guard models bash; `.claude/hooks/shells_test.py` checks every allowed
+  case runs the same under zsh, with and without Claude Code's options. The user's own
+  shell aliases and options are not modelled (#178; the native permission prompt applies).
   Pushes to main/master, force pushes without a lease, tags, releases, closing or reviewing
   PRs, any other `gh api` and repo settings stay permission prompts. The guard is a
   guardrail for agents, not the gate: the allowed test runners (`make`, `go test`, `npm`)

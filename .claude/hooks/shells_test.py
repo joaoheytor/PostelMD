@@ -1,9 +1,11 @@
-"""The guard models bash; agents' Bash tool may run zsh. Every command the guard tests allow
-(relax_test, review_test, review3_test) is run here under bash, zsh and zsh with
-extendedglob, with fake git, gh, go, make, npm and npx that print their arguments, and each
-shell must run the same programs with the same arguments, or zsh nothing at all (a glob
-with no match). A command that zsh runs
-differently (=cmd, $x:s/a/b/, two-argument cd, glob qualifiers) must not be allowed.
+"""The guard models bash; agents' Bash tool runs zsh. Every command the guard tests allow
+(relax_test, review_test, review3_test, review4_test) is run here under bash, zsh -f, zsh
+-f with extendedglob, and zsh as Claude Code runs it (its setopt line, then eval), with fake
+git, gh, go, make, npm and npx that log their directory and arguments. Each shell must run
+the same programs with the same arguments in the same place, or zsh nothing at all (a glob
+with no match). A command that zsh runs differently (=cmd, $x:s/a/b/, two-argument cd,
+x(e+cmd+) glob qualifiers) must not be allowed. The user's own aliases and options (the
+snapshot Claude Code sources) are not modelled (#178).
 Skipped where bash or zsh isn't installed, except in CI, where that fails (ci.yaml's
 test-go job installs zsh). Run: make test-scripts
 """
@@ -16,12 +18,17 @@ from unittest import mock
 
 import relax_test  # modules, not classes: discovery would run imported test classes twice
 import review3_test
+import review4_test
 import review_test
 from relax_test import API, HOME, KEY, SHA, Fixture
 
 FAKE = ("#!/bin/sh\n{ printf '%s in %s' \"$(basename \"$0\")\" \"$PWD\"; for a in \"$@\"; do printf ' [%s]' \"$a\"; "
         "done; echo; } >> \"$FAKE_LOG\"\n")  # a log, not stdout: redirects and pipes eat that
-SHELLS = (["bash", "-c"], ["zsh", "-f", "-c"], ["zsh", "-f", "-o", "extendedglob", "-c"])
+# Claude Code's Bash tool runs `zsh -c 'source <snapshot>; setopt NO_EXTENDED_GLOB
+# NO_BARE_GLOB_QUAL; …; eval '<cmd>''`: the last entry, without the user's snapshot.
+CLAUDE_CODE = ["zsh", "-f", "-c", "setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL; eval \"$1\"", "zsh"]
+SHELLS = (["bash", "-c"], ["zsh", "-f", "-c"], ["zsh", "-f", "-o", "extendedglob", "-c"],
+          CLAUDE_CODE)
 
 
 def require_shells(test):
@@ -38,7 +45,7 @@ def allowed_cases():
     """Every command string a guard test expects to pass silently."""
     found = []
     for cls in (relax_test.Relaxations, review_test.OpenedByTheRelaxations, review_test.OpenOnMain,
-                review_test.SecondRecheck, review3_test.ThirdRecheck):
+                review_test.SecondRecheck, review3_test.ThirdRecheck, review4_test.FourthRecheck):
         class Collect(cls):
             def assert_cases(self, cases, want):
                 if want is None:

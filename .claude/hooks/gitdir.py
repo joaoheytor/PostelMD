@@ -20,17 +20,23 @@ def common_dir(d, git_out, cache):
     return cache[d]
 
 
-def cd_target(d, args, cmd):
-    """Where `cd args` leads from d, or UNKNOWN: zsh's `cd old new` replaces old with new in
-    $PWD, `cd +N`/`-N` pick from the directory stack, and CDPATH searches other places."""
+def cd_targets(d, args, cmd):
+    """Where `cd args` may lead from d: {UNKNOWN} for zsh's `cd old new` (replaces old with
+    new in $PWD), `cd +N`/`-N` (the directory stack) and CDPATH. Otherwise both the logical
+    directory (the shell resolves L/.. as text) and the physical one (cd -P, chdir), since
+    which one a shell uses depends on its options: git must be safe in each."""
+    physical = False
     while args and args[0] in ("-L", "-P", "-e", "-@", "-q", "-s"):
+        physical |= args[0] == "-P"
         args = args[1:]
     if args[:1] == ["--"]:
         args = args[1:]
     if len(args) > 1 or (args and re.fullmatch(r"[+-]\d*", args[0])) \
             or os.environ.get("CDPATH") or "CDPATH" in cmd:
-        return UNKNOWN
-    return move(d, args[0] if args else "$HOME")
+        return {UNKNOWN}
+    target = args[0] if args else "$HOME"
+    real = move(d, target)
+    return {real} if physical or real is UNKNOWN else {real, move(d, target, logical=True)}
 
 
 def check(cmd, cwd, git_out):
@@ -46,7 +52,7 @@ def check(cmd, cwd, git_out):
         if not words:
             continue
         if words[0] == "cd":
-            dirs |= {cd_target(d, words[1:], cmd) for d in dirs}
+            dirs |= {t for d in dirs for t in cd_targets(d, words[1:], cmd)}
             continue
         if words[0] in ("pushd", "popd"):
             dirs.add(UNKNOWN)

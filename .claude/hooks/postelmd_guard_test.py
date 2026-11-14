@@ -21,7 +21,8 @@ GUARD = os.path.join(HERE, "postelmd_guard.py")
 def run_guard(mode, payload, project):
     env = dict(os.environ, CLAUDE_PROJECT_DIR=project)
     out = subprocess.run([sys.executable, GUARD, mode], input=json.dumps(payload),
-                         capture_output=True, text=True, env=env, check=True).stdout
+                         capture_output=True, text=True, env=env, check=True,
+                         timeout=30).stdout  # a hook that blocks (a FIFO) fails, not hangs
     return json.loads(out)["hookSpecificOutput"] if out.strip() else None
 
 

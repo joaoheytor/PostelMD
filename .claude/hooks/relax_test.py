@@ -20,7 +20,7 @@ API = "repos/joaoheytor/PostelMD"
 class Fixture(unittest.TestCase):
     """The repository and files the relaxation tests judge commands in (no tests here).
     A local branch named `2` makes a dropped fd number look like a real refspec; {r}/L is a
-    symlink into the foreign tree {f}/wt."""
+    symlink into the foreign tree {f}/wt, {f}/gd/link one into the project, {f}/fifo a FIFO."""
 
     @classmethod
     def setUpClass(cls):
@@ -38,6 +38,9 @@ class Fixture(unittest.TestCase):
             os.path.join(cls.files, "wt"))
         os.makedirs(os.path.join(cls.files, "wt", "inner"))
         os.symlink(os.path.join(cls.files, "wt", "inner"), os.path.join(cls.repo, "L"))
+        # {f}/gd/link/.. is {f}/gd (a foreign gitdir) for cd, the project for chdir and -C
+        os.symlink(os.path.join(cls.repo, "sub"), os.path.join(cls.files, "gd", "link"))
+        os.mkfifo(os.path.join(cls.files, "fifo"))  # a message file that blocks a reader
         for name, text in (("clean.md", "## What\nA fix.\n"), ("secret.md", f"chore: x\n\n{KEY}\n")):
             with open(os.path.join(cls.files, name), "w", encoding="utf-8") as fh:
                 fh.write(text)
