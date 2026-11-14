@@ -1,6 +1,6 @@
 # ADR-0031: v0.2 file identity: IDs, generations, renames and tombstones
 
-- **Status:** Proposed (Accepted with the IDs slice, the first code that depends on it)
+- **Status:** Accepted (with the IDs slice's first part, the first code that depends on it)
 - **Date:** 2026-11-12
 
 ## Context
@@ -39,10 +39,15 @@ same way (it ignores the content).
 - **Trash import.** Each existing `.postelmd-trash/` entry becomes a `trashed` record with its
   op ID (the stamp folder or old entry name), its name, and an unknown original path. Entries
   are read as [ADR-0024](0024-restore-from-the-trash.md)'s listing reads them: a stamp folder
-  with one entry (ADR-0022's `<stamp>[-n]/<name>`) is that entry; an empty one is skipped (a
-  crash's leftover; the purge removes it, ADR-0033); one with several entries, and a
-  `<stamp>-<name>` entry, are old-layout entries. Symlinks and special files are skipped. Its
-  files get no IDs: a restore gives new ones (ADR-0003).
+  with one entry (ADR-0022's `<stamp>[-n]/<name>`) is that entry, unless the entry is a
+  symlink or special file; any other `<stamp>-<suffix>` entry is the old layout, the item
+  `<suffix>` itself (so a `<stamp>-<n>` folder with several entries is an old-layout folder
+  named `<n>`). Skipped: an empty stamp folder (a crash's leftover), a bare `<stamp>` folder
+  with several entries (no layout reads it), symlinks, special files and names no delete
+  makes. A skipped entry gets no record, so ADR-0033's purge never removes it: it stays for
+  the operator. The one exception is an empty stamp folder, which the purge's removal of
+  "empty stamp folders that no record names" takes (with a remove that only takes an empty
+  folder). Its files get no IDs: a restore gives new ones (ADR-0003).
 - **An imported record's 7-day clock starts at the import**, not at the stamp: v0.1 kept
   deleted items until the trash was emptied by hand, so the automatic purge (ADR-0033) must
   not remove them in the first hour after the upgrade. The trash list shows each item's
@@ -51,7 +56,28 @@ same way (it ignores the content).
 ### The vault marker
 - `.postelmd-tmp/.created-by-postelmd` holds `postelmd-vault 1`, the vault UUID and the
   format number, one per line. It is written by temp (`.created-by-postelmd.new` in the same
-  folder), `fsync`, rename, `fsync` of the folder. `meta` stores the same UUID.
+  folder), `fsync`, rename, `fsync` of the folder. Where no marker exists yet, the write
+  first adopts the folder as ADR-0027 does, including its refusal: reserved folders holding
+  anything are refused and nothing changes (the next start's sweep would otherwise delete a
+  user's files from `.postelmd-tmp/`); then the empty marker is created and its folder
+  `fsync`ed before the temp exists, so a crash before the rename never leaves a temp folder
+  holding only the temp, which adoption would refuse as the user's. A marker that is a
+  symlink (dangling or not), a folder or another special file is refused and left as it is,
+  never replaced: replacing a symlink would mark a folder adoption never checked. The
+  refusal names its fix, "move it aside"; `vault claim` refuses it the same way. `meta`
+  stores the same UUID.
+
+  The write's recovery table (one step carries meaning, the rename, so no intent):
+
+  | Crash after | Process kill | Power loss | Next start |
+  |---|---|---|---|
+  | The adoption check, or the empty marker's create, before its folder `fsync` | Marker absent or empty | Marker absent (an unsynced entry is undone) | Adopted as before; a marker absent or empty reads alike at format 1 (ADR-0030's table) |
+  | The empty marker's folder `fsync`, or the temp's create and `fsync` | Empty marker, and maybe `.created-by-postelmd.new` | Empty marker; the temp's entry may be lost | The marker is empty: the step runs again (its stale temp removed first); Open's sweep removes a leftover temp |
+  | The rename, before the folder `fsync` | The new marker | The old marker (empty, or the earlier UUID) or the new one, never a partial one | Old: the step runs again. New: done |
+  | The folder `fsync` | The new marker | The new marker | Done |
+  | Nothing (refused: reserved folders not empty without a marker, or a marker that is a symlink, folder or special file) | Unchanged | Unchanged | The same refusal until the operator acts |
+
+  `TestWriteMarkerSurvivesEveryCrashPoint` covers every row under both models.
 - ADR-0030's format table says what each combination of `format`, `app.db` and marker does.
   In short, startup **refuses**, changing nothing, when the marker names another UUID (a
   swapped mount), names a UUID with no `app.db`, or is missing beside a database with live
@@ -130,6 +156,32 @@ check the ID's syntax before any lookup, check membership before choosing betwee
   format 1 (#175: the boot UUID, listen-early `/readyz`; the snapshot before migrating came
   with #173); this slice brings format 2, with `db rebuild` and `vault claim` (ADR-0030,
   Consequences, follow-up 2, in the parts [ADR-0034](0034-app-db-before-format-2.md) sets).
+  It ships in parts, and only the last writes format 2:
+  1. migration 0002 (`files`, `pending`, `tombstones`, `trash_records`; the vault UUID and the
+     "assigned" flag in `meta`), the ULIDs, the first assignment's transaction, its walk
+     (stat, hash, stat) and its trash reader, and the marker's read and write; nothing
+     assigns yet (flips this ADR);
+  2. `postelmd db rollback` (#174): migration 0002 runs against existing databases, so no
+     release ships part 1 without it (ADR-0030);
+  3. the startup scan: suspects and the second pass at least 10 s later, both rename rules,
+     pending paths (a read before the 10 s answers `503` with `Retry-After`), the tombstones'
+     background expiry, and a read or `git status` that gives an unseen path its ID;
+  4. data format 2: the first upgrade's five steps with `pre-format-2/`, ADR-0030's format
+     table with the identity check, `db rebuild` with its intent and rebuild UUID,
+     `vault claim`, `/readyz`'s `read-only` state, the runbook and the image-level upgrade
+     smoke test (ADR-0034's done conditions). The format table's "present but unparseable"
+     refusal names `vault claim` for a file with the wrong content, but for a marker that is
+     a symlink, a folder or a special file (which `vault claim` refuses too) it names "move
+     it aside, then `vault claim`".
+
+  Two schema facts the later parts build on:
+  - The states and reasons are SQL `CHECK`s (`files.state`, `tombstones.reason`,
+    `trash_records.kind` and `.state`). SQLite can't alter a `CHECK`, so a new value costs a
+    migration that rebuilds the table, which needs its own design first (ADR-0030).
+  - `files.path` is `UNIQUE`, and a suspect row keeps its path. ADR-0033's create, and
+    anything else that gives a path an ID, must resolve a suspect row on the same path (its
+    suspicion cleared, or its ID moved or tombstoned) in the same transaction that inserts
+    the new row.
 
 ## Alternatives considered
 | Option | Why not |

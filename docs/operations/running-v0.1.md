@@ -61,7 +61,7 @@ Nothing important lives anywhere else:
 | `vaults/notes/` | Your notes, as `.md` files |
 | `vaults/notes/.git/` | The vault's git history (your commits) |
 | `vaults/notes/.postelmd-trash/` | Deleted notes and folders (not in git) |
-| `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database |
+| `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-1-2.db` (the database as it was before that upgrade) and `post-migration-started-1-2` (a record that the upgrade finished): keep both with `app.db` |
 
 If you adopted a folder with `-v ~/notes:/data/vaults/notes`, back up `~/notes` too: it
 holds the notes, `.git` and `.postelmd-trash`, and `~/postelmd` holds the rest.
@@ -385,6 +385,89 @@ start refuses because the database is damaged, stop the server and move `app.db`
 `"$data"/.postelmd/damaged-<date>/` (never delete them); at format 1 they hold only the
 start's boot ID, and the next start creates a new database (ADR-0034).
 
+**Upgrading to `:main` after the file-identity tables** (the IDs slice's first part): the
+first start migrates `app.db` from version 1 to 2. It first copies the database to
+`.postelmd/pre-migrate-1-2.db` (owner-only) and, once migrated, writes
+`.postelmd/post-migration-started-1-2`; keep both with `app.db`. The new tables stay empty
+and the data format stays `1`, so rolling back to rc.1 is still the digest swap. An earlier
+`:main` refuses the migrated database (`written by a newer PostelMD`) and, restarted by
+`--restart unless-stopped`, refuses again and again. To roll back to one, follow
+**Rollback to an earlier `:main`** below: the database and both files move together into a
+new folder while no server runs, and the older image then creates a new database. Nothing
+is lost: at format 1 they hold only the boot ID. `postelmd db rollback` (#174) replaces this
+step before a release ships the migration.
+
+**Move the database aside** (used below), for the setup this runbook uses, a container
+started with `docker run --name postelmd`. It runs only when `docker ps` works and finds no
+`postelmd` container (run it after `docker rm`; a docker error stops it too) and `$data` is
+set; it moves each file of its first line only if it is there (after a clean stop there is
+no `app.db-wal` or `app.db-shm`), and works the same in `sh`, `bash` and `zsh`:
+
+```sh
+set -- app.db app.db-wal app.db-shm pre-migrate-1-2.db post-migration-started-1-2
+if ! c=$(docker ps -aq --filter 'name=^postelmd$'); then
+  echo "MOVE STOPPED: docker ps failed, so it can't tell whether a server runs" >&2
+elif [ -n "$c" ]; then
+  echo "MOVE STOPPED: a postelmd container still exists; stop and remove it first" >&2
+elif [ -z "$data" ] || [ ! -d "$data/.postelmd" ]; then
+  echo "MOVE STOPPED: \$data is empty, or has no .postelmd folder" >&2
+else
+  d="$data/.postelmd/rolled-back-$(date +%F-%H%M%S)"
+  if mkdir -m 700 "$d"; then
+    ok=yes
+    for f in "$@"; do
+      if [ -e "$data/.postelmd/$f" ]; then mv "$data/.postelmd/$f" "$d/" || ok=; fi
+    done
+    if [ -n "$ok" ]; then echo "moved into $d"; else echo "MOVE STOPPED: a file didn't move; see $d" >&2; fi
+  else
+    echo "MOVE STOPPED: can't create $d" >&2
+  fi
+fi
+```
+
+After `MOVE STOPPED: a file didn't move`, move the files already in `$d` back into
+`"$data"/.postelmd/`, don't start a server, and report the error `mv` printed.
+
+`pre-migrate-1-2.db` must move too: left behind, the next upgrade refuses to migrate with
+`a pre-migration snapshot is already there without an intent`. Moving
+`post-migration-started-1-2` is a precaution that keeps it with its database; left behind it
+does no harm.
+
+**If a start refuses with that message** (the snapshot was left behind, and no
+`migrate.intent` is in `.postelmd`; with one there, a migration was interrupted: keep
+everything and follow the message):
+
+1. Note `data=`, `port=` and `IMAGE=`. A container that `--restart` keeps restarting has no
+   port for `docker port`, so take the host address and port from its configuration. Keep
+   the address: without it, `-p` publishes on every interface, not only on `127.0.0.1`. An
+   IPv6 address needs brackets for `-p` (`[::1]:8080`), which the `case` line adds:
+
+   ```sh
+   data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
+   port=$(docker inspect -f '{{with index .HostConfig.PortBindings "8080/tcp"}}{{with index . 0}}{{if .HostIp}}{{.HostIp}}:{{end}}{{.HostPort}}{{end}}{{end}}' postelmd)
+   case $port in *:*:*) port="[${port%:*}]:${port##*:}" ;; esac
+   IMAGE=$(docker inspect -f '{{.Config.Image}}' postelmd)
+   echo "data=$data port=$port IMAGE=$IMAGE"
+   ```
+
+   With an adopted notes folder, also
+   `notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)`.
+   If any of them printed empty, stop here: the container's configuration isn't what this
+   runbook made, so start it again by hand with the flags you used.
+2. Stop **and remove** the container: `docker stop postelmd && docker rm postelmd`.
+3. Run the **Move the database aside** block with its first line changed to
+   `set -- pre-migrate-1-2.db post-migration-started-1-2`, so `app.db` stays.
+4. Only if it printed `moved into …`, start it again (with an adopted notes folder, add
+   `-v "$notes":/data/vaults/notes` before `"$IMAGE"`, and `[ -n "$notes" ]` to the checks):
+
+   ```sh
+   [ -n "$data" ] && [ -n "$port" ] && [ -n "$IMAGE" ] \
+     && docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+       --log-opt max-size=10m --log-opt max-file=3 \
+       -p "$port":8080 --user "$(id -u):$(id -g)" -v "$data":/data "$IMAGE" \
+     || echo "START STOPPED: data, port or IMAGE is empty, or docker run failed" >&2
+   ```
+
 If PostelMD says `format` is **damaged** (anything but a number on one line), back up
 the data folder first. If only v0.1 ever used it, delete `"$data"/.postelmd/format` and start
 again: the next start writes `1`. Otherwise restore the backup you took before the last
@@ -445,7 +528,45 @@ echo "data=$data notes=$notes port=$port IMAGE=$IMAGE"
 
 If it stops after `docker rm`, run its `docker run` again by hand with the values it printed.
 **Rollback** is the same sequence with the digest you noted
-(`ghcr.io/joaoheytor/postelmd@sha256:…`) in place of `$IMAGE`.
+(`ghcr.io/joaoheytor/postelmd@sha256:…`) in place of `$IMAGE`, with one exception:
+
+**Rollback to an earlier `:main`, from a `:main` with the file-identity tables** (see above;
+rollback to rc.1 is the plain sequence). The database has to move while no server runs, so
+the steps are, with `IMAGE` set to the digest you noted: take `data=` and `port=` from the
+running container, stop and remove it, move the database aside, then run the older image:
+
+```sh
+data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
+port=$(docker port postelmd 8080/tcp | head -n 1)
+echo "data=$data port=$port IMAGE=$IMAGE"
+[ -n "$data" ] && [ -n "$port" ] && [ -n "$IMAGE" ] && docker pull "$IMAGE" && docker stop postelmd \
+  && docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1 \
+  && docker rm postelmd || echo "ROLLBACK STOPPED" >&2
+```
+
+With an adopted notes folder, instead:
+
+```sh
+data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
+notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)
+port=$(docker port postelmd 8080/tcp | head -n 1)
+echo "data=$data notes=$notes port=$port IMAGE=$IMAGE"
+[ -n "$data" ] && [ -n "$notes" ] && [ -n "$port" ] && [ -n "$IMAGE" ] && docker pull "$IMAGE" \
+  && docker stop postelmd \
+  && docker logs postelmd > ~/postelmd-logs-$(date +%F-%H%M%S).jsonl 2>&1 \
+  && docker rm postelmd || echo "ROLLBACK STOPPED" >&2
+```
+
+Then run the **Move the database aside** block above, as it is. Only if it printed
+`moved into …`, start the older image:
+
+```sh
+docker run -d --name postelmd --restart unless-stopped --stop-timeout 60 \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  -p "$port":8080 --user "$(id -u):$(id -g)" -v "$data":/data "$IMAGE"
+```
+
+With an adopted notes folder, add `-v "$notes":/data/vaults/notes` before `"$IMAGE"`.
 
 ## Setup token lost or expired
 

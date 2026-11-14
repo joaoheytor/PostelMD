@@ -59,6 +59,21 @@ sign untrusted v0.5.0
 expect fail v0.5.0 "key trusted only on a branch"
 g switch -q main
 
+# Release blocker (ADR-0030, #174): migration 0002 runs against existing databases, so no
+# tag, release candidates included, on a commit that has it without `postelmd db rollback`.
+mkdir -p "$work/repo/internal/store/sql/migrations" "$work/repo/cmd/postelmd"
+echo "-- identity" >"$work/repo/internal/store/sql/migrations/0002_file_identity.sql"
+echo "// postelmd db rollback arrives with #174 (a comment doesn't count)" >"$work/repo/cmd/postelmd/main.go"
+g add internal cmd && g commit -q -m "migration 0002" && g push -q origin main && g fetch -q origin
+sign trusted v0.6.0-rc.1
+expect fail v0.6.0-rc.1 "migration 0002 without db rollback (release candidate)"
+sign trusted v0.6.0
+expect fail v0.6.0 "migration 0002 without db rollback (release)"
+printf 'Commands:\n  db rollback      Undo the last migration\n' >"$work/repo/cmd/postelmd/main.go"
+g commit -q -am "db rollback" && g push -q origin main && g fetch -q origin
+sign trusted v0.6.0-rc.2
+expect pass v0.6.0-rc.2 "migration 0002 with db rollback"
+
 # Revocation: removing the key on main makes its existing tags fail.
 : >"$work/repo/.github/allowed_signers"
 g commit -q -am "revoke" && g push -q origin main && g fetch -q origin

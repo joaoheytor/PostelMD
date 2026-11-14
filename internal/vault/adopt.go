@@ -38,6 +38,21 @@ func (v *Vault) adopt() error {
 	if !errors.Is(err, iofs.ErrNotExist) {
 		return fmt.Errorf("vault: check %s: %w", TmpDir, err)
 	}
+	if err := v.checkUnowned(); err != nil {
+		return err
+	}
+	if err := v.ensureDir(TmpDir); err != nil {
+		return err
+	}
+	if err := v.root.CreateFile(TmpDir+"/"+ownerMarker, nil, newFilePerm); err != nil && !errors.Is(err, iofs.ErrExist) {
+		return err
+	}
+	return v.root.SyncDir(TmpDir)
+}
+
+// checkUnowned is adoption's check of a folder without the marker (ADR-0027): each reserved
+// folder must be missing or empty, else ErrForeignReserved and nothing changes.
+func (v *Vault) checkUnowned() error {
 	for _, d := range []string{TmpDir, TrashDir} {
 		entries, err := v.root.ReadDir(d)
 		if errors.Is(err, iofs.ErrNotExist) {
@@ -50,13 +65,7 @@ func (v *Vault) adopt() error {
 			return foreignReserved(d)
 		}
 	}
-	if err := v.ensureDir(TmpDir); err != nil {
-		return err
-	}
-	if err := v.root.CreateFile(TmpDir+"/"+ownerMarker, nil, newFilePerm); err != nil && !errors.Is(err, iofs.ErrExist) {
-		return err
-	}
-	return v.root.SyncDir(TmpDir)
+	return nil
 }
 
 // sweepTemps removes every leftover temp file, apart from the marker: a save that didn't

@@ -181,7 +181,9 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   (identity), ADR-0032 (ETag and API) and ADR-0033 (intents), built in this order:
   `store/sql`; wiring, snapshot-before-migrate, IDs, the startup scan and format 2 (with
   its runbook and the image-level
-  upgrade smoke test); intents; the ETag switch and `/api/v1/files/{id}`; outbox and SSE;
+  upgrade smoke test; the IDs ship in the four parts of ADR-0031's follow-up, with
+  `postelmd db rollback`, #174, before any release that runs migration 0002, and format 2
+  only in the last part); intents; the ETag switch and `/api/v1/files/{id}`; outbox and SSE;
   the watcher and reconciler. The ETag switch is a breaking API change: v0.2.0. Deleted
   items leave the trash automatically after 7 days (ADR-0033).
 - Push and fast-forward-only pull through the egress client (ADR-0010, ADR-0016, #40); remote

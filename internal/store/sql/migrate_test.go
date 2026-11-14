@@ -123,8 +123,7 @@ func rawSet(t *testing.T, dir, stmt string) {
 }
 
 func TestOpenRefuses(t *testing.T) {
-	two := embeddedFS(t)
-	two["0002_more.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE more (x INTEGER) STRICT;")}
+	two, _ := laterMigrations(t, 1) // one migration pending
 	for _, c := range []struct {
 		name   string
 		tamper string // run on the closed database before the second open
