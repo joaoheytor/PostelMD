@@ -79,7 +79,10 @@ closes. Dates are deliberately omitted (FrankMD lesson: every estimate was low; 
       - **keys:** a crash at each step of rotation and retirement; a key is never deleted
         while a record references it;
       - **upgrade:** a crash at each step of the pre-migrate snapshot and of
-        `postelmd db rollback` (a stale WAL is never replayed into the restored file);
+        `postelmd db rollback` (a stale WAL is never replayed into the restored file;
+        process-kill model done in `internal/store/sql`: `TestRollbackCrashPoints`,
+        `TestRollbackRetireCrashPoints`, `TestRollbackRefusesAWALBesideTheRestoredFile`,
+        ADR-0035);
         startup repair or a worker running before any request still closes
         database-only rollback eligibility;
       - **outbox:** overflow by kind (commit obligations survive, clients get `resync`);
@@ -235,6 +238,11 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
     `internal/store/sql`: `TestPreMigrateCrashPoints`, `TestMigrateInterferenceIsRefused`,
     and a failed write during the snapshot in `TestPreMigrateDiskFull`; the power-loss
     model is still open);
+  - `postelmd db rollback` crashed at each row of ADR-0035's recovery table finishes on the
+    next run, and the previous build then opens the restored database; every refusal
+    changes nothing (process-kill model done: `TestRollbackCrashPoints`,
+    `TestRollbackRetireCrashPoints`, `TestRollbackRefuses`; the power-loss model is still
+    open);
   - with `POSTELMD_ALLOW_NETWORK_FS` overriding a refused filesystem for the state
     directory, a start refuses to create `app.db`, and creates no database;
   - an outside `mv` of one of several identical files keeps its ID at once; a unique

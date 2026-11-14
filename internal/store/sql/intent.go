@@ -7,21 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // The pre-migration sidecars in the state directory (ADR-0015, "Snapshot crash safety").
-const (
-	// MigrateIntent is the migration's durable intent: it can't live in the database being
-	// migrated, so it is a sidecar file, written and fsynced before the snapshot.
-	MigrateIntent = "migrate.intent"
-	intentMax     = 4096 // a larger file isn't ours
-)
+
+// MigrateIntent is the migration's durable intent: it can't live in the database being
+// migrated, so it is a sidecar file, written and fsynced before the snapshot.
+const MigrateIntent = "migrate.intent"
 
 // ErrMigrateInterference: an interrupted migration's intent doesn't match the database or its
 // snapshot (ADR-0015's "anything else" row), or a snapshot this migration would take already
@@ -88,35 +84,12 @@ func markerKey(from, to int) string { return fmt.Sprintf("post_migration_started
 // readIntent reads stateDir/migrate.intent: nil if absent. A file that isn't a regular file,
 // or doesn't parse as an intent this runner could have written, is ErrMigrateInterference.
 func readIntent(stateDir string) (*intent, error) {
-	f, err := os.OpenFile(filepath.Join(stateDir, MigrateIntent), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: the state directory's own file
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+	b, err := readSidecar(stateDir, MigrateIntent, ErrMigrateInterference)
+	if err != nil || b == nil {
+		return nil, err
 	}
-	if errors.Is(err, syscall.ELOOP) {
-		return nil, fmt.Errorf("%w (the intent is a symlink)", ErrMigrateInterference)
-	}
-	if err != nil {
-		return nil, intentIOError(err)
-	}
-	defer func() { _ = f.Close() }()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, intentIOError(err)
-	}
-	if !fi.Mode().IsRegular() || fi.Size() > intentMax {
-		return nil, fmt.Errorf("%w (the intent isn't a small regular file)", ErrMigrateInterference)
-	}
-	b, err := io.ReadAll(io.LimitReader(f, intentMax+1))
-	if err != nil {
-		return nil, intentIOError(err)
-	}
-	if len(b) > intentMax { // it grew since the Stat
-		return nil, fmt.Errorf("%w (the intent isn't a small regular file)", ErrMigrateInterference)
-	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
 	var in intent
-	if err := dec.Decode(&in); err != nil || dec.More() {
+	if err := decodeStrict(b, &in); err != nil {
 		return nil, fmt.Errorf("%w (the intent doesn't parse)", ErrMigrateInterference)
 	}
 	if in.From < 1 || in.To <= in.From || in.Snapshot != snapshotName(in.From, in.To) {
@@ -125,72 +98,41 @@ func readIntent(stateDir string) (*intent, error) {
 	return &in, nil
 }
 
-// intentIOError is an I/O error reading the intent, which isn't interference: it keeps the
-// operation and the cause, and names the file by its fixed name instead of its path.
-func intentIOError(err error) error {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
-		err = &fs.PathError{Op: pe.Op, Path: MigrateIntent, Err: pe.Err}
+// decodeStrict decodes one JSON value from b into v: no unknown fields, nothing after it.
+func decodeStrict(b []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
 	}
-	return fmt.Errorf("sql: read the migration intent: %w", err)
+	if dec.More() {
+		return errors.New("sql: data after the value")
+	}
+	return nil
 }
 
 // writeIntent makes stateDir/migrate.intent durable before the migration's first side
-// effect (CLAUDE.md rule 14): written to a temp (a stale one from a crash is removed first),
-// fsynced, renamed into place and the folder fsynced, so the intent is either absent or whole.
+// effect (CLAUDE.md rule 14), by writeSidecar: the intent is either absent or whole.
 func writeIntent(stateDir string, in intent) error {
-	path := filepath.Join(stateDir, MigrateIntent)
-	tmp := path + ".tmp"
-	if err := removeRegular(tmp); err != nil {
-		return err
-	}
 	b, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
-	f, err := createExclusive(tmp, "migration intent")
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(append(b, '\n'))
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("sql: write the migration intent: %w", err)
-	}
-	killPoint("intent-synced")
-	// The caller found no intent under the instance lock: RENAME_NOREPLACE makes sure.
-	if err := renameNoReplace(tmp, path); errors.Is(err, os.ErrExist) {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("%w (an intent appeared at its name)", ErrMigrateInterference)
-	} else if err != nil {
-		return fmt.Errorf("sql: write the migration intent: %w", err)
-	}
-	if err := syncDir(path); err != nil {
-		return fmt.Errorf("sql: write the migration intent: %w", err)
-	}
-	killPoint("intent-written")
-	return nil
+	return writeSidecar(stateDir, MigrateIntent, append(b, '\n'), ErrMigrateInterference, "intent-synced", "intent-written")
 }
 
 // removeIntent removes migrate.intent durably: the last step of a migration.
 func removeIntent(stateDir string) error {
-	path := filepath.Join(stateDir, MigrateIntent)
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("sql: remove the migration intent: %w", err)
-	}
-	killPoint("intent-removed")
-	return syncDir(path)
+	return removeSidecar(stateDir, MigrateIntent, "intent-removed")
 }
 
-// present reports whether path exists as a regular file. Anything else there (a symlink, a
-// folder) is ErrMigrateInterference: none of this runner's files is ever one.
-func present(path string) (bool, error) {
+// errNotRegular: something other than a regular file is where one of the state directory's
+// own files belongs.
+var errNotRegular = errors.New("sql: not a regular file")
+
+// regularFile reports whether path is a regular file; anything else there (a symlink, a
+// folder, a FIFO) is errNotRegular, naming the file and its type.
+func regularFile(path string) (bool, error) {
 	fi, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -199,9 +141,19 @@ func present(path string) (bool, error) {
 		return false, err
 	}
 	if !fi.Mode().IsRegular() {
-		return false, fmt.Errorf("%w (a migration file isn't a regular file: %s)", ErrMigrateInterference, fi.Mode().Type())
+		return false, fmt.Errorf("%w: %s (%s)", errNotRegular, filepath.Base(path), fi.Mode().Type())
 	}
 	return true, nil
+}
+
+// present is regularFile for the migration runner: anything but a regular file is
+// ErrMigrateInterference, since none of its files is ever one.
+func present(path string) (bool, error) {
+	ok, err := regularFile(path)
+	if errors.Is(err, errNotRegular) {
+		return false, fmt.Errorf("%w (%w)", ErrMigrateInterference, err)
+	}
+	return ok, err
 }
 
 // removeRegular removes path if it is a regular file; absent is fine, anything else refuses.
@@ -211,7 +163,7 @@ func removeRegular(path string) error {
 		return err
 	}
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("sql: remove a partial migration file: %w", err)
+		return fmt.Errorf("sql: remove the leftover %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }

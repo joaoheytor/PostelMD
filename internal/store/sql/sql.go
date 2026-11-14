@@ -56,6 +56,12 @@ func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*
 	if err := checkAbs(stateDir); err != nil {
 		return nil, err
 	}
+	// A rollback's half-restored state isn't a database to open or migrate (ADR-0035).
+	if ok, err := regularFile(filepath.Join(stateDir, RollbackIntent)); ok || errors.Is(err, errNotRegular) {
+		return nil, ErrRollbackInterrupted
+	} else if err != nil {
+		return nil, err
+	}
 	path := filepath.Join(stateDir, AppDB)
 	f, err := createExclusive(path, "database file")
 	if err == nil {

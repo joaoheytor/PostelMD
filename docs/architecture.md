@@ -111,6 +111,8 @@ Everything else consumes their interfaces.
     index.db                 # SQLite WAL, 0600: FTS and links; derived, rebuilt by `reindex` (ADR-0030)
     migrate.intent           # sidecar from before a migration's snapshot until it ends (ADR-0015)
     rebuild.intent           # sidecar while `postelmd db rebuild` runs (ADR-0030)
+    rollback.intent          # sidecar while `postelmd db rollback` runs; serve refuses to start beside it (ADR-0035)
+    rollback-*/              # app.db, its WAL files and the snapshot `db rollback` replaced; never deleted automatically (ADR-0035)
     damaged-*/               # app.db files moved aside by `db rebuild`, or by hand at format 1 (ADR-0034); never deleted automatically (ADR-0030)
     pre-format-2/            # 0600 copies of format, auth.json, secret.key, config.yaml as v0.1 left them (ADR-0030)
     pre-format-2-*/, rolled-back-*/  # set aside by a v0.2 → v0.1 rollback or a redone copy; removed by the runbook

@@ -115,6 +115,13 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   rollback" section lists. Rolling back to 0.1.0-rc.1 is still the image swap. No release,
   release candidates included, ships this before `postelmd db rollback` (#174);
   `verify-release-tag.sh` refuses such a tag.
+- `postelmd db rollback`: after an upgrade whose database migration didn't finish, it puts
+  back the copy the migration took first, so the previous version starts again. Run it with
+  the new image while no server runs. It refuses, changing nothing, once the new version has
+  started after a finished migration, and it never deletes the database it replaces: that
+  and the copy move into `.postelmd/rollback-<time>/`. A start refuses while a rollback is
+  unfinished; running the command again finishes it. The runbook's "Upgrade and rollback"
+  section has the steps.
 - A stop (`docker stop`, Ctrl-C) while the server is still starting exits cleanly, with code
   0, instead of reporting an error.
 - **Breaking:** `POSTELMD_ALLOW_NETWORK_FS` no longer covers `/data/.postelmd`: a server
