@@ -37,10 +37,30 @@ func continueRollback(ctx context.Context, stateDir string, rb rollbackIntent) (
 		return done, interference(errors.New("the snapshot is in both places"))
 	case !moved && !inState:
 		return done, interference(errors.New("the snapshot is in neither place"))
-	case !moved:
-		if err := restore(ctx, stateDir, d, snap, rb.From); err != nil {
-			return done, err
-		}
+	}
+	in, err := readIntent(stateDir)
+	switch {
+	case err != nil:
+		return done, interference(err)
+	case in != nil && (in.From != rb.From || in.To != rb.To):
+		return done, interference(fmt.Errorf("migrate.intent names %d → %d", in.From, in.To))
+	case in == nil && !moved:
+		return done, interference(errors.New("migrate.intent is gone, but the snapshot hasn't moved"))
+	case in == nil:
+		// Retired before a crash: the previous build may have opened app.db since.
+		return done, removeSidecar(stateDir, RollbackIntent, "rollback-done")
+	}
+	// While migrate.intent is there no build opens app.db as its own, so on every run app.db
+	// is checked against the snapshot, wherever it is now; with no app.db (moved aside after
+	// an older build left one), the copy is made again from there.
+	src := snap
+	if moved {
+		src = snapMoved
+	}
+	if err := restore(ctx, stateDir, d, src, rb.From); err != nil {
+		return done, err
+	}
+	if !moved {
 		if err := moveInto(snap, snapMoved); err != nil {
 			return done, err
 		}
@@ -49,16 +69,8 @@ func continueRollback(ctx context.Context, stateDir string, rb rollbackIntent) (
 			return done, err
 		}
 	}
-	in, err := readIntent(stateDir)
-	switch {
-	case err != nil:
-		return done, interference(err)
-	case in != nil && (in.From != rb.From || in.To != rb.To):
-		return done, interference(fmt.Errorf("migrate.intent names %d → %d", in.From, in.To))
-	case in != nil:
-		if err := removeSidecar(stateDir, MigrateIntent, "rollback-retired"); err != nil {
-			return done, err
-		}
+	if err := removeSidecar(stateDir, MigrateIntent, "rollback-retired"); err != nil {
+		return done, err
 	}
 	return done, removeSidecar(stateDir, RollbackIntent, "rollback-done")
 }

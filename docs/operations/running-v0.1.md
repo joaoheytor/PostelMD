@@ -479,26 +479,57 @@ changing nothing, if the migration finished (the new version started after it) o
 doesn't match (ADR-0035):
 
 1. Note `data=`, `port=` and `IMAGE=` as in step 1 above (`IMAGE` is the new image, which
-   runs the rollback), and set `PREV` to the digest you noted before the upgrade.
+   runs the rollback), and set `PREV` to the digest you noted before the upgrade. If the
+   container already runs the previous image (you swapped the image back and it refuses on
+   `migrate.intent`), `IMAGE` now names that previous image: set `IMAGE` by hand to the new
+   image's digest, the one whose first start stopped.
 2. Stop **and remove** the container: `docker stop postelmd && docker rm postelmd`.
 3. Run the rollback (with an adopted notes folder, add `-v "$notes":/data/vaults/notes`
-   before `"$IMAGE"`):
+   before `"$IMAGE"`). It runs only when `docker ps` works and finds no `postelmd` container:
+   a container left with `--restart` could start the new image again and redo the migration
+   right after the rollback.
 
    ```sh
-   [ -n "$data" ] && [ -n "$IMAGE" ] \
-     && docker run --rm --user "$(id -u):$(id -g)" -v "$data":/data "$IMAGE" db rollback \
-     || echo "ROLLBACK STOPPED" >&2
+   if ! c=$(docker ps -aq --filter 'name=^postelmd$'); then
+     echo "ROLLBACK STOPPED: docker ps failed, so it can't tell whether a server runs" >&2
+   elif [ -n "$c" ]; then
+     echo "ROLLBACK STOPPED: a postelmd container still exists; stop and remove it first" >&2
+   elif [ -z "$data" ] || [ -z "$IMAGE" ]; then
+     echo "ROLLBACK STOPPED: \$data or \$IMAGE is empty" >&2
+   else
+     docker run --rm --user "$(id -u):$(id -g)" -v "$data":/data "$IMAGE" db rollback \
+       || echo "ROLLBACK STOPPED" >&2
+   fi
    ```
 
-4. Only if it printed `Rolled back the database …` or `The migration from version … stopped
-   before it changed the database`, start the previous image: run the block of step 4 above
-   with `IMAGE=$PREV`.
+4. Only if it printed `Undid the migration from version …` or `The migration from version …
+   stopped before it changed the database`, start the previous image: run the block of step
+   4 above with `IMAGE=$PREV`.
 
-If it refuses with `nothing to roll back` and says the new version started, the migration
-finished: follow **Rollback to an earlier `:main`** below. If it stops part way (a crash, a
-full disk), run step 3 again: it finishes from where it stopped, and until then a start
-refuses with `a db rollback was interrupted`. If it says `rollback.intent stays`, start no
-server and report the whole message.
+If it refuses:
+
+- `nothing to roll back`, saying the new version started: the migration finished; follow
+  **Rollback to an earlier `:main`** below.
+- `the pre-migration snapshot doesn't verify`, or `app.db can't be read`: there is nothing
+  to restore. Fix forward with a newer image, or restore the backup you took before the
+  upgrade. Don't move `app.db` aside as for a damaged database: `migrate.intent` would stay,
+  and the previous image would still refuse.
+- `rollback.intent stays`, with `app.db is neither the moved database nor the snapshot's
+  copy`: a server (an older image, after a crash) started while the rollback was unfinished
+  and left its own `app.db`. Move it aside, keep it (it may hold what the old WAL held), and
+  run step 3 again:
+
+  ```sh
+  d="$data/.postelmd/stray-$(date +%F-%H%M%S)"
+  mkdir -m 700 "$d" && for f in app.db app.db-wal app.db-shm; do
+    if [ -e "$data/.postelmd/$f" ]; then mv "$data/.postelmd/$f" "$d/"; fi
+  done && echo "moved into $d"
+  ```
+
+- any other `rollback.intent stays`: start no server, and report the whole message.
+
+If it stops part way (a crash, a full disk), run step 3 again: it finishes from where it
+stopped, and until then a start refuses with `a db rollback was interrupted`.
 
 If PostelMD says `format` is **damaged** (anything but a number on one line), back up
 the data folder first. If only v0.1 ever used it, delete `"$data"/.postelmd/format` and start

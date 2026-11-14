@@ -67,7 +67,9 @@ never one):
 3. `app.db` is a regular file at a version from `F` to `T`; `-wal` and `-shm` beside it, if
    there, are regular files; there is no `app.db-journal`. The read is read-only: with no
    WAL, `immutable=1`, which creates no file; with a WAL, through it, so its committed
-   transactions count.
+   transactions count (a marker row a killed migration committed only to the WAL is found).
+   That read may rewrite or create SQLite's `-shm` index, and nothing else: the index holds
+   no data and is rebuilt from the WAL.
 4. No `app.db.tmp`. Then either:
    - the snapshot is there, with no temp beside it, verifies (`integrity_check`, version `F`,
      no `-journal`, `-wal` or `-shm` beside it) and the folder `rollback-<UTC time>/` doesn't
@@ -75,7 +77,11 @@ never one):
    - the snapshot isn't there and `app.db` is at `F` (migrations start only after the
      snapshot is in place): a **retire**.
 
-Otherwise it refuses (`ErrRollbackRefused`) and changes nothing.
+Otherwise it refuses (`ErrRollbackRefused`) and changes nothing but, with a WAL, the `-shm`
+index. A snapshot that doesn't verify, or an `app.db` that can't be read, leaves nothing to
+restore: the refusal names fixing forward or the runbook, never the damaged-database fix of
+ADR-0034 (moving `app.db` aside would leave `migrate.intent`, so the previous build would
+still refuse).
 
 **Restore**, each step durable before the next:
 1. write `rollback.intent`, `{"from","to","snapshot","dir"}`, by temp, `fsync`,
@@ -88,7 +94,8 @@ Otherwise it refuses (`ErrRollbackRefused`) and changes nothing.
    `app.db`, rename it to `app.db` (`RENAME_NOREPLACE`) and `fsync` the folder;
 5. move the snapshot into the rollback folder, then `fsync` both folders: the next upgrade
    takes a new one;
-6. remove `migrate.intent` (after checking it still names `F → T`);
+6. remove `migrate.intent`, after checking that it still names `F → T` and that `app.db`
+   still has the moved snapshot's bytes with nothing beside it;
 7. remove `rollback.intent`.
 
 **Retire** (no snapshot): remove the snapshot's temp and its `-journal` if there, `fsync`
@@ -111,8 +118,8 @@ until step 6, and after step 6 the database it finds is the restored one.
 | moves synced | all moved | copies, goes on |
 | copy written, or verified | `app.db.tmp` | removes it, copies again, goes on |
 | restored, or its folder synced | `app.db` the snapshot's copy | `app.db` with the snapshot's bytes and nothing beside it: moves the snapshot, goes on |
-| snapshot moved | the snapshot in the folder | removes `migrate.intent`, then its own |
-| `migrate.intent` removed | only `rollback.intent` | removes it |
+| snapshot moved | the snapshot in the folder | checks `app.db` against it, removes `migrate.intent`, then its own |
+| `migrate.intent` removed | only `rollback.intent` | removes it, without judging `app.db` (the previous build may have opened it since) |
 | `rollback.intent` removed | done | "nothing to roll back" |
 
 | Retire killed at | Left | Next run |
@@ -120,10 +127,26 @@ until step 6, and after step 6 the database it finds is the restored one.
 | temp removed | `migrate.intent` | removes it |
 | `migrate.intent` removed | done | "nothing to roll back" |
 
+While `migrate.intent` is there no build opens `app.db` as its own, so every run checks
+`app.db` against the snapshot, wherever the snapshot is (state directory or folder), before
+retiring it; with `app.db` gone and the original in the folder, it copies the snapshot
+again from there.
+
 Anything else on a re-run (the intent not parsing or naming another build, the snapshot in
 both places or neither, `app.db` in neither place, a file at `app.db` that isn't the
-snapshot's copy, a WAL beside it before the rename, a name taken in the folder) is
-`ErrRollbackInterference`: it stops, keeps `rollback.intent`, and changes nothing more.
+snapshot's copy, a WAL beside it before the rename or before `migrate.intent` goes, a name
+taken in the folder, `migrate.intent` naming another migration) is `ErrRollbackInterference`:
+it stops, keeps `rollback.intent`, and changes nothing more.
+
+**An older build started during steps 3 to 6** (after a crash; it doesn't know
+`rollback.intent`) creates a new, empty `app.db` where the original was moved, or opens the
+restored copy and changes its header, and then refuses on `migrate.intent`. The re-run
+refuses that file as interference. The fix, in the runbook: move `app.db`, `app.db-wal` and
+`app.db-shm` (those there) into a new `.postelmd/stray-<date>/` folder, then run
+`db rollback` again; it finds `app.db` gone with the original in the folder, and copies the
+snapshot again. If the original's WAL was still beside `app.db` when the older build opened
+it (a crash between two moves), SQLite checkpointed those frames into the stray file: the
+stray folder keeps them, so it is never deleted either.
 
 ## Consequences
 - Positive: after a failed or interrupted migration, one command brings back the database
@@ -131,10 +154,11 @@ snapshot's copy, a WAL beside it before the rename, a name taken in the folder) 
   with a new snapshot. Nothing is deleted.
 - Negative / costs: after a migration finished (its markers exist) the command refuses, by
   design: at format 1 the runbook's move-aside still applies (the database holds only the
-  boot ID). If an older build opens the restored file between steps 4 and 5 (after a crash),
-  its bytes change and the re-run refuses as interference; the runbook says what to move.
-  The copy reads the whole snapshot once more than a rename would, to keep the snapshot for
-  the folder.
+  boot ID). From format 2 on, a finished migration means fixing forward or ADR-0017's
+  coordinated full-instance restore, as ADR-0015 says. If an older build starts during steps
+  3 to 6 (after a crash), it leaves a file at `app.db` that the re-run refuses as
+  interference; the runbook says what to move (above). The copy reads the whole snapshot
+  once more than a rename would, to keep the snapshot for the folder.
 - Follow-ups: the power-loss model of these crash points (with the pre-migration one,
   roadmap v0.2); the image-level upgrade smoke test that runs `db rollback` in a container
   (ADR-0031, part 4).
