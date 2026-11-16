@@ -10,7 +10,9 @@ last), and fails closed: an unknown directory or a rev-parse error asks.
 import os
 import re
 
+from bash_writes import PURE_REDIRECT, is_punct, tokens
 from shparse import UNKNOWN, bare, git_parts, move, segments
+from shscan import expandable, scan
 
 
 def common_dir(d, git_out, cache):
@@ -37,6 +39,48 @@ def cd_targets(d, args, cmd):
     target = args[0] if args else "$HOME"
     real = move(d, target)
     return {real} if physical or real is UNKNOWN else {real, move(d, target, logical=True)}
+
+
+def inside(path, roots):
+    return path is not UNKNOWN and any((path + "/").startswith(r + "/") for r in roots)
+
+
+def cd_outside(cmd, cwd):
+    """A reason to ask when a cd, pushd, popd or chdir in cmd may leave the project:
+    settings.json allows `Bash(cd:*)`, so this is the only check on where cd goes. Every
+    target (logical and physical, cd_targets) must be under CLAUDE_PROJECT_DIR, its
+    worktrees in .claude/worktrees/ included; cd with no argument, ~, -, an unknown $VAR,
+    CDPATH, two arguments or +N/-N ask."""
+    project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    if not re.search(r"\b(cd|pushd|popd|chdir)\b", cmd):
+        return None
+    if not project:
+        return "cd without a project directory to compare with"
+    # backticks only where the shell runs them: unquoted or in double quotes, not in single
+    # quotes or heredoc bodies (a commit message's `cd web`)
+    if not tokens(cmd) or re.search(r"`[^`]*\b(cd|pushd|popd|chdir)\b", expandable(scan(cmd))):
+        return "cd in a command the guard can't split into words (or inside backticks)"
+    roots = {os.path.normpath(project), os.path.realpath(project)}
+    dirs = {cwd if isinstance(cwd, str) else UNKNOWN}
+    # Joined only by &&, each cd runs only after the previous one succeeded, so it replaces
+    # the directory (cd sub && cd ..). Otherwise (;, ||, |, subshells) every directory a cd
+    # may have left stays possible.
+    chained = all(t == "&&" for t in tokens(cmd) if is_punct(t) and not PURE_REDIRECT.fullmatch(t))
+    for words in segments(cmd):
+        words = bare(words)
+        if not words:
+            continue
+        if words[0] in ("pushd", "popd", "chdir"):
+            return f"{words[0]} (only a literal cd inside the project passes)"
+        if words[0] != "cd":
+            continue
+        targets = {t for d in dirs for t in cd_targets(d, words[1:], cmd)}
+        dirs = targets if chained else dirs | targets
+        outside = [d for d in dirs if not inside(d, roots)]
+        if outside:
+            where = "a directory the guard can't follow" if outside[0] is UNKNOWN else outside[0]
+            return f"cd to {where}, outside the project ({project})"
+    return None
 
 
 def check(cmd, cwd, git_out):

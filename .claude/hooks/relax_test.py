@@ -1,7 +1,8 @@
 """Tests for the six relaxations of the guard (chore/guard-relax), each with the cases that
 must still ask or deny next to the ones that now pass. The hook judges, never runs, them in
 a throwaway repository on branch `feature`; {w} is a worktree of it in a temp dir (a scratch
-review worktree), {f}/wt a directory whose .git file points at a gitdir of its own.
+review worktree), {i} one under {r}/.claude/worktrees/, {f}/wt a directory whose .git file
+points at a gitdir of its own.
 Run: python3 -m unittest discover -s .claude/hooks -p '*_test.py'  (make test-scripts)
 """
 import os
@@ -34,6 +35,8 @@ class Fixture(unittest.TestCase):
         cls.files = tempfile.mkdtemp()
         cls.wt = os.path.join(cls.files, "review-1")
         git(cls.repo, "worktree", "add", "-q", "--detach", cls.wt)
+        cls.inner = os.path.join(cls.repo, ".claude", "worktrees", "agent-1")  # {i}: inside
+        git(cls.repo, "worktree", "add", "-q", "--detach", cls.inner)
         git(cls.files, "init", "-q", "--separate-git-dir", os.path.join(cls.files, "gd"),
             os.path.join(cls.files, "wt"))
         os.makedirs(os.path.join(cls.files, "wt", "inner"))
@@ -57,7 +60,7 @@ class Fixture(unittest.TestCase):
     def assert_cases(self, cases, want):
         for command in cases:
             command = command.format(r=self.repo, w=self.wt, f=self.files, sha=SHA, key=KEY,
-                                     home=HOME, api=API)
+                                     home=HOME, api=API, i=self.inner)
             with self.subTest(command=command):
                 self.assertEqual(self.decide(command), want)
 
@@ -99,7 +102,7 @@ class Relaxations(Fixture):
             "S={r} && git -C \"$S\" status --short",
             "B=origin/main; git diff --stat $B...HEAD",
             "S={r}\ncd $S && git status",
-            "W={w}; cd ${{W}} && go test ./...",
+            "W={i}; cd ${{W}} && go test ./...",
             "S={f}; git diff origin/main > $S/c.diff",
             "S=feature; git push -u origin $S",
         ], None)
@@ -206,10 +209,12 @@ class Relaxations(Fixture):
         self.assert_cases([
             "cd {r} && git log -1",
             "cd {r}/sub && git status",
-            "cd {w} && git status && git diff --stat origin/main",
-            "S={w}; cd $S && git log --oneline -1",
+            "cd {i} && git status && git diff --stat origin/main",
+            "S={i}; cd $S && git log --oneline -1",
         ], None)
         self.assert_cases([
+            "cd {w} && git status",  # a worktree outside the project: cd outside asks (cd_test)
+            "S={w}; cd $S && git log --oneline -1",
             "cd $(mktemp -d) && git status",
             "cd {f}/wt && git status",
             "S={f}/wt; cd $S && git status",

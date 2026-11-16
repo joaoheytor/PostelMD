@@ -1,5 +1,5 @@
 """The guard models bash; agents' Bash tool runs zsh. Every command the guard tests allow
-(relax_test, review_test, review3_test to review5_test) is run here under bash, zsh -f, zsh
+(relax_test, review_test, review3_test to review5_test, cd_test) is run here under bash, zsh -f, zsh
 -f with extendedglob, and zsh as Claude Code runs it (its setopt line, then eval), with fake
 git, gh, go, make, npm and npx that log their directory and arguments. Each shell must run
 the same programs with the same arguments in the same place, or zsh nothing at all (a glob
@@ -16,6 +16,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+import cd_test
 import relax_test  # modules, not classes: discovery would run imported test classes twice
 import review3_test
 import review4_test
@@ -47,7 +48,7 @@ def allowed_cases():
     found = []
     for cls in (relax_test.Relaxations, review_test.OpenedByTheRelaxations, review_test.OpenOnMain,
                 review_test.SecondRecheck, review3_test.ThirdRecheck, review4_test.FourthRecheck,
-                review5_test.FifthRecheck):
+                review5_test.FifthRecheck, cd_test.CdInsideTheProject):
         class Collect(cls):
             def assert_cases(self, cases, want):
                 if want is None:
@@ -97,7 +98,7 @@ class SameUnderZsh(Fixture):
         self.assertGreater(len(cases), 40)
         for command in cases:
             command = command.format(r=self.repo, w=self.wt, f=self.files, sha=SHA, key=KEY,
-                                     home=HOME, api=API)
+                                     home=HOME, api=API, i=self.inner)
             with self.subTest(command=command):
                 runs = [self.run_in(shell, command, bin_dir, home) for shell in SHELLS]
                 for got in runs[1:]:  # zsh's "no matches found" runs nothing: also safe
