@@ -44,7 +44,7 @@ ID + generation ETag flips it.
 | [0012](0012-license-apache-2.md) | License: Apache-2.0 with DCO | Accepted |
 | [0013](0013-project-name.md) | Project name: PostelMD | Accepted |
 | [0014](0014-kubernetes-topology.md) | Single writer: Kubernetes topology and instance lock | Proposed |
-| [0015](0015-supply-chain-and-ci.md) | Supply chain, dependencies and CI | Accepted |
+| [0015](0015-supply-chain-and-ci.md) | Supply chain, dependencies and CI | Accepted (the `db rollback` command's steps: see 0035) |
 | [0016](0016-git-repository-state-and-recovery.md) | Git repository state model and recovery | Proposed |
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
@@ -64,3 +64,4 @@ ID + generation ETag flips it.
 | [0032](0032-v02-etag-and-api.md) | v0.2 ETag and API: ID + generation + hash, and saves by file ID | Proposed |
 | [0033](0033-v02-intents.md) | v0.2 intents: saves, creates and structural operations | Proposed |
 | [0034](0034-app-db-before-format-2.md) | app.db in serve before data format 2 | Accepted |
+| [0035](0035-db-rollback.md) | `postelmd db rollback` and retiring `migrate.intent` | Accepted |

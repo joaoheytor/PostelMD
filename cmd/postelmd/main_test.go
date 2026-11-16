@@ -40,6 +40,9 @@ func TestRun(t *testing.T) {
 		{name: "version flag", args: []string{"--version"}, wantCode: 0, wantStdout: "postelmd dev"},
 		{name: "help", args: []string{"help"}, wantCode: 0, wantStdout: "Commands:"},
 		{name: "unknown command", args: []string{"serv"}, wantCode: 2, wantStderr: `unknown command "serv"`},
+		{name: "db without a command", args: []string{"db"}, wantCode: 2, wantStderr: "Usage: postelmd"},
+		{name: "an unknown db command", args: []string{"db", "rewind"}, wantCode: 2, wantStderr: `unknown command "db rewind"`},
+		{name: "help lists db rollback", args: []string{"help"}, wantCode: 0, wantStdout: "  db rollback "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

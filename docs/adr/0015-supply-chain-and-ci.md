@@ -1,6 +1,7 @@
 # ADR-0015: Supply chain, dependencies and CI
 
-- **Status:** Accepted
+- **Status:** Accepted; its database-only rollback command (the five steps and the re-run
+  rule) is superseded by [ADR-0035](0035-db-rollback.md)
 - **Date:** 2026-11-09
 
 ## Context
