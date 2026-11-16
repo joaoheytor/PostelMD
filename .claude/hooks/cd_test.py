@@ -89,6 +89,23 @@ class CdInsideTheProject(Fixture):
             "cd ~root && ls",
         ], "ask")
         self.assert_cases([
+            # second pass: 1. a backslash-newline inside the name (the shell joins it)
+            "c\\\nd .. && pwd",
+            "cd \\\n.. && pwd",
+            # 2. parentheses the guard can't match inside $( )
+            "echo \"$(echo \")\"; cd L && cat f)\"",
+            "echo \"$(case x in x) cd L; cat f;; esac)\"",
+            # 3. an expansion in a word that contains cd
+            "\"${{x}}cd\" /tmp",
+            "${{x}}cd /tmp",
+            "$x'cd' /tmp",
+            # 4. a declaring builtin can set cdpath under a computed name
+            "x=CDPAT; typeset ${{x:l}}h=/tmp; cd claude-1000",
+            "declare y=1; cd sub",
+            "read x; cd sub",
+            "set -A a x; cd sub",
+        ], "ask")
+        self.assert_cases([
             "cat <<'EOF'\n$(cd L && cat f)\nEOF",  # a quoted heredoc: text
             "cd sub && ls *.md",  # the glob is ls's, not cd's
             "! cd sub && ls",  # either way inside

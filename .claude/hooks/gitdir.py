@@ -68,47 +68,44 @@ def raw_words(s):
     return out
 
 
-def substitutions(text):
-    """The bodies of the $(…) and `…` command substitutions in text."""
-    found, i = [], 0
-    while i < len(text):
-        if text.startswith("$(", i):
-            depth, j = 1, i + 2
-            while j < len(text) and depth:
-                depth += {"(": 1, ")": -1}.get(text[j], 0)
-                j += 1
-            found.append(text[i + 2:j])
-            i = j
-        elif text[i] == "`":
-            j = text.find("`", i + 1)
-            j = len(text) if j < 0 else j
-            found.append(text[i + 1:j])
-            i = j + 1
-        else:
-            i += 1
-    return found
+def after_substitution(text):
+    """True when a cd word appears anywhere after the first $( or backtick in text. Fails
+    closed instead of matching parentheses, which quotes and `case x in x)` make wrong."""
+    starts = [i for i in (text.find("$("), text.find("`")) if i >= 0]
+    return bool(starts) and bool(CD_WORD.search(text, min(starts)))
+
+
+DECLARE = {"typeset", "declare", "export", "local", "readonly", "read", "integer", "float"}
 
 
 def cd_syntax(cmd):
-    """A reason to ask for cd syntax the directory check can't follow: a quoted or escaped
-    command name ('c'd, c\\d), an unquoted glob or brace in a cd argument (cd L*, cd [L]),
-    or a cd in a command substitution the shell runs (unquoted, in double quotes or in a
-    heredoc with an unquoted delimiter)."""
+    """A reason to ask for cd syntax the directory check can't follow: a quoted, escaped or
+    expanded command name ('c'd, c\\d, ${x}cd), an unquoted glob or brace in a cd argument
+    (cd L*, cd [L]), a cd after a command substitution the shell runs (unquoted, in double
+    quotes or in a heredoc with an unquoted delimiter), or a declaring builtin, which can
+    set cdpath under a computed name."""
     s = scan(cmd)
     after_cd = False
     for w in raw_words(s):
         if w == "sep":
             after_cd = False
             continue
-        plain = "".join(ch for ch, _ in w if ch not in "'\"\\$")
+        text = "".join(ch for ch, _ in w)
+        plain = "".join(ch for ch in text if ch not in "'\"\\$")
         if plain in CD_NAMES and any(k is not None for _, k in w):
             return f"a quoted or escaped {plain}"
+        if "$" in text and re.search(r"cd|pushd|popd|chdir", plain):
+            return "an expansion in a word with cd in it"
         if after_cd and any(k is None and ch in "*?[]{}" for ch, k in w):
             return "a glob or brace in a cd argument"
         after_cd = after_cd or plain in CD_NAMES
     texts = [expandable(s)] + [body for quoted, body in s.bodies if not quoted]
-    if any(CD_WORD.search(sub) for t in texts for sub in substitutions(t)):
-        return "cd in a command substitution"
+    if any(after_substitution(t) for t in texts):
+        return "cd after a command substitution"
+    for words in segments(cmd):
+        words = bare(words)
+        if words and (words[0] in DECLARE or (words[0] == "set" and "-A" in words)):
+            return f"{words[0]} in a command with cd (it can set cdpath under a computed name)"
     return None
 
 
@@ -124,12 +121,15 @@ def cd_outside(cmd, cwd):
     CDPATH, two arguments or +N/-N ask."""
     project = os.environ.get("CLAUDE_PROJECT_DIR", "")
     toks = tokens(cmd)  # unquoted: 'c'd is cd
-    if not CD_WORD.search(cmd) and not CD_NAMES & set(toks):
+    joined = cmd.replace("\\\n", "")  # the shell joins c\<newline>d into cd
+    if not CD_WORD.search(cmd) and not CD_WORD.search(joined) and not CD_NAMES & set(toks):
         return None
     if not project:
         return "cd without a project directory to compare with"
     if not toks:
         return "cd in a command the guard can't split into words"
+    if joined != cmd:
+        return "a backslash-newline in a command with cd"
     why = cd_syntax(cmd)
     if why:
         return why
