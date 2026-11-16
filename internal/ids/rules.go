@@ -92,7 +92,7 @@ func (p *planner) rule2(missing []*sqlstore.File) {
 		p.hold(h.r, h.n)
 	}
 	for _, n := range rest {
-		if r := p.only1(byHash[string(n.obs.sum)], paths[string(n.obs.sum)]); r != nil && !p.done[r.ID] && !sameInode(r, n) {
+		if r := p.only1(byHash[string(n.obs.sum)], paths[string(n.obs.sum)]); r != nil && !p.done[r.ID] && !p.busy[r.ID] && !sameInode(r, n) {
 			p.hold(r, n)
 			continue
 		}
@@ -141,6 +141,10 @@ func (p *planner) move(r *sqlstore.File, n newPath) {
 func (p *planner) hold(r *sqlstore.File, n newPath) {
 	since, record := p.since(r)
 	left := since.Add(SecondPass).Sub(p.now)
+	if left <= 0 && p.only != "" { // a read sees one path: only a full pass can check uniqueness
+		p.done[r.ID], p.full = true, true
+		return
+	}
 	if left <= 0 {
 		p.move(r, n)
 		return
@@ -190,7 +194,7 @@ func (p *planner) resolveMissing(missing []*sqlstore.File) {
 		add(sum, "", p.now)
 	}
 	for _, r := range missing {
-		if p.done[r.ID] {
+		if p.done[r.ID] || p.busy[r.ID] {
 			continue
 		}
 		absent := []check{{r.Path, false, fs.Stat{}}}

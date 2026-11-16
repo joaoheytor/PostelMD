@@ -57,7 +57,9 @@ missing.
 - **Rule 1 comes first, and it includes the rows that hold a path.** When a suspect's own
   inode (same hash, device, inode and mtime) comes back at a new path, the ID moves there, at
   once, inside the 10 s or after them, and the suspect's hold is released: the held path gets
-  a new ID. A held path can itself be rule 1's match for another row.
+  a new ID. A held path can itself be rule 1's match (the original renamed onto its copy). A
+  held path that is being written can't be hashed: its hold waits for the next pass, but
+  rule 1 can still move its row.
 - **A rule-2 hold is provisional.** It records a match; it doesn't decide it. Rule 1 can take
   its row (above), and before a hold becomes a move the pass checks rule 2's uniqueness
   again: the row must still be the only missing row with the hash and the held path the only
@@ -82,7 +84,11 @@ gets the rules against every row with its hash or its device and inode, **live o
 plus the rows that hold a path. Each of those rows whose path is gone counts as missing, so a
 rename made outside PostelMD while it runs (`mv a.md b.md`, then a read of `b.md`) moves the
 ID by rule 1, and rule 2's "only missing row" counts a live row whose file was just removed.
-Rule 2 may hold the path, and answers the same `503`. The existing indexes `files_by_sha256`
+Rule 2 may hold the path, and answers the same `503`. A read sees only its own path and the
+stored holds, not a second copy elsewhere on disk, so it never makes a rule-2 move itself:
+when the hold is due (or a match would move at once), the read runs a **full pass** instead,
+which checks rule 2's uniqueness against every path, and then reads. This happens only after
+the 10 s wait, and concurrent reads share one full pass. The existing indexes `files_by_sha256`
 and `files_by_inode` serve the lookup, so no migration is needed. A path with a row, a path
 that isn't a regular file, and a file over the read size limit (`fs.MaxFileSize`) are left to
 the scan. Concurrent reads of one path share one pass. If the pass fails, the failure is

@@ -58,6 +58,42 @@ func TestRenameRulesOnTheSignals(t *testing.T) {
 	}
 }
 
+// A held copy that is being written (it can't be hashed) waits for the next pass, but it
+// doesn't stop rule 1: the suspect's own inode back at renamed.md takes the ID, and the
+// busy copy's hold is let go.
+func TestABusyHoldDoesNotBlockRule1(t *testing.T) {
+	now := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	sum := bytes.Repeat([]byte{1}, 32)
+	orig := fs.Stat{Size: 5, Device: 1, Inode: 10, MtimeNS: 100, CtimeNS: 100}
+	held := fs.Stat{Size: 5, Device: 1, Inode: 11, MtimeNS: 200, CtimeNS: 200}
+	row := sqlstore.File{ID: sqlstore.NewID(now.Add(-time.Hour)), Path: "a.md", Generation: 1, SHA256: sum,
+		Stat: fileStat(orig), Suspect: true, SuspectSince: now.Add(-3 * time.Second)}
+	disk := map[string]fs.Stat{"copy.md": {Size: 6, Device: 1, Inode: 11, MtimeNS: 300, CtimeNS: 300}, "renamed.md": orig}
+	p := &planner{now: now, rows: []sqlstore.File{row}, paths: []string{"copy.md", "renamed.md"}, totals: &Totals{},
+		holds: []sqlstore.Pending{{Path: "copy.md", FileID: row.ID, SHA256: sum, Stat: fileStat(held)}},
+		stat:  func(path string) (fs.Stat, bool) { st, ok := disk[path]; return st, ok },
+		hash: func(path string) (observed, bool) {
+			if path == "copy.md" {
+				return observed{}, false // a writer is busy with it
+			}
+			return observed{disk[path], sum}, true
+		}}
+	moved, released := false, false
+	for _, u := range p.plan() {
+		for _, ch := range u.changes {
+			switch ch := ch.(type) {
+			case sqlstore.UpdateFile:
+				moved = moved || ch.ID == row.ID && ch.NewPath == "renamed.md"
+			case sqlstore.Release:
+				released = released || ch.Path == "copy.md"
+			}
+		}
+	}
+	if !moved || !released {
+		t.Fatalf("moved to renamed.md %v, copy.md released %v; want both", moved, released)
+	}
+}
+
 // Every decision rests on the paths it read: a move checks that the old path is still
 // absent and the new one unchanged, so a file that comes back before the mutex is taken
 // keeps its ID.

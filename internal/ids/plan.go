@@ -56,15 +56,17 @@ type planner struct {
 
 	totals *Totals
 	units  []unit
-	// done: the rows the plan has decided for (moved, held, back, busy), by ID; moved: the
-	// ones whose ID moves; released: the holds let go, by path.
-	done, moved, released map[string]bool
-	claimed               map[string]bool // the paths an ID moved to, by path
-	news                  []newPath       // the paths with no row and no hold standing
-	held                  []heldPath      // the held paths whose suspect is still missing
-	others                map[string]int  // the held paths the plan doesn't decide, by hash
-	inserted              [][]byte        // the hashes of the paths given new IDs
-	wait                  time.Duration   // for only: how long until its hold resolves
+	// done: the rows the plan has decided for (moved, held, back), by ID; moved: the ones
+	// whose ID moves; busy: the rows whose held path is being written (rule 1 may still move
+	// them, nothing else decides for them this pass); released: the holds let go, by path.
+	done, moved, busy, released map[string]bool
+	full                        bool            // a read's plan needs a full pass (a rule-2 move is due)
+	claimed                     map[string]bool // the paths an ID moved to, by path
+	news                        []newPath       // the paths with no row and no hold standing
+	held                        []heldPath      // the held paths whose suspect is still missing
+	others                      map[string]int  // the held paths the plan doesn't decide, by hash
+	inserted                    [][]byte        // the hashes of the paths given new IDs
+	wait                        time.Duration   // for only: how long until its hold resolves
 }
 
 type newPath struct {
@@ -84,7 +86,7 @@ type heldPath struct {
 // rows still missing.
 func (p *planner) plan() []unit {
 	p.done, p.moved, p.released, p.claimed = map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
-	p.others = map[string]int{}
+	p.others, p.busy = map[string]int{}, map[string]bool{}
 	var missing []*sqlstore.File
 	for i := range p.rows {
 		r := &p.rows[i]
@@ -185,7 +187,7 @@ func (p *planner) checkHolds() {
 		if !sameStat(h.Stat, st) {
 			var ok bool
 			if o, ok = p.hash(h.Path); !ok {
-				p.done[r.ID] = true // busy: decide next pass
+				p.busy[r.ID] = true // decide next pass
 				p.others[string(h.SHA256)]++
 				continue
 			}

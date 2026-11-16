@@ -80,38 +80,48 @@ func (s *Scanner) Pass(ctx context.Context) (Totals, error) {
 // suspect is still missing gets the ID once SecondPass has passed since the suspect was
 // first missed. It returns how long until a hold on p resolves (the read answers 503 with
 // Retry-After), else 0. A path that isn't a regular file, is over the read size limit, or
-// already has a row, is left to the read and the scan. Concurrent reads of one path share
-// one pass.
+// already has a row, is left to the read and the scan. A read sees one path, so a rule-2
+// move it would make (the hold is due) runs a full pass instead, which sees every copy.
+// Concurrent reads of one path share one pass, and concurrent full passes one full pass.
 func (s *Scanner) Seen(ctx context.Context, p string) (time.Duration, error) {
 	st, on, err := s.v.StatPath(p)
 	if err != nil || !on || st.Size > s.maxSize {
 		return 0, err
 	}
+	return s.once(ctx, p, func() (time.Duration, error) { return s.seen(ctx, p) })
+}
+
+// fullPass is a read's full pass; its key "" is never a path.
+const fullPass = ""
+
+// once runs fn for key, or, while a call for key runs, waits for it and shares its wait.
+func (s *Scanner) once(ctx context.Context, key string, fn func() (time.Duration, error)) (time.Duration, error) {
 	s.mu.Lock()
-	if f, ok := s.flights[p]; ok {
+	if f, ok := s.flights[key]; ok {
 		s.mu.Unlock()
 		killPoint("seen-joined")
 		select {
 		case <-f.done:
-			return f.wait, nil // the first read reports its error
+			return f.wait, nil // the first caller reports its error
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		}
 	}
 	f := &flight{done: make(chan struct{})}
-	s.flights[p] = f
+	s.flights[key] = f
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		delete(s.flights, p)
+		delete(s.flights, key)
 		s.mu.Unlock()
 		close(f.done)
 	}()
-	f.wait, err = s.seen(ctx, p)
+	var err error
+	f.wait, err = fn()
 	return f.wait, err
 }
 
-// flight is a read's pass over one path, which the concurrent reads of that path wait for.
+// flight is a read's pass in progress, which the concurrent reads of the same key wait for.
 type flight struct {
 	done chan struct{}
 	wait time.Duration
@@ -147,6 +157,9 @@ func (s *Scanner) seen(ctx context.Context, p string) (time.Duration, error) {
 			return st, ok && err == nil
 		}}
 	units := pl.plan()
+	if pl.full {
+		return s.once(ctx, fullPass, func() (time.Duration, error) { _, err := s.Pass(ctx); return 0, err })
+	}
 	if err := s.apply(ctx, now, units); err != nil {
 		return 0, err
 	}

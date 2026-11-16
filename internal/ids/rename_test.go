@@ -38,6 +38,51 @@ func TestAnInodeBackElsewhereBeatsAHold(t *testing.T) {
 	}
 }
 
+// Rule 1 matches a held path too: the original renamed onto its own held copy takes its
+// ID back at once, and the hold goes.
+func TestAnInodeBackOnItsHeldPathTakesTheID(t *testing.T) {
+	e := newEnv(t, map[string]string{"a.md": "unique"})
+	id := e.row("a.md").ID
+	e.aside("a.md")
+	e.cp2("unique", "copy.md")
+	e.pass()
+	e.back("copy.md")
+	e.after(3 * time.Second)
+	e.pass()
+	if r := e.row("copy.md"); r.ID != id {
+		t.Fatalf("copy.md: %+v, want a.md's ID", r)
+	}
+	if h := e.holds(); len(h) != 0 {
+		t.Fatalf("holds %+v", h)
+	}
+}
+
+// A read doesn't see every copy on disk, so a rule-2 move it would make runs a full pass
+// instead: two copies made while PostelMD runs both get new IDs, and the original is
+// tombstoned as ambiguous-rename, as a full pass decides.
+func TestSeenOfOneOfTwoUnseenCopies(t *testing.T) {
+	e := newEnv(t, map[string]string{"a.md": "unique"})
+	id := e.row("a.md").ID
+	e.cp2("unique", "x.md")
+	e.cp2("unique", "y.md")
+	e.aside("a.md")
+	if wait, err := e.s.Seen(ctx, "x.md"); err != nil || wait != SecondPass {
+		t.Fatalf("Seen = %v, %v; want a hold", wait, err)
+	}
+	e.after(SecondPass)
+	if wait, err := e.s.Seen(ctx, "x.md"); err != nil || wait != 0 {
+		t.Fatalf("Seen after the 10 s = %v, %v", wait, err)
+	}
+	for _, p := range []string{"x.md", "y.md"} {
+		if r := e.row(p); r.ID == id {
+			t.Fatalf("%s got a.md's ID though two copies have its bytes", p)
+		}
+	}
+	if ts := e.tombstone(id); ts.Reason != "ambiguous-rename" {
+		t.Fatalf("tombstone %+v, want ambiguous-rename", ts)
+	}
+}
+
 // The same through a read: the read of the original's new path takes the ID and lets the
 // held copy go.
 func TestSeenOfAnInodeBackElsewhereReleasesTheHold(t *testing.T) {
