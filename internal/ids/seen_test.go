@@ -38,7 +38,9 @@ func TestSeenOfAHeldPathWaitsThenResolves(t *testing.T) {
 		t.Run(held, func(t *testing.T) {
 			e := newEnv(t, map[string]string{"a.md": "unique"})
 			id := e.row("a.md").ID
-			e.rm("a.md")
+			// Out of the vault but not deleted: a freed inode could be reused by the copy,
+			// which is TestRenameRulesOnTheSignals' "cp over the freed inode" (a new ID).
+			e.aside("a.md")
 			e.pass() // a.md suspect
 			e.cp2("unique", "copy.md")
 			if held == "by the scan" {
