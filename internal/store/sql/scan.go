@@ -42,7 +42,9 @@ type UpdateFile struct {
 	Bump    bool
 }
 
-// Suspect marks a live row suspect from the transaction's time: a scan missed its path.
+// Suspect marks a live row suspect from the transaction's time: a scan missed its path. On a
+// suspect row it only restarts a clock that is in the future (the system clock stepped back,
+// ADR-0036); a suspect already counting is stale.
 type Suspect struct{ Row }
 
 // TombstoneFile ends a row's ID: the row moves to tombstones with its last path and
@@ -149,8 +151,9 @@ func (c UpdateFile) apply(ctx context.Context, tx *sql.Tx, _ time.Time) error {
 }
 
 func (c Suspect) apply(ctx context.Context, tx *sql.Tx, now time.Time) error {
-	return one(ctx, tx, "mark a file suspect", `UPDATE files SET state = 'suspect', suspect_since_ms = ?
-		WHERE id = ? AND path = ? AND generation = ? AND state = 'live'`, now.UnixMilli(), c.ID, []byte(c.Path), c.Generation)
+	return one(ctx, tx, "mark a file suspect", `UPDATE files SET state = 'suspect', suspect_since_ms = ?1
+		WHERE id = ?2 AND path = ?3 AND generation = ?4 AND (state = 'live' OR suspect_since_ms > ?1)`,
+		now.UnixMilli(), c.ID, []byte(c.Path), c.Generation)
 }
 
 func (c TombstoneFile) apply(ctx context.Context, tx *sql.Tx, now time.Time) error {

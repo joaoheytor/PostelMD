@@ -18,13 +18,16 @@ func (db *DB) Files(ctx context.Context) ([]File, error) {
 	return db.queryFiles(ctx, "SELECT "+fileColumns+" FROM files")
 }
 
-// Suspects returns the suspect rows: what a read's single-path pass matches a new path with.
-func (db *DB) Suspects(ctx context.Context) ([]File, error) {
-	return db.queryFiles(ctx, "SELECT "+fileColumns+" FROM files WHERE state = 'suspect'")
+// FilesMatching returns the rows a read's single-path pass matches a new path with (ADR-0036):
+// every row, live or suspect, with that hash or that device and inode, and every row that
+// holds a path. The indexes files_by_sha256 and files_by_inode serve the first two.
+func (db *DB) FilesMatching(ctx context.Context, sha256 []byte, device, inode uint64) ([]File, error) {
+	return db.queryFiles(ctx, "SELECT "+fileColumns+` FROM files WHERE sha256 = ? OR (device = ? AND inode = ?)
+		OR id IN (SELECT file_id FROM pending)`, sha256, int64(device), int64(inode)) //nolint:gosec // G115: the bits are kept
 }
 
-func (db *DB) queryFiles(ctx context.Context, query string) ([]File, error) {
-	rows, err := db.r.QueryContext(ctx, query)
+func (db *DB) queryFiles(ctx context.Context, query string, args ...any) ([]File, error) {
+	rows, err := db.r.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sql: read the file rows: %w", err)
 	}

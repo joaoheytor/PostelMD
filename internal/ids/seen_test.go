@@ -4,7 +4,6 @@ package ids
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"strings"
 	"sync"
@@ -89,31 +88,41 @@ func TestAPathThatChangesBeforeTheMutexIsLeftForTheNextPass(t *testing.T) {
 }
 
 func TestStartRunsTheSecondPassAndExpiresTombstones(t *testing.T) {
-	e := newEnv(t, map[string]string{"a.md": "A", "b.md": "B"})
+	e := newEnv(t, map[string]string{"a.md": "A", "b.md": "B", "c.md": "C"})
 	logs := &logBuffer{}
 	e.s.log = slog.New(slog.NewJSONHandler(logs, nil))
 	e.s.secondAfter, e.s.expireEvery = 10*time.Millisecond, 10*time.Millisecond
-	gone := e.row("b.md").ID
+	old, recent := e.row("b.md").ID, e.row("c.md").ID
 	e.rm("b.md")
 	e.pass()
 	e.after(SecondPass)
 	e.pass() // b.md tombstoned at the clock's time
+	e.rm("c.md")
+	e.pass()
+	e.after(SecondPass)
+	e.pass() // c.md tombstoned SecondPass later
 	e.rm("a.md")
 	id := e.row("a.md").ID
-	e.s.now = func() time.Time { return e.clock.Add(TombstoneTTL + SecondPass) } // the expiry sees b.md's as 30 days old
+	// The expiry sees b.md's tombstone as TTL + 5 s old, c.md's as TTL - 5 s.
+	e.s.now = func() time.Time { return e.clock.Add(TombstoneTTL - 5*time.Second) }
 	stop, err := e.s.Start(ctx)
 	must(t, err)
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(logs.String(), `"pass":2`) || !strings.Contains(logs.String(), "expired tombstones removed") {
+	for !strings.Contains(logs.String(), `"msg":"startup scan","pass":2`) ||
+		!strings.Contains(logs.String(), "expired tombstones removed") {
 		if time.Now().After(deadline) {
 			t.Fatalf("no second pass or expiry: %s", logs.String())
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	stop()
-	if _, err := e.db.TombstoneByID(ctx, gone); err == nil {
+	if strings.Contains(logs.String(), `"level":"ERROR"`) {
+		t.Fatalf("a pass failed: %s", logs.String())
+	}
+	if _, err := e.db.TombstoneByID(ctx, old); err == nil {
 		t.Fatal("the expired tombstone is still there")
 	}
+	e.tombstone(recent) // younger than TombstoneTTL: kept
 	// The first pass made a.md suspect at the shifted clock; the second, 10 ms later on the
 	// same clock, left it: absence takes 10 s, not two passes.
 	if r := e.row("a.md"); r.ID != id || !r.Suspect {
@@ -124,13 +133,12 @@ func TestStartRunsTheSecondPassAndExpiresTombstones(t *testing.T) {
 	}
 }
 
-func TestStartStopsWithItsContext(t *testing.T) {
+// stop ends the background work on its own, with the parent context still alive.
+func TestStopEndsTheBackgroundWork(t *testing.T) {
 	e := newEnv(t, map[string]string{"a.md": "A"})
 	e.s.secondAfter = time.Hour
-	c, cancel := context.WithCancel(ctx)
-	stop, err := e.s.Start(c)
+	stop, err := e.s.Start(ctx)
 	must(t, err)
-	cancel()
 	done := make(chan struct{})
 	go func() { stop(); close(done) }()
 	select {

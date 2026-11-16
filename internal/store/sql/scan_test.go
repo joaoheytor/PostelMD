@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"syscall"
 	"testing"
 	"time"
@@ -101,17 +102,54 @@ func TestApplyScanSkipsAStaleUnit(t *testing.T) {
 		{Hold{Path: "notes/b.md", FileID: a.ID, SHA256: sum(8)}},                     // the path has a row
 		{Hold{Path: "free.md", FileID: b.ID, SHA256: sum(8)}},                        // the row isn't suspect
 		{UpdateFile{Row: rowOf(b), NewPath: "a.md", SHA256: b.SHA256, Stat: b.Stat}}, // an ID moving onto a row
+		{UpdateFile{Row: stale, NewPath: "notes/b.md", SHA256: sum(8), Stat: b.Stat}},
+		{TombstoneFile{Row: stale, Reason: "missing"}},
 	}
 	applied, err := db.ApplyScan(ctx, time.Now(), units)
-	if err != nil || !applied[0] || applied[1] || applied[2] || applied[3] || applied[4] || applied[5] {
+	if err != nil || !applied[0] || slices.Contains(applied[1:], true) {
 		t.Fatalf("ApplyScan = %v, %v; want only the first unit", applied, err)
 	}
 	rows := rowsByPath(t, db)
-	if rows["a.md"].Generation != 2 || rows["notes/b.md"].Suspect || len(rows) != 3 {
+	if rows["a.md"].Generation != 2 || rows["notes/b.md"].Suspect || rows["notes/b.md"].Generation != 1 || len(rows) != 3 {
 		t.Fatalf("rows after the pass: %+v", rows)
+	}
+	if _, err := db.TombstoneByID(ctx, b.ID); !errors.Is(err, ErrNoTombstone) {
+		t.Fatalf("a stale tombstone was recorded: %v", err)
 	}
 	if h, _ := db.Holds(ctx); len(h) != 0 {
 		t.Fatalf("holds %+v", h)
+	}
+}
+
+// A unit made from an older view of a suspect is stale too: marking a row that is already
+// suspect (its clock would restart), and holding a second path for a row that holds one.
+func TestApplyScanSkipsAStaleSuspectOrHold(t *testing.T) {
+	db, before := assigned(t)
+	ctx := context.Background()
+	b := before["notes/b.md"]
+	t0 := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	first := [][]Change{{Suspect{Row: rowOf(b)}, Hold{Path: "held.md", FileID: b.ID, SHA256: b.SHA256}}}
+	if applied, err := db.ApplyScan(ctx, t0, first); err != nil || !applied[0] {
+		t.Fatalf("ApplyScan = %v, %v", applied, err)
+	}
+	units := [][]Change{
+		{Suspect{Row: rowOf(b)}},
+		{Hold{Path: "other.md", FileID: b.ID, SHA256: b.SHA256}},
+		{InsertFile{Path: "x.md", SHA256: sum(8)}},
+	}
+	applied, err := db.ApplyScan(ctx, t0.Add(time.Minute), units)
+	if err != nil || applied[0] || applied[1] || !applied[2] {
+		t.Fatalf("ApplyScan = %v, %v; want only the insert", applied, err)
+	}
+	rows := rowsByPath(t, db)
+	if r := rows["notes/b.md"]; !r.Suspect || !r.SuspectSince.Equal(t0) {
+		t.Fatalf("notes/b.md: %+v, want suspect since %v", r, t0)
+	}
+	if h, _ := db.Holds(ctx); len(h) != 1 || h[0].Path != "held.md" {
+		t.Fatalf("holds %+v", h)
+	}
+	if _, ok := rows["x.md"]; !ok {
+		t.Fatal("the unit after the stale ones wasn't applied")
 	}
 }
 
@@ -134,6 +172,13 @@ func TestExpireTombstones(t *testing.T) {
 	}
 	if _, err := db.TombstoneByID(ctx, recent.ID); err != nil {
 		t.Fatalf("the recent tombstone: %v", err)
+	}
+	// The boundary: a tombstone recorded at the cutoff is kept; a millisecond later it goes.
+	if n, err := db.ExpireTombstones(ctx, t0.Add(time.Hour)); err != nil || n != 0 {
+		t.Fatalf("ExpireTombstones at the tombstone's time = %d, %v; want 0", n, err)
+	}
+	if n, err := db.ExpireTombstones(ctx, t0.Add(time.Hour+time.Millisecond)); err != nil || n != 1 {
+		t.Fatalf("ExpireTombstones a millisecond later = %d, %v; want 1", n, err)
 	}
 }
 
@@ -196,6 +241,12 @@ func TestApplyScanCrashPoints(t *testing.T) {
 					if g := after[p]; g.ID != f.ID || g.Generation != f.Generation || g.Suspect || len(after) != len(before) {
 						t.Fatalf("killed before the commit, but %q is %+v (was %+v)", p, g, f)
 					}
+					if _, err := db.TombstoneByID(context.Background(), f.ID); !errors.Is(err, ErrNoTombstone) {
+						t.Fatalf("killed before the commit, but %q has a tombstone: %v", p, err)
+					}
+				}
+				if h, err := db.Holds(context.Background()); err != nil || len(h) != 0 {
+					t.Fatalf("killed before the commit, but holds %+v, %v", h, err)
 				}
 				return
 			}

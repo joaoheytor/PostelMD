@@ -25,7 +25,8 @@ ADR-0031's Decision.
 - **Under the vault mutex**, the pass stats each of those paths again and drops every
   decision whose paths changed; then it commits the rest in **one write transaction**, each
   decision in its own savepoint guarded by the row's ID, path and generation (a suspect also
-  by its state; a new ID or a hold by the path having no row and no hold). A decision whose
+  by its state, or a clock in the future; a new ID or a hold by the path having no row and no
+  hold, a hold also by its row being suspect and holding nothing yet). A decision whose
   row changed since the plan (a read's pass ran in between) is rolled back alone. The vault
   mutex comes first, then the transaction, and no filesystem I/O happens inside it
   (ADR-0030). A dropped decision is left for the next pass.
@@ -40,13 +41,30 @@ ADR-0031's Decision.
   suspect when its own time is at least 10 s after that, **whichever pass it is**: the 10 s
   pass after the start, or the first pass after a restart. The 10 s are never counted in
   memory.
+- The 10 s are measured on the system clock, so its steps count. A `suspect_since` in the
+  future (the clock stepped back) is treated as now: the pass writes now in its place, so no
+  wait, and no `Retry-After`, is ever longer than 10 s. A clock that jumps forward shortens
+  the 10 s, down to the next pass; a move or tombstone that comes early is the same as one
+  after a real 10 s wait.
 - The second pass is a full pass, run once 10 s after the first finishes (ADR-0031: "until
   the watcher slice"). A path that first goes missing during the second pass stays suspect
   until the next start, or until a read resolves a match for it.
 
 ### The rules, made exact
-- Rule 2 counts, for a hash, the new paths and the held paths, and the missing rows whose IDs
-  haven't moved in this pass. A row already holding a path isn't matched again.
+A pass decides in this order: the rows whose paths are there; rule 1 over every new and held
+path; the holds that still stand; rule 2 over the other new paths; then the rows still
+missing.
+- **Rule 1 comes first, and it includes the rows that hold a path.** When a suspect's own
+  inode (same hash, device, inode and mtime) comes back at a new path, the ID moves there, at
+  once, inside the 10 s or after them, and the suspect's hold is released: the held path gets
+  a new ID. A held path can itself be rule 1's match for another row.
+- **A rule-2 hold is provisional.** It records a match; it doesn't decide it. Rule 1 can take
+  its row (above), and before a hold becomes a move the pass checks rule 2's uniqueness
+  again: the row must still be the only missing row with the hash and the held path the only
+  new or held path with it. If not, the hold is released, every path with the hash gets a new
+  ID, and the row is tombstoned as `ambiguous-rename` once it has been missing 10 s.
+- Rule 2 counts, for a hash, the new paths and the held paths, and the missing rows (live or
+  suspect) whose IDs haven't moved in this pass.
 - A held path that went away releases its hold; one whose bytes changed releases it and is
   taken as a new path. When the old path is back, the hold is released and the held path
   gets a new ID in the same pass.
@@ -59,10 +77,17 @@ ADR-0031's Decision.
 ### A read
 `GET /api/v1/notes/{path}` runs a single-path pass before reading, only for a path with no
 row: a held path resolves once its suspect has been missing 10 s, else the read answers
-`503` with `Retry-After` (whole seconds, rounded up); a new path gets the rules against the
-suspects (rule 2 may hold it, and answers the same `503`). A path with a row is left to the
-scan. If the pass fails, the failure is logged without the path and the read goes on: no ID is
-on the wire yet. The commit dialog's change list (`git status`) does the same in
+`503` with `Retry-After` (whole seconds, rounded up, at most 10); a new path is hashed, and
+gets the rules against every row with its hash or its device and inode, **live or suspect**,
+plus the rows that hold a path. Each of those rows whose path is gone counts as missing, so a
+rename made outside PostelMD while it runs (`mv a.md b.md`, then a read of `b.md`) moves the
+ID by rule 1, and rule 2's "only missing row" counts a live row whose file was just removed.
+Rule 2 may hold the path, and answers the same `503`. The existing indexes `files_by_sha256`
+and `files_by_inode` serve the lookup, so no migration is needed. A path with a row, a path
+that isn't a regular file, and a file over the read size limit (`fs.MaxFileSize`) are left to
+the scan. Concurrent reads of one path share one pass. If the pass fails, the failure is
+logged without the path and the read goes on: no ID is on the wire yet. The commit dialog's
+change list (`git status`) does the same in
 [#181](https://github.com/joaoheytor/PostelMD/issues/181).
 
 ### serve before data format 2
@@ -70,7 +95,10 @@ on the wire yet. The commit dialog's change list (`git status`) does the same in
 has the "assigned" flag **and** the vault marker names the database's vault UUID. Anything
 else is left as it is, with a warning when the flag is set: at format 1 nothing assigns IDs,
 and the other combinations are ADR-0030's format table, which comes with format 2. A failed
-pass is logged and serving goes on. `stop` cancels the background passes and the expiry, and
+pass is logged and serving goes on. Writer I/O errors from the pass's transaction
+(`SQLITE_CORRUPT`, `SQLITE_IOERR`, `SQLITE_FULL`) are not an exception to that: once part 4
+adds ADR-0030's read-only state, they follow its read-only rule like every other write.
+`stop` cancels the background passes and the expiry, and
 waits for them before the database closes.
 
 ### Tombstone expiry

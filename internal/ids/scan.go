@@ -11,6 +11,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/errattr"
@@ -31,12 +32,17 @@ type Scanner struct {
 	now func() time.Time
 	// secondAfter is SecondPass; expireEvery how often the expiry runs. Tests shorten them.
 	secondAfter, expireEvery time.Duration
+	maxSize                  int64 // the largest file a read hashes (fs.MaxFileSize)
+
+	mu      sync.Mutex
+	flights map[string]*flight // the reads' passes in progress, by path
 }
 
 // New returns a scanner of v's rows in db. The caller has checked that db's IDs describe v
 // (the "assigned" flag, and the vault marker naming db's vault UUID).
 func New(db *sqlstore.DB, v *vault.Vault, log *slog.Logger) *Scanner {
-	return &Scanner{db: db, v: v, log: log, now: time.Now, secondAfter: SecondPass, expireEvery: time.Hour}
+	return &Scanner{db: db, v: v, log: log, now: time.Now, secondAfter: SecondPass, expireEvery: time.Hour,
+		maxSize: fs.MaxFileSize, flights: map[string]*flight{}}
 }
 
 // Pass runs one full pass: every file on disk against every row and hold. A walk that fails
@@ -69,20 +75,59 @@ func (s *Scanner) Pass(ctx context.Context) (Totals, error) {
 }
 
 // Seen is a read's pass over p, a path the scan may not have seen (ADR-0031): a path with
-// no row and no hold gets the rename rules against the suspects (its ID, a hold, or a new
-// ID); a held path whose suspect is still missing gets the ID once SecondPass has passed
-// since the suspect was first missed. It returns how long until a hold on p resolves (the
-// read answers 503 with Retry-After), else 0. A path that isn't a regular file, or already
-// has a row, is left to the read and the scan.
+// no row and no hold gets the rename rules against every row with its hash or its inode,
+// live or suspect, whose path is gone (its ID, a hold, or a new ID); a held path whose
+// suspect is still missing gets the ID once SecondPass has passed since the suspect was
+// first missed. It returns how long until a hold on p resolves (the read answers 503 with
+// Retry-After), else 0. A path that isn't a regular file, is over the read size limit, or
+// already has a row, is left to the read and the scan. Concurrent reads of one path share
+// one pass.
 func (s *Scanner) Seen(ctx context.Context, p string) (time.Duration, error) {
-	if _, on, err := s.v.StatPath(p); err != nil || !on {
+	st, on, err := s.v.StatPath(p)
+	if err != nil || !on || st.Size > s.maxSize {
 		return 0, err
 	}
+	s.mu.Lock()
+	if f, ok := s.flights[p]; ok {
+		s.mu.Unlock()
+		killPoint("seen-joined")
+		select {
+		case <-f.done:
+			return f.wait, nil // the first read reports its error
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	f := &flight{done: make(chan struct{})}
+	s.flights[p] = f
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.flights, p)
+		s.mu.Unlock()
+		close(f.done)
+	}()
+	f.wait, err = s.seen(ctx, p)
+	return f.wait, err
+}
+
+// flight is a read's pass over one path, which the concurrent reads of that path wait for.
+type flight struct {
+	done chan struct{}
+	wait time.Duration
+}
+
+func (s *Scanner) seen(ctx context.Context, p string) (time.Duration, error) {
 	if _, err := s.db.FileByPath(ctx, p); !errors.Is(err, sqlstore.ErrNoFile) {
 		return 0, err
 	}
+	hash := s.hasher(ctx)
+	o, ok := hash(p)
+	if !ok {
+		return 0, nil // gone or busy: the scan decides
+	}
 	now := s.now()
-	suspects, err := s.db.Suspects(ctx)
+	rows, err := s.db.FilesMatching(ctx, o.sum, o.stat.Device, o.stat.Inode)
 	if err != nil {
 		return 0, err
 	}
@@ -90,8 +135,14 @@ func (s *Scanner) Seen(ctx context.Context, p string) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	pl := &planner{now: now, rows: suspects, holds: holds, paths: []string{p}, only: p, totals: &Totals{},
-		hash: s.hasher(ctx), stat: func(path string) (fs.Stat, bool) {
+	pl := &planner{now: now, rows: rows, holds: holds, paths: []string{p}, only: p, totals: &Totals{},
+		hash: func(path string) (observed, bool) {
+			if path == p {
+				return o, true
+			}
+			return hash(path)
+		},
+		stat: func(path string) (fs.Stat, bool) {
 			st, ok, err := s.v.StatPath(path)
 			return st, ok && err == nil
 		}}
