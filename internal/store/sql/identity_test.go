@@ -57,7 +57,7 @@ func TestAssignInOneTransaction(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileByPath(%q): %v", nf.Path, err)
 		}
-		if !ValidID(f.ID) || ids[f.ID] || !idTime(f.ID).Equal(now) {
+		if !ValidID(f.ID) || ids[f.ID] || !IDTime(f.ID).Equal(now) {
 			t.Fatalf("%q got ID %q: not a new ULID at the assignment's time", nf.Path, f.ID)
 		}
 		ids[f.ID] = true

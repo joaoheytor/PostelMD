@@ -28,7 +28,12 @@ Decisions are recorded in [`adr/`](adr/). This document describes how the pieces
 > 0002 (`files`, `pending`, `tombstones`, `trash_records`), ULID file IDs, the first
 > assignment's one transaction, its stat-hash-stat walk and trash reader, and the vault
 > marker's read and write, which adopts an unmarked folder as ADR-0027 does (ADR-0031);
-> nothing assigns IDs until data format 2.
+> nothing assigns IDs until data format 2. Its third part adds `internal/ids`, the startup
+> scan ([ADR-0036](adr/0036-the-startup-scan.md)): a pass plans without the vault mutex,
+> re-checks each path under it and commits in one transaction; suspects, both rename rules,
+> held paths, a read's single-path pass (`503` with `Retry-After` for a held path) and the
+> hourly tombstone expiry. `serve` runs it only when the database's IDs describe the mounted
+> vault, so it waits for format 2.
 
 ## 1. System context
 
@@ -65,6 +70,7 @@ Everything else consumes their interfaces.
 | `store/lock` | Instance lock (`flock`) and the vault mutex (one per vault; no per-file locks, ADR-0033) |
 | `store/auditfile` | The `file:` audit sink: an append-only JSON-lines file on a separate volume (§9). Filesystem I/O, so it lives under `store`. |
 | `vault` | Vault lifecycle and states, including maintenance mode |
+| `ids` | File identity kept in step with the vault (ADR-0031, ADR-0036): the startup scan, a read's single-path pass, the tombstone expiry. Plans without the vault mutex, applies under it through `vault` and `store/sql` |
 | `sync` | Debouncing of watcher hints, the reconciler, the per-vault event bus, SSE fan-out with replay and per-event authorization |
 | `gitvault` | The git state machine (ADR-0016): auto-commit batching, pull/push policy, crash repair |
 | `secrets` | gitleaks rules: synchronous save scan, commit gate, outgoing-range scan, findings |

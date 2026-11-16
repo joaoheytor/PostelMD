@@ -84,3 +84,13 @@ func decode(c byte) int {
 	}
 	return -1
 }
+
+// IDTime is the time in a valid ID's first ten characters (48 bits of milliseconds): when
+// PostelMD first saw the file. The scan uses it to tell an ID made after a file went missing.
+func IDTime(id string) time.Time {
+	var ms int64
+	for i := range 10 {
+		ms = ms<<5 | int64(decode(id[i]))
+	}
+	return time.UnixMilli(ms)
+}

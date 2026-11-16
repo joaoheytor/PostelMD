@@ -227,7 +227,12 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   - a trash item deleted under v0.1, with a stamp older than 7 days, survives the first
     v0.2 hour (its clock starts at the import);
   - a read of a pending path within 10 s of the suspect answers `503` with `Retry-After`,
-    and resolves the match after;
+    and resolves the match after (done at the scanner and handler levels:
+    `TestSeenOfAHeldPathWaitsThenResolves`, `TestReadOfAHeldPath`; inert until format 2
+    assigns IDs);
+  - the startup scan crashed at each row of ADR-0036's recovery table reaches that row's
+    outcome, the 10 s counted across the restart (process-kill model done:
+    `TestScanCrashPoints`, `TestApplyScanCrashPoints`; the power-loss model is #182);
   - `postelmd db rebuild` crashed at each step resumes, and an `app.db` without the intent's
     rebuild UUID is never taken for the new one; a start with `app.db` missing at format 2,
     or failing `quick_check`, refuses and changes nothing;
@@ -248,7 +253,8 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   - an outside `mv` of one of several identical files keeps its ID at once; a unique
     copy-and-delete keeps it after the second pass (pending until then); a `cp` over a freed
     inode, and a rename plus an edit, give new IDs; a path missing for one pass only keeps
-    its ID;
+    its ID (done in `internal/ids` on real vaults, the inode reuse in
+    `TestRenameRulesOnTheSignals`);
   - a save after an outside edit the scan hasn't seen gets `412` (the bytes are read, not the
     row); a save to a missing path gets `412 file-missing` without an ETag.
 - Search across 10k notes < 200 ms p95.

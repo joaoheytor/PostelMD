@@ -65,3 +65,4 @@ ID + generation ETag flips it.
 | [0033](0033-v02-intents.md) | v0.2 intents: saves, creates and structural operations | Proposed |
 | [0034](0034-app-db-before-format-2.md) | app.db in serve before data format 2 | Accepted |
 | [0035](0035-db-rollback.md) | `postelmd db rollback` and retiring `migrate.intent` | Accepted |
+| [0036](0036-the-startup-scan.md) | The startup scan: one transaction per pass, re-checked under the vault mutex | Accepted |

@@ -17,13 +17,14 @@ import (
 //   - the pre-setup gate (ADR-0009): until setup, only setup and health are served.
 //
 // ui is the built web app, served outside /api/ (nil when the binary has no UI); build is
-// what /api/v1/about tells a logged-in user.
-func NewRouter(a Auth, v Vault, ui fs.FS, build Build, log *slog.Logger) stdhttp.Handler {
+// what /api/v1/about tells a logged-in user; ids is nil until the vault's file IDs are
+// assigned (ADR-0031).
+func NewRouter(a Auth, v Vault, ids IDs, ui fs.FS, build Build, log *slog.Logger) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", ok)
 	(&AuthAPI{auth: a, importer: v, log: log}).register(mux)
-	notesAPI := routed(NewNotesAPI(v, log))
+	notesAPI := routed((&NotesAPI{notes: v, ids: ids, log: log}).mux())
 	private := stdhttp.NewServeMux()
 	private.Handle("/api/v1/notes/", notesAPI)
 	private.Handle("/api/v1/folders/", notesAPI)

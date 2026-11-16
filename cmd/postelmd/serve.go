@@ -97,7 +97,7 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer, ready func(
 		}
 		return err
 	}
-	gate.Ready(pmhttp.NewRouter(in.auth, in.vault, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log))
+	gate.Ready(pmhttp.NewRouter(in.auth, in.vault, in.ids, web.Dist(), pmhttp.Build{Version: version, Commit: commit}, log))
 	log.Info("ready")
 	if ready != nil {
 		ready(addr)
