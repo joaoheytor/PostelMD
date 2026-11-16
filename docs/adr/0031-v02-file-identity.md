@@ -196,3 +196,8 @@ check the ID's syntax before any lookup, check membership before choosing betwee
 ## Decisions on the review's open questions (maintainer may revisit)
 1. **Tombstones are kept 30 days**, apart from the trash's 7.
 2. **A swapped vault mount is detected** by the marker's UUID and refused.
+
+## Clarifications
+- **2026-11-16, the startup scan's mechanics.** How a pass is planned, re-checked and
+  committed, where its 10 s are measured from across a restart, and its recovery table are in
+  [ADR-0036](0036-the-startup-scan.md) (the IDs slice's third part).

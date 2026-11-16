@@ -44,12 +44,16 @@ const maxFiles = 50_000
 //	GET    /api/v1/files           every file's path, for the finder (at most maxFiles)
 type NotesAPI struct {
 	notes Notes
+	ids   IDs // nil until file IDs are assigned
 	log   *slog.Logger
 }
 
 // NewNotesAPI returns the notes API on a new mux.
 func NewNotesAPI(notes Notes, log *slog.Logger) *stdhttp.ServeMux {
-	a := &NotesAPI{notes: notes, log: log}
+	return (&NotesAPI{notes: notes, log: log}).mux()
+}
+
+func (a *NotesAPI) mux() *stdhttp.ServeMux {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("GET /api/v1/notes/{path...}", a.read)
 	mux.HandleFunc("PUT /api/v1/notes/{path...}", a.write)
@@ -68,6 +72,9 @@ func etag(r vault.Rev) string { return `"` + string(r) + `"` }
 
 func (a *NotesAPI) read(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	p := r.PathValue("path")
+	if a.held(w, r, p) {
+		return
+	}
 	b, rev, err := a.notes.Read(p)
 	if err != nil {
 		a.fail(w, r, err)

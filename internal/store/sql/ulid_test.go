@@ -25,7 +25,7 @@ func TestULIDFormat(t *testing.T) {
 	if !ValidID(id) {
 		t.Fatalf("ValidID(%q) = false", id)
 	}
-	if got := idTime(id); !got.Equal(at) {
+	if got := IDTime(id); !got.Equal(at) {
 		t.Fatalf("the ID's time = %v, want %v", got, at)
 	}
 }
@@ -100,15 +100,6 @@ func TestValidID(t *testing.T) {
 			t.Errorf("ValidID(%q) = %v, want %v", id, got, want)
 		}
 	}
-}
-
-// idTime is the time in a valid ID's first ten characters (48 bits of milliseconds).
-func idTime(id string) time.Time {
-	var ms int64
-	for i := range 10 {
-		ms = ms<<5 | int64(decode(id[i]))
-	}
-	return time.UnixMilli(ms)
 }
 
 var errBroken = errors.New("broken")

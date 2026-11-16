@@ -24,7 +24,7 @@ internal/
                        git/SQLite I/O
   audit/               security-relevant events: DB + external sink (rule 15)
   egress/              the single outbound HTTP client (rule 13)
-  vault/ sync/ gitvault/ secrets/ index/ auth/ keys/ plugins/ config/ setup/
+  vault/ ids/ sync/ gitvault/ secrets/ index/ auth/ keys/ plugins/ config/ setup/
   errattr/             log attributes for errors without the user text they quote (rule 15)
 web/
   src/core/            framework-free: doc store, save queue, sync engine, plugin host

@@ -13,7 +13,7 @@ import (
 
 // File identity in app.db (ADR-0031, migration 0002): the files, pending, tombstones and
 // trash_records tables, and three meta rows. This file has the first assignment and the
-// lookups; the scan's changes come with the scan.
+// lookups; the scan's writes and reads are in scan.go and scanrows.go.
 
 // The meta rows of file identity.
 const (
@@ -204,7 +204,10 @@ func (db *DB) FileByID(ctx context.Context, id string) (File, error) {
 	return scanFile(db.r.QueryRowContext(ctx, "SELECT "+fileColumns+" FROM files WHERE id = ?", id))
 }
 
-func scanFile(row *sql.Row) (File, error) {
+// scanner is a *sql.Row or *sql.Rows.
+type scanner interface{ Scan(dest ...any) error }
+
+func scanFile(row scanner) (File, error) {
 	var f File
 	var path []byte
 	var dev, ino int64
