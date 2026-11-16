@@ -139,9 +139,11 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   arguments, followed at most by ` 2>&1`, ` >/dev/null` (exactly; `2>/dev/null` asks) or
   pipes into `tail`, `head`, `grep`, `wc`, `cat`, `sort` or `uniq` without file arguments;
   PR/issue text and commit messages (`-m`, `-F <file>`, `-F - <<'EOF'` with no other stdin
-  redirect) are scanned for secrets. Local git commands may follow a literal
-  `cd <dir>` (`git -C` is preferred) into this project or one of its worktrees, and
-  `git fetch origin pull/<N>/head:<dst>` passes for `refs/remotes/review/…`,
+  redirect) are scanned for secrets. `cd` is allowed in any command (`cd web && npm test`)
+  while every target stays inside the project, its `.claude/worktrees/` included, at
+  both the logical and the physical path; `cd ..` out of the root, `cd`, `cd ~`, `cd -`,
+  an unknown `$VAR`, CDPATH, `pushd`, `popd` and `chdir` ask. Local git commands may follow
+  such a `cd` (`git -C` is preferred), and `git fetch origin pull/<N>/head:<dst>` passes for `refs/remotes/review/…`,
   `refs/scratch/…` or a new local `pr<N>…` branch. A command may
   start with literal assignments (`S=/tmp/x; git -C $S log`): the guard substitutes them
   and judges the result as typed; `export`, `$(…)` values, `S=x cmd` prefixes and zsh

@@ -38,7 +38,7 @@ import sys
 from bash_writes import SAFE_GIT, SAFE_GIT_ENV, repo_write_targets, tokens
 from commitmsg import CONVENTIONAL, SUBJECT, check as check_message
 from content import has_secret, public_reasons
-from gitdir import check as check_gitdir
+from gitdir import cd_outside, check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
 from gh_rules import output_filters as gh_output_filters
 from shparse import bare, indirect, segments, wrapped
@@ -226,6 +226,10 @@ def check_git(tool_input, cwd):
     if why:
         respond("ask", f"CAN'T PARSE: {why}. The guard's checks can't see this command as "
                        "bash will run it.")
+    why = cd_outside(cmd, cwd)
+    if why:
+        respond("ask", f"OUTSIDE THE PROJECT: {why}. settings.json allows cd only for the "
+                       "guard to check: a literal cd inside the project passes.")
     why = check_gitdir(cmd, cwd, git_out)
     if why:
         respond("ask", f"FOREIGN REPOSITORY: {why}.")
