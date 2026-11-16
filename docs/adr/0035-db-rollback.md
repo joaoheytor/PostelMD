@@ -104,8 +104,12 @@ idempotent and the next run reads the same state, so no second intent is needed.
 
 **While `rollback.intent` is there, `Open` refuses** (`ErrRollbackInterrupted`) before it
 creates or opens anything: the new build would otherwise resume the migration on a
-half-restored state. An older build can't know the file, but it refuses on `migrate.intent`
-until step 6, and after step 6 the database it finds is the restored one.
+half-restored state. A build without this command can't know the file. One whose last
+migration is older than `migrate.intent`'s refuses on it until step 6, and after step 6 the
+database it finds is the restored one. One with the same last migration (every build since
+#177, before this command) resumes the migration it names and can finish it; the re-run then
+finds `migrate.intent` gone while the snapshot hasn't moved, or the snapshot in both places,
+and refuses (below): the migration ran again, so the fix is forward.
 
 **A re-run with `rollback.intent` there** reads the files, never one signal alone:
 
@@ -141,17 +145,20 @@ it stops, keeps `rollback.intent`, and changes nothing more.
 **An older build started during steps 3 to 6** (after a crash; it doesn't know
 `rollback.intent`) creates a new, empty `app.db` where the original was moved, or opens the
 restored copy and changes its header, and then refuses on `migrate.intent`. The re-run
-refuses that file as interference. The fix, in the runbook: move `app.db`, `app.db-wal` and
-`app.db-shm` (those there) into a new `.postelmd/stray-<date>/` folder, then run
-`db rollback` again; it finds `app.db` gone with the original in the folder, and copies the
-snapshot again. If the original's WAL was still beside `app.db` when the older build opened
-it (a crash between two moves), SQLite checkpointed those frames into the stray file: the
-stray folder keeps them, so it is never deleted either.
+refuses that file as interference (it isn't the snapshot's copy, or a WAL, shared-memory or
+journal file is beside it). The fix, in the runbook: move `app.db`, `app.db-wal`,
+`app.db-shm` and `app.db-journal` (those there) into a new `.postelmd/stray-<date>/` folder,
+then run `db rollback` again; it finds `app.db` gone with the original in the folder, and
+copies the snapshot again. If the original's WAL was still beside `app.db` (a crash between
+two moves), SQLite deleted it when it created the new database beside it; it held only the
+failed migration's work, which the rollback discards anyway. The stray folder is still moved
+aside, never deleted.
 
 ## Consequences
 - Positive: after a failed or interrupted migration, one command brings back the database
   the previous build wrote, and that build starts. A re-upgrade then runs the migration again
-  with a new snapshot. Nothing is deleted.
+  with a new snapshot. The command deletes nothing: the database it replaces, its WAL files
+  and the snapshot go into the rollback folder.
 - Negative / costs: after a migration finished (its markers exist) the command refuses, by
   design: at format 1 the runbook's move-aside still applies (the database holds only the
   boot ID). From format 2 on, a finished migration means fixing forward or ADR-0017's

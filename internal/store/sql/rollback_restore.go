@@ -185,7 +185,8 @@ func moveAside(stateDir, d string) error {
 func noneBeside(db string) error {
 	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
 		if _, err := os.Lstat(db + suffix); err == nil {
-			return interference(fmt.Errorf("an app.db%s is beside the restored database", suffix))
+			return interference(fmt.Errorf("an app.db%s is beside app.db; move app.db and the files beside it "+
+				"into a new folder, then run this again", suffix))
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}

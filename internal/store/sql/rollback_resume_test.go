@@ -108,7 +108,8 @@ func TestRollbackRefusesAWALBesideTheRestoredFileAfterACrash(t *testing.T) {
 		t.Fatalf("the helper wasn't killed: %v\n%s", err, out)
 	}
 	writeFile(t, filepath.Join(dir, AppDB+"-wal"), []byte("stale"))
-	assertInterference(t, dir, fsys, "beside the restored database")
+	// Neutral: the file at app.db may be a stray one an older build made, not the copy.
+	assertInterference(t, dir, fsys, "an app.db-wal is beside app.db; move app.db and the files beside it")
 }
 
 // A well-formed rollback intent for another build's migration is refused before anything
@@ -144,6 +145,39 @@ func TestRollbackFinishesAfterThePreviousBuildStarted(t *testing.T) {
 		t.Fatalf("the next run: %v", err)
 	}
 	assertRolledBack(t, dir, r, from, from+2)
+}
+
+// A build with the same last migration that doesn't know rollback.intent (every :main
+// build since the migration shipped, before this command) started after a crash: it finds
+// migrate.intent naming its own last migration, resumes and finishes the migration. The
+// next run of db rollback refuses, keeping its intent: the migration ran again, so the fix
+// is forward.
+func TestRollbackRefusesAfterTheMigrationRanAgain(t *testing.T) {
+	for _, c := range []struct{ at, want string }{
+		{"rollback-dir-made:1", "migrate.intent is gone, but the snapshot hasn't moved"},
+		{"rollback-restored-synced:1", "migrate.intent is gone, but the snapshot hasn't moved"},
+		{"rollback-snapshot-moved:1", "the snapshot is in both places"},
+	} {
+		t.Run(c.at, func(t *testing.T) {
+			dir, fsys, from := failedMigration(t)
+			if out, err := runRollbackHelper(t, dir, c.at); !killed(err) {
+				t.Fatalf("the helper wasn't killed: %v\n%s", err, out)
+			}
+			rb := filepath.Join(dir, RollbackIntent)
+			body, err := os.ReadFile(rb) //nolint:gosec // G304: the test's own temp folder
+			if err != nil {
+				t.Fatal(err)
+			}
+			must(t, os.Remove(rb)) // that build doesn't know the file
+			good, _ := laterMigrations(t, 2)
+			openWith(t, dir, good)
+			if _, err := os.Lstat(filepath.Join(dir, markerName(from, from+2))); err != nil {
+				t.Fatalf("that build didn't finish the migration: %v", err)
+			}
+			writeFile(t, rb, body)
+			assertInterference(t, dir, fsys, c.want)
+		})
+	}
 }
 
 // A copy of the snapshot that fails its check is never put in place.

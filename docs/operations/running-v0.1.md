@@ -515,17 +515,29 @@ If it refuses:
   upgrade. Don't move `app.db` aside as for a damaged database: `migrate.intent` would stay,
   and the previous image would still refuse.
 - `rollback.intent stays`, with `app.db is neither the moved database nor the snapshot's
-  copy`: a server (an older image, after a crash) started while the rollback was unfinished
-  and left its own `app.db`. Move it aside, keep it (it may hold what the old WAL held), and
-  run step 3 again:
+  copy`, or `an app.db-wal` (`-shm`, `-journal`) `is beside app.db`: a server (an older
+  image, after a crash) started while the rollback was unfinished and left its own `app.db`.
+  Move it and the files beside it aside, never delete them, and run step 3 again. (If the
+  failed migration's WAL was beside it, SQLite deleted that WAL when it created the new
+  database; it held only the migration's work, which the rollback discards anyway.)
 
   ```sh
   d="$data/.postelmd/stray-$(date +%F-%H%M%S)"
-  mkdir -m 700 "$d" && for f in app.db app.db-wal app.db-shm; do
-    if [ -e "$data/.postelmd/$f" ]; then mv "$data/.postelmd/$f" "$d/"; fi
-  done && echo "moved into $d"
+  if mkdir -m 700 "$d"; then
+    ok=yes
+    for f in app.db app.db-wal app.db-shm app.db-journal; do
+      if [ -e "$data/.postelmd/$f" ]; then mv "$data/.postelmd/$f" "$d/" || ok=; fi
+    done
+    if [ -n "$ok" ]; then echo "moved into $d"; else echo "STRAY MOVE STOPPED: a file didn't move; see $d" >&2; fi
+  else
+    echo "STRAY MOVE STOPPED: can't create $d" >&2
+  fi
   ```
 
+- `rollback.intent stays`, with `migrate.intent is gone, but the snapshot hasn't moved` or
+  `the snapshot is in both places`: a server of the new version started while the rollback
+  was unfinished and ran the migration again. Don't roll back: fix forward with a newer
+  image, or restore the backup you took before the upgrade, and report the whole message.
 - any other `rollback.intent stays`: start no server, and report the whole message.
 
 If it stops part way (a crash, a full disk), run step 3 again: it finishes from where it
