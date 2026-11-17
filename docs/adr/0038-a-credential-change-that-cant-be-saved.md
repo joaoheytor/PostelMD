@@ -1,6 +1,6 @@
 # ADR-0038: A credential change that can't be saved
 
-- **Status:** Accepted (with [#188](https://github.com/joaoheytor/PostelMD/pull/188), the first code that depends on it)
+- **Status:** Accepted (with [#188](https://github.com/joaoheytor/PostelMD/pull/188), the first code that depends on it); its "Held in memory, saved later" bullet is superseded by [ADR-0039](0039-a-held-credential-is-retried-at-most-every-five-seconds.md)
 - **Date:** 2026-11-17
 
 ## Context
