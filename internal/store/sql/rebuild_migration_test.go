@@ -33,6 +33,12 @@ func TestRebuildTakesOverAMigrationRollbackCantUndo(t *testing.T) {
 		{"a post-migration-started row", func(t *testing.T, dir string, from int) {
 			rawSet(t, dir, "INSERT INTO meta (key, value) VALUES ('"+markerKey(from, from+2)+"', '1')")
 		}},
+		{"the snapshot has another version", func(t *testing.T, dir string, from int) {
+			b, err := os.ReadFile(filepath.Join(dir, AppDB)) //nolint:gosec // G304: the test's own state folder
+			must(t, err)
+			mustRemove(t, filepath.Join(dir, snapshotName(from, from+2)))
+			writeFile(t, filepath.Join(dir, snapshotName(from, from+2)), b) // app.db is past from
+		}},
 		{"the snapshot doesn't verify", func(t *testing.T, dir string, from int) {
 			mustRemove(t, filepath.Join(dir, snapshotName(from, from+2)))
 			writeFile(t, filepath.Join(dir, snapshotName(from, from+2)), []byte(strings.Repeat("x", 4096)))
@@ -77,6 +83,19 @@ func TestRebuildRefusesAMigrationForOtherReasons(t *testing.T) {
 			setup: func(t *testing.T, dir string) { writeFile(t, filepath.Join(dir, AppDB+".tmp"), nil) }},
 		{name: "the rollback folder already there", want: "already there",
 			setup: func(t *testing.T, dir string) { mustMkdir(t, filepath.Join(dir, rollbackDirName(rebuildNow))) }},
+		{name: "the snapshot unreadable", want: "snapshot doesn't verify",
+			setup: func(t *testing.T, dir string) {
+				if os.Geteuid() == 0 {
+					t.Skip("root reads a file without read permission")
+				}
+				es, err := os.ReadDir(dir)
+				must(t, err)
+				for _, e := range es {
+					if strings.HasPrefix(e.Name(), "pre-migrate-") && strings.HasSuffix(e.Name(), ".db") {
+						must(t, os.Chmod(filepath.Join(dir, e.Name()), 0))
+					}
+				}
+			}},
 		{name: "migrate.intent unreadable", want: "permission denied",
 			setup: func(t *testing.T, dir string) {
 				if os.Geteuid() == 0 {

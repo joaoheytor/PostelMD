@@ -182,7 +182,11 @@ func checkEligible(ctx context.Context, stateDir string, last int, rb *rollbackI
 	if err := verifySnapshot(ctx, snap, in.From); err != nil {
 		// Not the cause's text: ErrDamaged's fix (move app.db aside) is for a start, and
 		// would leave migrate.intent behind, so the previous build would still refuse.
-		return false, pastRollback{errNoRestore("the pre-migration snapshot doesn't verify")}
+		e := errNoRestore("the pre-migration snapshot doesn't verify")
+		if errors.As(err, new(badSnapshot)) { // its content, not a permission or I/O error
+			return false, pastRollback{e}
+		}
+		return false, e
 	}
 	if _, err := os.Lstat(filepath.Join(stateDir, rb.Dir)); !errors.Is(err, fs.ErrNotExist) {
 		return false, errors.Join(fmt.Errorf("%s is already there; run this again in a second", rb.Dir), err)

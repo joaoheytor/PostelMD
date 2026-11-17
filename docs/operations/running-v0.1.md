@@ -793,11 +793,12 @@ same way: a folder on the host (`bind`) as your user, with the notes folder if y
 one; a named volume (`volume`) by its own name, as the image's user, which owns it. It reads
 the volume's name from the container, since a guessed one (with Compose it is
 `<project>_postelmd-data`) would silently create a new, empty volume. It runs nothing when
-a value is missing. Set `c` to your container's name, and the command on the `set --` line:
+a value is missing. Set `c` to your container's name, and the command on the `set --` line;
+for `vault claim`, make that line `set -- vault claim; it=-it`:
 
 ```sh
 c=postelmd
-set -- db rebuild; it=                # for vault claim: set -- vault claim; it=-it
+set -- db rebuild; it=
 m=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}} {{.Name}}{{end}}{{end}}' "$c")
 data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$c")
 notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' "$c")

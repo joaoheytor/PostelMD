@@ -188,17 +188,32 @@ func verifySnapshot(ctx context.Context, snap string, from int) error {
 	}
 	v, err := checkCopy(ctx, snap)
 	if err != nil {
-		return errors.Join(ErrMigrateInterference, err)
+		e := errors.Join(ErrMigrateInterference, err)
+		// The integrity check failing is a bare ErrBadCopy; SQLite's own verdict is ErrDamaged.
+		if errors.Is(damaged(err), ErrDamaged) || err == ErrBadCopy { //nolint:errorlint // checkCopy returns the bare sentinel for a failed check
+
+			return badSnapshot{e}
+		}
+		return e
 	}
 	killPoint("snapshot-rechecked")
 	if after, err := os.Lstat(snap); err != nil || !os.SameFile(before, after) {
 		return fmt.Errorf("%w (the snapshot was replaced while it was verified)", ErrMigrateInterference)
 	}
 	if v != from {
-		return fmt.Errorf("%w (the snapshot has version %d, not %d)", ErrMigrateInterference, v, from)
+		return badSnapshot{fmt.Errorf("%w (the snapshot has version %d, not %d)", ErrMigrateInterference, v, from)}
 	}
 	return nil
 }
+
+// badSnapshot marks verifySnapshot's refusals that are about the snapshot's content: SQLite
+// finds it damaged or not a database, its integrity check fails, or its version isn't the
+// migration's. A permission or I/O error, or a snapshot replaced meanwhile, isn't marked
+// (ADR-0040: db rebuild takes a migration over only for the content). Its text is the
+// refusal's own.
+type badSnapshot struct{ error }
+
+func (e badSnapshot) Unwrap() error { return e.error }
 
 // checkPlanted refuses, before the migration's first side effect, what none of its steps
 // leaves: a file beside the snapshot or its temp that SQLite would open with it (a FIFO there

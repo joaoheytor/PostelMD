@@ -74,7 +74,9 @@ changing nothing:
   migration over only when rollback refuses because `app.db` is absent or not a regular
   file; `app.db` is damaged or isn't a database (SQLite says so; a permission or I/O error
   doesn't count); the new version started (a `post-migration-started` file or row); or the
-  snapshot doesn't verify. Each of those four is marked where rollback's check finds it,
+  snapshot's content doesn't verify (SQLite finds it damaged, its integrity check fails, or
+  its version isn't the migration's; a permission or I/O error, or a snapshot replaced while
+  it was verified, doesn't count). Each of those four is marked where rollback's check finds it,
   never inferred from its text;
 - the vault can't be read; the vault marker is a symlink, a folder or a special file;
 - what step 4's `vault.Open` would refuse on: adoption's check (ADR-0027: a reserved folder
