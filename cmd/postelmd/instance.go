@@ -40,7 +40,7 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 		return nil, err
 	}
 	in := &instance{db: db}
-	if in.auth, err = auth.OpenDir(paths.State, audit.New(log)); err != nil {
+	if in.auth, err = auth.OpenDir(paths.State, audit.New(log), log); err != nil {
 		in.close(log, true)
 		return nil, err
 	}

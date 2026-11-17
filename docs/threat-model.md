@@ -22,7 +22,12 @@ The MVP adds:
 - **a stolen session cookie** is valid until it expires (7 days) or the password changes;
   one session can't be revoked server-side. Mitigations: `HttpOnly`, `SameSite=Lax`,
   `Secure` on TLS, "log out everywhere" bumps the epoch, and a password change needs the
-  current password, so a stolen cookie can't lock the owner out;
+  current password, so a stolen cookie can't lock the owner out. When `auth.json` can't be
+  saved, both still take effect in memory (ADR-0038, #187): the epoch jumps by a random
+  32-bit amount so a later bump never reuses it, and every login and session check retries
+  the save. Until a save succeeds, a restart undoes the change: the old sessions and the old
+  password are back. The request, a warning in the log and the audit record (`saved=false`)
+  say so, and the user must log in (with the old password, after a restart) and repeat it;
 - **`auth.json` and `secret.key`** in `/data/.postelmd/` (`0600`, reserved paths) are the
   whole credential: anyone who can read the volume can forge sessions, as with the key ring
   in the full design;
