@@ -219,7 +219,10 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
     `purging` record is `409`), crashed at every step, reach ADR-0003's rows;
   - the v0.1 → v0.2 upgrade crashed at each of its five steps resumes from its intent
     (ADR-0041; process-kill model done: `TestUpgradeCrashPoints`,
-    `TestUpgradeIntentCrashPoints`, not yet run at start);
+    `TestUpgradeIntentCrashPoints`; step 1's power-loss model:
+    `TestCopyPreFormat2SurvivesAPowerLossAtEveryStep`; not yet run at start); an upgrade
+    that can't finish is taken over by `db rebuild` (`TestRebuildTakesOverAStuckUpgrade`,
+    `TestRebuildTakeoverCrashPoints`), a resumable one isn't;
     a v0.1 binary refuses the result; a vault marker naming another UUID, or a UUID with no
     `app.db`, is refused; at format 2, an empty vault mount (marker absent) and a different
     v0.1 vault (empty marker, identity check fails) are refused and nothing is tombstoned;

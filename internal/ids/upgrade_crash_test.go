@@ -87,7 +87,7 @@ func readUpLeft(t *testing.T, e *env, u sqlstore.Upgrade) upLeft {
 //	|--------------------------|---------------------------------------|------------------------|
 //	| upgrade-intent-written   | the intent                            | step 1 on              |
 //	| upgrade-copy-moved-aside | the incomplete copy moved aside       | a new copy, on         |
-//	| upgrade-copied (1st)     | a partial pre-format-2/               | moves it aside, on     |
+//	| upgrade-copied (1st, 2nd)| a partial pre-format-2/               | moves it aside, on     |
 //	| upgrade-copy-complete    | pre-format-2/ complete                | keeps it, assigns, on  |
 //	| upgrade-assigned         | the flag with the intent's UUID       | marker, format         |
 //	| upgrade-marker-written   | the marker                            | marker again, format   |
@@ -100,6 +100,7 @@ func TestUpgradeCrashPoints(t *testing.T) {
 		{"upgrade-intent-written", upLeft{copy: "partial"}},
 		{"upgrade-copy-moved-aside", upLeft{aside: true}},
 		{"upgrade-copied:1", upLeft{copy: "partial", aside: true}},
+		{"upgrade-copied:2", upLeft{copy: "partial", aside: true}},
 		{"upgrade-copy-complete", upLeft{copy: "complete", aside: true}},
 		{"upgrade-assigned", upLeft{copy: "complete", aside: true, flag: true}},
 		{"upgrade-marker-written", upLeft{copy: "complete", aside: true, flag: true, marked: true}},

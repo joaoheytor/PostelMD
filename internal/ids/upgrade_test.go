@@ -89,6 +89,60 @@ func TestUpgrade(t *testing.T) {
 	}
 }
 
+// TestUpgradeMovesAsideAnEarlierUpgradesCopy: an upgrade, a rollback that left
+// pre-format-2/ in place, a password reset, then a fresh upgrade: the earlier copy, with the
+// revoked hash, is moved aside, and pre-format-2/ holds today's credentials (ADR-0041).
+func TestUpgradeMovesAsideAnEarlierUpgradesCopy(t *testing.T) {
+	e := v01Env(t)
+	old := filepath.Join(e.state, layout.PreFormat2)
+	must(t, os.Mkdir(old, 0o700))
+	must(t, os.WriteFile(filepath.Join(old, "auth.json"), []byte("revoked"), 0o600))
+	must(t, os.WriteFile(filepath.Join(old, "complete"), []byte(testVaultUUID+" 2026-01-01T00:00:00Z\n"), 0o600))
+	u, err := Upgrade(ctx, e.db, e.v, upgradeOpts(e))
+	must(t, err)
+	if u.KeptCopy {
+		t.Fatal("an earlier upgrade's copy was kept")
+	}
+	checkUpgraded(t, e, u.VaultUUID)
+	if b, _ := os.ReadFile(filepath.Join(old, "auth.json")); string(b) != "{}" { //nolint:gosec // G304: the test's state
+		t.Fatalf("pre-format-2/auth.json = %q, want today's", b)
+	}
+	aside := filepath.Join(e.state, layout.PreFormat2+"-"+u.Stamp(), "auth.json")
+	if b, err := os.ReadFile(aside); err != nil || string(b) != "revoked" { //nolint:gosec // G304: the test's state
+		t.Fatalf("the earlier copy moved aside: %q, %v", b, err)
+	}
+}
+
+// TestUpgradeStopsOnASymlinkedSource after its intent: step 1 refuses, the intent stays and
+// nothing else changes; once the file is fixed, the next start finishes the same upgrade.
+func TestUpgradeStopsOnASymlinkedSource(t *testing.T) {
+	e := v01Env(t)
+	auth := filepath.Join(e.state, "auth.json")
+	must(t, os.Remove(auth))
+	must(t, os.Symlink(filepath.Join(t.TempDir(), "x"), auth))
+	if _, err := Upgrade(ctx, e.db, e.v, upgradeOpts(e)); err == nil {
+		t.Fatal("Upgrade copied through a symlinked auth.json")
+	}
+	in, err := sqlstore.ReadUpgradeIntent(e.state)
+	if err != nil || in == nil {
+		t.Fatalf("the intent after the refusal: %v, %v", in, err)
+	}
+	if _, err := os.Lstat(filepath.Join(e.state, layout.PreFormat2)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the refusal wrote pre-format-2/: %v", err)
+	}
+	if id, _ := e.db.Identity(ctx); id.Assigned {
+		t.Fatal("the refusal assigned IDs")
+	}
+	must(t, os.Remove(auth))
+	must(t, os.WriteFile(auth, []byte("{}"), 0o600))
+	u, err := Upgrade(ctx, e.db, e.v, upgradeOpts(e))
+	must(t, err)
+	if !u.Resumed || u.VaultUUID != in.VaultUUID {
+		t.Fatalf("the next start: %+v, want the intent's upgrade resumed", u)
+	}
+	checkUpgraded(t, e, in.VaultUUID)
+}
+
 // TestUpgradeRefuses what isn't a first upgrade to resume or start, changing nothing.
 func TestUpgradeRefuses(t *testing.T) {
 	const other = "00000000-0000-4000-8000-000000000000"
@@ -108,6 +162,11 @@ func TestUpgradeRefuses(t *testing.T) {
 			p := filepath.Join(e.dir, vault.TmpDir, ".created-by-postelmd")
 			must(t, os.Remove(p))
 			must(t, os.Mkdir(p, 0o700))
+		}, vault.ErrMarkerNotAFile, false},
+		{"marker is a symlink", func(e *env) {
+			p := filepath.Join(e.dir, vault.TmpDir, ".created-by-postelmd")
+			must(t, os.Remove(p))
+			must(t, os.Symlink(filepath.Join(t.TempDir(), "x"), p))
 		}, vault.ErrMarkerNotAFile, false},
 		{"flag set under another UUID than the intent's", func(e *env) {
 			_, err := sqlstore.BeginUpgrade(e.state, rebuildNow)

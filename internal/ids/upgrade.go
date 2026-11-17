@@ -78,7 +78,8 @@ func Upgrade(ctx context.Context, db *sqlstore.DB, v *vault.Vault, o UpgradeOpti
 	}
 	out.Upgrade = *in
 	killPoint("upgrade-intent-written")
-	if out.KeptCopy, err = layout.CopyPreFormat2(o.State, in.Stamp(), copyStep, o.FS...); err != nil {
+	tag := in.VaultUUID + " " + in.Time + "\n" // binds pre-format-2/ to this upgrade (ADR-0041)
+	if out.KeptCopy, err = layout.CopyPreFormat2(o.State, in.Stamp(), tag, copyStep, o.FS...); err != nil {
 		return out, err
 	}
 	if !id.Assigned {

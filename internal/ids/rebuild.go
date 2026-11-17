@@ -59,7 +59,7 @@ func Rebuild(ctx context.Context, o RebuildOptions) (Rebuilt, error) {
 		if err := vault.CheckOpenable(o.Vault, o.FS...); err != nil {
 			return out, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, err)
 		}
-		b, err := sqlstore.BeginRebuild(ctx, o.State, o.Now)
+		b, err := beginRebuild(ctx, o)
 		if err != nil {
 			return out, err
 		}
@@ -91,6 +91,36 @@ func Rebuild(ctx context.Context, o RebuildOptions) (Rebuilt, error) {
 	}
 	killPoint("rebuild-format-written")
 	return out, sqlstore.FinishRebuild(o.State)
+}
+
+// beginRebuild writes rebuild.intent. Beside upgrade.intent it takes the first upgrade over
+// only when it can't finish (sqlstore.StuckUpgrade; ADR-0041), and otherwise refuses, saying
+// to start the server so the upgrade finishes.
+func beginRebuild(ctx context.Context, o RebuildOptions) (sqlstore.Rebuild, error) {
+	if sqlstore.UpgradeUnderWay(o.State) == nil {
+		return sqlstore.BeginRebuild(ctx, o.State, o.Now)
+	}
+	reason, err := sqlstore.StuckUpgrade(ctx, o.State, func(vaultUUID string) (bool, error) {
+		m, err := vault.ReadMarker(o.Vault, o.FS...)
+		switch {
+		case errors.Is(err, vault.ErrMarkerNotAFile):
+			return false, err
+		case errors.Is(err, vault.ErrBadMarker):
+			return true, nil
+		case err != nil:
+			return false, err
+		}
+		return m.VaultUUID != "" && m.VaultUUID != vaultUUID, nil
+	})
+	switch {
+	case err != nil:
+		return sqlstore.Rebuild{}, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, err)
+	case reason == "":
+		return sqlstore.Rebuild{}, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, sqlstore.ErrUpgradeInProgress)
+	}
+	o.Log.Warn("db rebuild takes over a first upgrade that can't finish; its upgrade.intent goes into the damaged folder",
+		"reason", reason)
+	return sqlstore.BeginRebuildOverUpgrade(ctx, o.State, o.Now)
 }
 
 // temps is step 3's handler: each temp is kept in r's recovery folder; an entry left in

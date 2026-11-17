@@ -62,7 +62,7 @@ func dbRebuild(cfg config.Config, stdout io.Writer) error {
 		}
 		audit.New(log).Record(ctx, "db.rebuilt", slog.String("rebuild_uuid", r.UUID),
 			slog.String("vault_uuid", r.VaultUUID), slog.Bool("resumed", r.Resumed), slog.Bool("had_db", r.HadDB),
-			slog.Int("files", r.Files), slog.Int("temps_kept", r.Kept))
+			slog.Int("files", r.Files), slog.Int("temps_kept", r.Kept), slog.Bool("took_over_upgrade", r.Upgrade))
 		_, err = fmt.Fprint(stdout, rebuildMessage(r))
 		return err
 	})
@@ -82,6 +82,10 @@ func rebuildMessage(r ids.Rebuilt) string {
 	if len(r.Moves) > 0 {
 		fmt.Fprintf(&b, "The old database's files are in .postelmd/%s/ (never removed automatically).\n",
 			r.DamagedDir())
+	}
+	if r.Upgrade {
+		fmt.Fprintf(&b, "It took over a first upgrade that couldn't finish: its upgrade.intent is in .postelmd/%s/, "+
+			"and .postelmd/pre-format-2/, if the upgrade made one, stays where it is.\n", r.DamagedDir())
 	}
 	if r.Kept > 0 {
 		fmt.Fprintf(&b, "%d temp files of unfinished saves are in .postelmd/%s/.\n", r.Kept, r.RecoveryDir())

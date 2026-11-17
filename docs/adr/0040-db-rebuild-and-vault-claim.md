@@ -1,6 +1,6 @@
 # ADR-0040: `db rebuild`, `vault claim` and the identity check: their mechanics
 
-- **Status:** Accepted (with the IDs slice's fourth part, second PR, the first code that depends on it). Supersedes two parts of [ADR-0030](0030-v02-storage-sqlite.md)'s `db rebuild`: step 2's file list, and step 3's "left in place"
+- **Status:** Accepted (with the IDs slice's fourth part, second PR, the first code that depends on it). Supersedes two parts of [ADR-0030](0030-v02-storage-sqlite.md)'s `db rebuild`: step 2's file list, and step 3's "left in place". Its step 2 file list is extended by [ADR-0041](0041-the-first-upgrades-intent.md) (an `upgrade.intent` it takes over moves too)
 - **Date:** 2026-11-17
 
 ## Context

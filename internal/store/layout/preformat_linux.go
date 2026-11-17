@@ -20,15 +20,17 @@ const preFormat2Complete = "complete"
 // preFormat2Files are copied when present, in this order.
 var preFormat2Files = []string{formatFile, "auth.json", "secret.key", "config.yaml"}
 
-// CopyPreFormat2 is the first upgrade's step 1. A pre-format-2/ with its complete file is
-// kept (kept is true: a resumed upgrade). One without it is first moved aside, with
-// RENAME_NOREPLACE, to pre-format-2-<stamp>/ (or -<stamp>-<n>), never written over. Then each
-// file present is copied as <name>.tmp (0600, O_EXCL, fsync) renamed to <name>, the folder is
-// synced, and its empty complete file is created and synced. Every source is read before
+// CopyPreFormat2 is the first upgrade's step 1. A pre-format-2/ whose complete file is a
+// regular file holding tag, the upgrade's own (its intent's vault UUID and time), is kept
+// (kept is true: this upgrade, resumed). Any other is first moved aside, with
+// RENAME_NOREPLACE, to pre-format-2-<stamp>/ (or -<stamp>-<n>), never written over or kept:
+// an earlier upgrade's copy may hold credentials since revoked. Then each file present is
+// copied as <name>.tmp (0600, O_EXCL, fsync) renamed to <name>, the folder is synced, and its
+// complete file is created with tag and synced, and the folder synced again. Every source is read before
 // anything is written, so a source that isn't a regular file refuses with nothing changed.
 // step, if not nil, is called with "moved-aside", "copied" (after each file) and "complete":
 // the crash test's kill points. The caller holds the instance lock.
-func CopyPreFormat2(state, stamp string, step func(string), opts ...fs.Option) (kept bool, err error) {
+func CopyPreFormat2(state, stamp, tag string, step func(string), opts ...fs.Option) (kept bool, err error) {
 	if step == nil {
 		step = func(string) {}
 	}
@@ -37,7 +39,7 @@ func CopyPreFormat2(state, stamp string, step func(string), opts ...fs.Option) (
 		return false, err
 	}
 	defer func() { _ = r.Close() }()
-	exists, complete, err := preFormat2State(r)
+	exists, complete, err := preFormat2State(r, tag)
 	if err != nil || complete {
 		return complete, err
 	}
@@ -51,25 +53,28 @@ func CopyPreFormat2(state, stamp string, step func(string), opts ...fs.Option) (
 		}
 		step("moved-aside")
 	}
-	return false, writeCopy(r, srcs, step)
+	return false, writeCopy(r, srcs, tag, step)
 }
 
-// preFormat2State reports whether pre-format-2/ is there and complete. A symlink or a file
-// at its name is refused.
-func preFormat2State(r *fs.Root) (exists, complete bool, err error) {
-	es, err := r.ReadDir(PreFormat2)
+// preFormat2State reports whether pre-format-2/ is there, and whether this upgrade completed
+// it: its complete file is a regular file holding tag. A symlink or a file at the folder's
+// name is refused.
+func preFormat2State(r *fs.Root, tag string) (exists, complete bool, err error) {
+	_, err = r.ReadDir(PreFormat2)
 	switch {
 	case errors.Is(err, iofs.ErrNotExist):
 		return false, false, nil
 	case err != nil:
 		return false, false, fmt.Errorf("layout: %s isn't a folder PostelMD made; move it aside: %w", PreFormat2, err)
 	}
-	for _, e := range es {
-		if e.Name() == preFormat2Complete && e.Type().IsRegular() {
-			return true, true, nil
-		}
+	b, err := r.ReadFile(PreFormat2 + "/" + preFormat2Complete)
+	switch {
+	case errors.Is(err, iofs.ErrNotExist), errors.Is(err, fs.ErrSymlink), errors.Is(err, fs.ErrNotRegular):
+		return true, false, nil
+	case err != nil:
+		return true, false, fmt.Errorf("layout: read %s/%s: %w", PreFormat2, preFormat2Complete, err)
 	}
-	return true, false, nil
+	return true, string(b) == tag, nil
 }
 
 type source struct {
@@ -112,7 +117,7 @@ func moveAside(r *fs.Root, stamp string) error {
 	}
 }
 
-func writeCopy(r *fs.Root, srcs []source, step func(string)) error {
+func writeCopy(r *fs.Root, srcs []source, tag string, step func(string)) error {
 	if err := r.Mkdir(PreFormat2); err != nil {
 		return fmt.Errorf("layout: create %s: %w", PreFormat2, err)
 	}
@@ -132,7 +137,7 @@ func writeCopy(r *fs.Root, srcs []source, step func(string)) error {
 	if err := r.SyncDir(PreFormat2); err != nil {
 		return err
 	}
-	if err := r.CreateFile(PreFormat2+"/"+preFormat2Complete, nil, 0o600); err != nil {
+	if err := r.CreateFile(PreFormat2+"/"+preFormat2Complete, []byte(tag), 0o600); err != nil {
 		return fmt.Errorf("layout: complete %s: %w", PreFormat2, err)
 	}
 	if err := r.SyncDir(PreFormat2); err != nil {

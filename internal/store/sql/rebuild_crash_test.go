@@ -27,7 +27,11 @@ func rebuildSteps(dir string, attempt bool) (Rebuild, error) {
 		return Rebuild{}, err
 	}
 	if r == nil {
-		b, err := BeginRebuild(ctx, dir, rebuildNow)
+		begin := BeginRebuild
+		if exists(dir, UpgradeIntent) { // a first upgrade db rebuild takes over (ADR-0041)
+			begin = BeginRebuildOverUpgrade
+		}
+		b, err := begin(ctx, dir, rebuildNow)
 		if err != nil {
 			return b, err
 		}
