@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 
 	"github.com/joaoheytor/PostelMD/internal/config"
 	pmhttp "github.com/joaoheytor/PostelMD/internal/http"
@@ -27,4 +28,14 @@ func startIDs(context.Context, appDB, *vault.Vault, string, *slog.Logger) (pmhtt
 // dbRollback is unsupported outside Linux, like the store it needs.
 func dbRollback(_ config.Config, _ io.Writer) error {
 	return fmt.Errorf("db rollback: %w", errors.ErrUnsupported)
+}
+
+// dbRebuild is unsupported outside Linux, like the store it needs.
+func dbRebuild(_ config.Config, _ io.Writer) error {
+	return fmt.Errorf("db rebuild: %w", errors.ErrUnsupported)
+}
+
+// vaultClaim is unsupported outside Linux, like the store it needs.
+func vaultClaim(_ config.Config, _ *os.File, _ io.Writer) error {
+	return fmt.Errorf("vault claim: %w", errors.ErrUnsupported)
 }

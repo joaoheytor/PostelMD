@@ -62,6 +62,10 @@ Nothing important lives anywhere else:
 | `vaults/notes/.git/` | The vault's git history (your commits) |
 | `vaults/notes/.postelmd-trash/` | Deleted notes and folders (not in git) |
 | `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-1-2.db` (the database as it was before that upgrade) and `post-migration-started-1-2` (a record that the upgrade finished): keep both with `app.db` |
+| `.postelmd/rollback-<time>/` | Written by `db rollback` (any data format): the database it replaced, with its `-wal` and `-shm`, and the pre-migration copy it restored from |
+| `.postelmd/damaged-<time>/` | From data format 2: the database files `db rebuild` moved aside (and any `attempt-<n>/` it made); the only copy of the old file IDs |
+| `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept |
+| `.postelmd/rebuild.intent` | Only while a `db rebuild` is unfinished: back it up with the rest, and restore it with them, so the restored instance finishes that rebuild |
 
 If you adopted a folder with `-v ~/notes:/data/vaults/notes`, back up `~/notes` too: it
 holds the notes, `.git` and `.postelmd-trash`, and `~/postelmd` holds the rest.
@@ -340,16 +344,25 @@ Count them in the newest export (the setup lines aren't JSON, hence `fromjson?`)
 ```sh
 f=$(ls -t ~/postelmd-logs-*.jsonl | head -n 1)
 # 5xx except a busy 503; every 503 after a read_only record counts (see below)
-jq -cnR '[inputs | fromjson?] | (map(.event == "read_only") | index(true)) as $ro
-  | to_entries[] | select(.value.msg == "request" and .value.status >= 500
-    and (.value.status != 503 or ($ro != null and .key > $ro))) | .value' "$f"
-jq -cR 'fromjson? | select(.msg == "request" and .status == 412)' "$f" | wc -l
+jq -cnR 'foreach (inputs | fromjson? | objects) as $r (false;
+    if $r.msg == "listening" then false elif $r.event == "read_only" then true else . end;
+    select($r.msg == "request" and $r.status >= 500 and ($r.status != 503 or .)) | $r)' "$f"
+jq -cR 'fromjson? | objects | select(.msg == "request" and .status == 412)' "$f" | wc -l
 ```
 
 A 503 with `Retry-After` (the vault was busy) is retried by the browser and isn't a failure.
 A 503 after an `"event":"read_only"` record is: the server refused the change because it is
 read-only ([Read-only after a storage error](#read-only-after-a-storage-error)). The request
-log doesn't record `Retry-After`, so the filter tells them apart by that record.
+log doesn't record `Retry-After`, so the filter tells them apart by that record. Only a
+restart ends the read-only state, so the filter forgets it at each `listening` record: an
+export that spans restarts counts only the 503s between a `read_only` record and the next
+start. Lines that aren't JSON objects are skipped.
+
+One read-only 503 can be logged just before the `read_only` record: the server turns
+read-only first and logs the record after, so no change slips in between (that order is
+deliberate). Count a 503 logged within a second before that record as read-only too: the
+filter above doesn't apply that rule, so it lists that 503 as a failure, and you check its
+time against the `read_only` record's by hand.
 
 ## Health
 
@@ -761,6 +774,94 @@ was full or reported an I/O error, or the database is damaged. Only a restart en
 2. Fix the cause: free space (`df -h "$data"`), or check the disk (`dmesg` for I/O errors).
 3. Restart: `docker restart postelmd`. The start checks the database (`quick_check`); if it
    is damaged, the start refuses and the message says what to do.
+
+## Database lost, or the vault marker doesn't match
+
+From data format 2 only (the release that assigns file IDs; ADR-0040). Builds before it
+have both commands but refuse them with `this command arrives with data format 2`, changing
+nothing; at format 1, a damaged database is the manual move in
+[Upgrade and rollback](#upgrade-and-rollback). Both run with the server stopped, with the
+same image, volumes and user as the server.
+
+**First, free disk space** (see [Disk full](#disk-full-or-permission-errors)): `db rebuild`
+needs at least the size of `app.db` plus that of the vault's `.postelmd-tmp/` free on the
+data folder's filesystem (`df -h "$data"`; `du -sh "$data"/.postelmd/app.db*
+"$data"/vaults/notes/.postelmd-tmp`). It never deletes the old database to make room.
+
+The block below reads how the server's container mounts `/data`, and runs the command the
+same way: a folder on the host (`bind`) as your user, with the notes folder if you adopted
+one; a named volume (`volume`) by its own name, as the image's user, which owns it. It reads
+the volume's name from the container, since a guessed one (with Compose it is
+`<project>_postelmd-data`) would silently create a new, empty volume. It runs nothing when
+a value is missing. Set `c` to your container's name, and the command on the `set --` line;
+for `vault claim`, make that line `set -- vault claim; it=-it`:
+
+```sh
+c=postelmd
+set -- db rebuild; it=
+m=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}} {{.Name}}{{end}}{{end}}' "$c")
+data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$c")
+notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' "$c")
+IMAGE=$(docker inspect -f '{{.Image}}' "$c")
+case "${m%% *}" in
+  bind) src=$data; user="$(id -u):$(id -g)" ;;
+  volume) src=${m#* }; user= ;;
+  *) src= ;;
+esac
+if [ -z "$src" ] || [ -z "$IMAGE" ]; then
+  echo "STOPPED: can't tell how $c mounts /data (\"$m\"), or IMAGE is empty; nothing was run" >&2
+else
+  docker stop "$c" >/dev/null
+  docker run --rm $it ${user:+--user} ${user:+"$user"} -v "$src":/data \
+    ${notes:+-v} ${notes:+"$notes":/data/vaults/notes} "$IMAGE" "$@" || echo "STOPPED: $* failed" >&2
+  docker start "$c" >/dev/null
+fi
+```
+
+It works the same in `sh`, `bash` and `zsh` (each optional flag and its value are separate
+words, so `zsh`, which doesn't split a variable, passes them right). For `vault claim`, `it=-it`
+lets it ask you (see below).
+
+**`postelmd db rebuild`**, when the start refuses because `app.db` is missing or damaged,
+or the vault marker names another vault and this vault is the one to keep. It moves `app.db`
+and the files beside it into `.postelmd/damaged-<time>/` (never deleted), keeps the temp
+files of unfinished saves in `.postelmd/recovery/rebuild-<time>/`, and gives every file a
+new ID. Every old file ID is gone. If a migration was interrupted and `db rollback` can undo
+it, `db rebuild` refuses and names `db rollback`; if it can't (the database is gone or
+unreadable), the migration's files move into `damaged-<time>/` too. If it is interrupted (a
+crash, a full disk), the start refuses with `a db rebuild was interrupted`: free space if
+needed, and run `db rebuild` again; it finishes from where it stopped. If it stops with
+`files don't match its intent`, something changed the state folder meanwhile: leave
+`rebuild.intent` in place, start no server, and open an issue with the log.
+
+`damaged-<time>/` is the only copy of the old database. Keep it on the host until the rebuilt
+instance has run for a while and you have a new backup; then you may move it off the host
+(to your backup storage), never delete it without a copy.
+
+**`postelmd vault claim`**, when the start refuses because the vault marker
+(`.postelmd-tmp/.created-by-postelmd`) is missing, empty, unreadable or names another vault,
+and this is the right vault. It shows the vault's path, how many files it has, the vault UUID
+the marker names (when another one), and how many file IDs it found at their path with the
+same inode and size, then asks. To answer, it needs a terminal: run it with `docker run -it`
+(`it=-it` in the block above).
+With `-t` alone (no `-i`), it can't read your answer and waits forever; without a terminal it
+refuses and names the flag to pass.
+
+- When at least 90% match, type `yes` (or pass `--yes`).
+- When fewer match, it is probably another folder: check the mount first. The expected case
+  is a vault moved or restored to a new disk, which gives every file a new inode. To claim it
+  anyway, type the vault's path as the prompt shows it (the path inside the container, such
+  as `/data/vaults/notes`, not the host's), or pass `--force`. The next start then marks
+  every file ID it doesn't find as missing, and those files get new IDs.
+- In a script, pass `--yes` (claims only when the check passes) or `--force` (always) instead
+  of `-it`: `set -- vault claim --yes; it=`.
+
+A marker that is a symlink, a folder or a special file is refused: move it aside, then run
+`vault claim` again. Both commands write an audit record (`db.rebuilt`, `vault.claimed`) to
+their output, as the server's log does.
+
+Offline commands run as the user you give `docker run`: with a host folder, that is the
+folder's owner (`--user "$(id -u):$(id -g)"`), as for the server.
 
 ## State folder on a network filesystem
 

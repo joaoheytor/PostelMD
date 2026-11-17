@@ -243,8 +243,15 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
     outcome, the 10 s counted across the restart (process-kill model done:
     `TestScanCrashPoints`, `TestApplyScanCrashPoints`; the power-loss model is #182);
   - `postelmd db rebuild` crashed at each step resumes, and an `app.db` without the intent's
-    rebuild UUID is never taken for the new one; a start with `app.db` missing at format 2,
-    or failing `quick_check`, refuses and changes nothing;
+    rebuild UUID is never taken for the new one (done, ADR-0040: `TestRebuildCrashPoints` in
+    `internal/ids` and `internal/store/sql`, `TestRebuildCrashTwiceKeepsBothAttempts`,
+    `TestRebuildCrashWithAStaleWAL`, `TestAKillWhileAHalfBuiltDatabaseMoves`,
+    `TestAnEarlierRebuildsDatabaseIsMoved`; the power-loss model is #182); a
+    start with `app.db` missing at format 2, or failing `quick_check`, refuses and changes
+    nothing;
+  - `postelmd vault claim` asks before writing the marker, needs `--force` or the vault's
+    path when the identity check fails, and refuses a marker that is a symlink, a folder or a
+    special file (`TestVaultClaimCommand`, `TestVaultClaimAsks`, `TestCheckClaim`);
   - a migration crashed mid-transaction runs again; an edited migration, and a database
     newer than the binary, are refused;
   - the pre-migration snapshot and `migrate.intent`, crashed at each row of their recovery

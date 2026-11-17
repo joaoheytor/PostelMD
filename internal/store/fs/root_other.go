@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
+	"os"
 )
 
 // Root is not implemented outside Linux yet. The portable fallback (an O_NOFOLLOW walk
@@ -24,6 +25,9 @@ func (r *Root) Close() error { return nil }
 
 // ReadFile is unsupported on this platform.
 func (r *Root) ReadFile(string) ([]byte, error) { return nil, errors.ErrUnsupported }
+
+// OpenRegular is unsupported on this platform.
+func (r *Root) OpenRegular(string) (*os.File, int64, error) { return nil, 0, errors.ErrUnsupported }
 
 // RenameNoReplace is unsupported on this platform.
 func (r *Root) RenameNoReplace(string, string) error { return errors.ErrUnsupported }

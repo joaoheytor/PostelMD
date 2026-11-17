@@ -63,6 +63,8 @@ func TestSQLiteFullIsAWriterFault(t *testing.T) {
 // A writer waiting for the writer connection when another write faults is refused once it
 // gets the connection: the flag is set before the connection is given back. Its rows are
 // unchanged and the hook runs once.
+var errNeverWaited = errors.New("the second writer never waited for the connection")
+
 func TestAWriterWaitingForTheConnectionIsRefusedAfterAFault(t *testing.T) {
 	db, before := assigned(t)
 	var fired atomic.Int32
@@ -72,7 +74,13 @@ func TestAWriterWaitingForTheConnectionIsRefusedAfterAFault(t *testing.T) {
 	second := make(chan error, 1)
 	err := db.writeTx(ctx, func(tx *sql.Tx) error {
 		go func() { _, err := db.ApplyScan(ctx, time.Now(), bulk(1, "second")); second <- err }()
+		// A hang guard only, never a timing bound. It returns an error rather than calling
+		// t.Fatal here, which would leave the transaction open and hang the cleanup.
+		hang := time.Now().Add(10 * time.Second)
 		for db.w.Stats().WaitCount == 0 { // the second writer is blocked in Conn
+			if time.Now().After(hang) {
+				return errNeverWaited
+			}
 			time.Sleep(time.Millisecond)
 		}
 		for _, u := range bulk(2000, "first") {

@@ -177,3 +177,11 @@ aside, never deleted.
 | Record each phase in `rollback.intent` (rewritten per step) | Six more durable writes, and a re-run must still check the files, since the phase alone is one signal |
 | Rename the snapshot to `app.db` instead of copying it | Leaves nothing to compare a restored file with after a crash, and the snapshot is the record of what was restored |
 | Let `serve` roll back on its own when a migration fails | A failed migration is an operator's decision (fix forward or go back); an automatic restore could hide a bug and would run while an image the operator didn't choose is starting |
+
+## Clarifications
+- **2026-11-17, `db rebuild` and `migrate.intent`.** From data format 2, `db rebuild` can move
+  an interrupted migration's `migrate.intent`, snapshot and `post-migration-started` files
+  aside, into its `damaged-<time>/` folder, when this command refuses it because `app.db` is
+  absent or damaged, the new version started, or the snapshot doesn't verify. Any other
+  refusal of this command stops `db rebuild` too. See
+  [ADR-0040](0040-db-rebuild-and-vault-claim.md). This is a cross-reference only.

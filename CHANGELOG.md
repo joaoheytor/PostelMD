@@ -105,6 +105,15 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   healthy. Keep the tab open, fix the disk, then restart (the runbook's "Read-only after a
   storage error"). Until data format 2 assigns file IDs, nothing writes the database at run
   time.
+- `postelmd db rebuild` and `postelmd vault claim`, offline commands for a lost or damaged
+  database and for a vault marker that doesn't name the database's vault. They arrive with
+  data format 2: until then they refuse and change nothing. `db rebuild` never deletes: the
+  old database goes to `.postelmd/damaged-<time>/`, unfinished saves' temp files to
+  `.postelmd/recovery/rebuild-<time>/`, and a rebuild interrupted by a crash is finished by
+  running it again (a start refuses until then). `vault claim` shows how many file IDs match
+  the mounted vault and asks before it writes the marker (`--yes`, or `--force` when they
+  don't match). Each writes an audit record. See the runbook's "Database lost, or the vault
+  marker doesn't match".
 
 ### Changed
 - `/healthz` and `/readyz` answer `200` instead of `204`. The server answers `/healthz` as

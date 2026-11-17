@@ -73,28 +73,40 @@ func (r *Root) openat(rel string, flags uint64) (int, error) {
 
 // ReadFile returns the contents of the regular file at rel.
 func (r *Root) ReadFile(rel string) ([]byte, error) {
-	if err := checkRel(rel); err != nil {
+	f, size, err := r.OpenRegular(rel)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if size > MaxFileSize {
+		return nil, fmt.Errorf("%w: %s is larger than %d bytes", ErrTooLarge, rel, MaxFileSize)
+	}
+	return io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+}
+
+// OpenRegular opens the regular file at rel for reading, of any size, and returns its size
+// at the open: for a caller that streams it (db rebuild's temp copies). The caller closes it.
+func (r *Root) OpenRegular(rel string) (*os.File, int64, error) {
+	if err := checkRel(rel); err != nil {
+		return nil, 0, err
 	}
 	// O_NONBLOCK: a FIFO swapped in after the caller listed a regular file must not block
 	// the open; the check below then refuses it. It changes nothing for a regular file.
 	fd, err := r.openat(rel, unix.O_RDONLY|unix.O_NONBLOCK)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	f := os.NewFile(uintptr(fd), rel)
-	defer func() { _ = f.Close() }()
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
-		return nil, mapErr("stat", rel, err)
+		_ = f.Close()
+		return nil, 0, mapErr("stat", rel, err)
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {
-		return nil, fmt.Errorf("%w: %s", ErrNotRegular, rel)
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("%w: %s", ErrNotRegular, rel)
 	}
-	if st.Size > MaxFileSize {
-		return nil, fmt.Errorf("%w: %s is larger than %d bytes", ErrTooLarge, rel, MaxFileSize)
-	}
-	return io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+	return f, st.Size, nil
 }
 
 // ReadDir lists the directory rel ("." for the root), sorted by name. Entry types come from

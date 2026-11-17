@@ -52,11 +52,31 @@ func EnsureFormat(state string, opts ...fs.Option) error {
 	case !errors.Is(err, iofs.ErrNotExist):
 		return fmt.Errorf("layout: read %s/%s: %w", state, formatFile, err)
 	}
+	return writeFormat(r, state, FormatVersion)
+}
+
+// SetFormat writes n into the format file, replacing what is there: the last step of the
+// first upgrade and of db rebuild (ADR-0030). Like EnsureFormat's write, it is one rename,
+// so a crash leaves the old format or n. The caller holds the instance lock.
+func SetFormat(state string, n int, opts ...fs.Option) error {
+	if n < 1 || n > FormatVersion {
+		return fmt.Errorf("layout: data format %d isn't one this build writes", n)
+	}
+	r, err := fs.OpenRoot(state, opts...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = r.Close() }()
+	return writeFormat(r, state, n)
+}
+
+// writeFormat writes n through a synced temp, one rename and the folder's fsync.
+func writeFormat(r *fs.Root, state string, n int) error {
 	if err := r.Remove(formatNew); err != nil && !errors.Is(err, iofs.ErrNotExist) {
 		return fmt.Errorf("layout: remove %s: %w", formatNew, err)
 	}
 	steps := []func() error{
-		func() error { return r.CreateFile(formatNew, []byte(strconv.Itoa(FormatVersion)+"\n"), 0o600) },
+		func() error { return r.CreateFile(formatNew, []byte(strconv.Itoa(n)+"\n"), 0o600) },
 		func() error { return r.Rename(formatNew, formatFile) },
 		func() error { return r.SyncDir(".") },
 	}

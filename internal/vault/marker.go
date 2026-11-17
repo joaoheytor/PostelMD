@@ -27,6 +27,13 @@ const (
 var ErrBadMarker = errors.New("vault: the vault marker (.postelmd-tmp/.created-by-postelmd) " +
 	"can't be read as PostelMD's")
 
+// ErrMarkerNotAFile: the marker, or its temp folder, is a symlink, a folder or a special
+// file. It is also ErrBadMarker. vault claim and db rebuild refuse it too: the fix is to move
+// it aside (ADR-0031).
+var ErrMarkerNotAFile = errors.New("it isn't a regular file; move it aside, then run this again")
+
+func notAFile() error { return fmt.Errorf("%w: %w", ErrBadMarker, ErrMarkerNotAFile) }
+
 var (
 	markerUUID   = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	markerFormat = regexp.MustCompile(`^[1-9][0-9]{0,8}$`)
@@ -55,7 +62,7 @@ func ReadMarker(dir string, opts ...fs.Option) (Marker, error) {
 	case errors.Is(err, iofs.ErrNotExist):
 		return Marker{}, nil
 	case errors.Is(err, fs.ErrSymlink), errors.Is(err, fs.ErrNotRegular), errors.Is(err, fs.ErrNotDir):
-		return Marker{}, fmt.Errorf("%w: it isn't a regular file", ErrBadMarker)
+		return Marker{}, notAFile()
 	case err != nil:
 		return Marker{}, fmt.Errorf("vault: read the vault marker: %w", err)
 	case st.Size > markerMaxSize:
@@ -63,7 +70,7 @@ func ReadMarker(dir string, opts ...fs.Option) (Marker, error) {
 	}
 	b, err := root.ReadFile(rel)
 	if errors.Is(err, fs.ErrSymlink) || errors.Is(err, fs.ErrNotRegular) {
-		return Marker{}, fmt.Errorf("%w: it isn't a regular file", ErrBadMarker)
+		return Marker{}, notAFile()
 	} else if err != nil {
 		return Marker{}, fmt.Errorf("vault: read the vault marker: %w", err)
 	}

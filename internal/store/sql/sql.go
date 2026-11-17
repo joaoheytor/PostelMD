@@ -53,8 +53,31 @@ func Open(ctx context.Context, stateDir string, log *slog.Logger) (*DB, error) {
 	return open(ctx, stateDir, log, migrationFiles)
 }
 
+// ErrNoDatabase: OpenExisting found no app.db. Nothing was created.
+var ErrNoDatabase = errors.New("sql: there is no app.db in the state directory, so its file IDs are lost; " +
+	"if this is the right data directory, postelmd db rebuild makes a new database (ADR-0030)")
+
+// OpenExisting is Open for a command that needs the database there already (vault claim):
+// with no app.db it is ErrNoDatabase, and nothing is created.
+func OpenExisting(ctx context.Context, stateDir string, log *slog.Logger) (*DB, error) {
+	if err := checkAbs(stateDir); err != nil {
+		return nil, err
+	}
+	if ok, err := regularFile(filepath.Join(stateDir, AppDB)); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, ErrNoDatabase
+	}
+	return Open(ctx, stateDir, log)
+}
+
 // open is Open with the migrations in fsys (tests use their own).
 func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*DB, error) {
+	return openState(ctx, stateDir, log, fsys, false)
+}
+
+// openState is open; forRebuild is db rebuild's own open, the one allowed beside its intent.
+func openState(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS, forRebuild bool) (*DB, error) {
 	if err := checkAbs(stateDir); err != nil {
 		return nil, err
 	}
@@ -62,6 +85,10 @@ func open(ctx context.Context, stateDir string, log *slog.Logger, fsys fs.FS) (*
 	if ok, err := regularFile(filepath.Join(stateDir, RollbackIntent)); ok || errors.Is(err, errNotRegular) {
 		return nil, ErrRollbackInterrupted
 	} else if err != nil {
+		return nil, err
+	}
+	// Nor is a rebuild's half-built one, except to the rebuild (ADR-0040).
+	if err := rebuilding(stateDir, forRebuild); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(stateDir, AppDB)

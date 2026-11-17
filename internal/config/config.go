@@ -27,6 +27,8 @@ type Config struct {
 	// AllowedHosts: allowed_hosts, POSTELMD_ALLOWED_HOSTS (comma-separated). The host names,
 	// besides localhost and IP literals, that requests may name (DNS rebinding; ADR-0005).
 	AllowedHosts []string
+	// Yes and Force are vault claim's --yes and --force (flags only; ADR-0040).
+	Yes, Force bool
 }
 
 // file is config.yaml. Pointers tell a setting that's absent from one set to its zero value.
@@ -55,6 +57,10 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	fl.SetOutput(stderr)
 	fl.StringVar(&flagData, "data", c.DataDir, "data directory (POSTELMD_DATA_DIR)")
 	fl.StringVar(&flagListen, "listen", c.Listen, "listen address (POSTELMD_LISTEN, config.yaml listen)")
+	if name == "vault claim" {
+		fl.BoolVar(&c.Yes, "yes", false, "claim without asking, when the identity check passes")
+		fl.BoolVar(&c.Force, "force", false, "claim without asking, even when the identity check fails")
+	}
 	if err := fl.Parse(args); err != nil {
 		return c, fmt.Errorf("%w: %w", ErrPrinted, err)
 	}
