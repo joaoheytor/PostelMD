@@ -42,6 +42,9 @@ func TestRebuildTakesOverAStuckUpgrade(t *testing.T) {
 			must(t, e.db.Assign(ctx, sqlstore.Assignment{VaultUUID: otherVault, Now: rebuildNow}))
 		},
 		"the marker names another vault": func(e *env) { must(t, vault.WriteMarker(e.dir, otherVault, 1)) },
+		"the marker doesn't parse": func(e *env) {
+			must(t, os.WriteFile(filepath.Join(e.dir, vault.TmpDir, ".created-by-postelmd"), []byte("not ours\n"), 0o600))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := stuckEnv(t, broken)
@@ -65,6 +68,39 @@ func TestRebuildTakesOverAStuckUpgrade(t *testing.T) {
 			m, _ := vault.ReadMarker(e.dir)
 			if id.RebuildUUID != r.UUID || m.VaultUUID != id.VaultUUID {
 				t.Fatalf("identity %+v, marker %+v: not rebuilt", id, m)
+			}
+		})
+	}
+}
+
+// TestMarkerNamesAnotherVault is db rebuild's marker check beside an upgrade's intent: a
+// marker naming another vault, or not parsing, is a reason to take over; an empty one, or
+// the intent's, isn't; one that isn't a regular file is an error, never a reason (Rebuild
+// refuses it before, but the check doesn't rely on that).
+func TestMarkerNamesAnotherVault(t *testing.T) {
+	markerPath := func(e *env) string { return filepath.Join(e.dir, vault.TmpDir, ".created-by-postelmd") }
+	for _, c := range []struct {
+		name    string
+		set     func(e *env)
+		other   bool
+		failing bool
+	}{
+		{"empty", func(*env) {}, false, false},
+		{"the intent's vault", func(e *env) { must(t, vault.WriteMarker(e.dir, testVaultUUID, 1)) }, false, false},
+		{"another vault", func(e *env) { must(t, vault.WriteMarker(e.dir, otherVault, 1)) }, true, false},
+		{"doesn't parse", func(e *env) { must(t, os.WriteFile(markerPath(e), []byte("not ours\n"), 0o600)) }, true, false},
+		{"a folder", func(e *env) { must(t, os.Remove(markerPath(e))); must(t, os.Mkdir(markerPath(e), 0o700)) }, false, true},
+		{"a symlink", func(e *env) {
+			must(t, os.Remove(markerPath(e)))
+			must(t, os.Symlink(filepath.Join(t.TempDir(), "x"), markerPath(e)))
+		}, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := v01Env(t)
+			c.set(e)
+			other, err := markerNamesAnotherVault(e.dir)(testVaultUUID)
+			if other != c.other || (err != nil) != c.failing {
+				t.Fatalf("= %v, %v; want %v, error %v", other, err, c.other, c.failing)
 			}
 		})
 	}

@@ -100,18 +100,7 @@ func beginRebuild(ctx context.Context, o RebuildOptions) (sqlstore.Rebuild, erro
 	if sqlstore.UpgradeUnderWay(o.State) == nil {
 		return sqlstore.BeginRebuild(ctx, o.State, o.Now)
 	}
-	reason, err := sqlstore.StuckUpgrade(ctx, o.State, func(vaultUUID string) (bool, error) {
-		m, err := vault.ReadMarker(o.Vault, o.FS...)
-		switch {
-		case errors.Is(err, vault.ErrMarkerNotAFile):
-			return false, err
-		case errors.Is(err, vault.ErrBadMarker):
-			return true, nil
-		case err != nil:
-			return false, err
-		}
-		return m.VaultUUID != "" && m.VaultUUID != vaultUUID, nil
-	})
+	reason, err := sqlstore.StuckUpgrade(ctx, o.State, markerNamesAnotherVault(o.Vault, o.FS...))
 	switch {
 	case err != nil:
 		return sqlstore.Rebuild{}, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, err)
@@ -121,6 +110,26 @@ func beginRebuild(ctx context.Context, o RebuildOptions) (sqlstore.Rebuild, erro
 	o.Log.Warn("db rebuild takes over a first upgrade that can't finish; its upgrade.intent goes into the damaged folder",
 		"reason", reason)
 	return sqlstore.BeginRebuildOverUpgrade(ctx, o.State, o.Now)
+}
+
+// markerNamesAnotherVault is StuckUpgrade's marker check for the vault at dir: true when the
+// marker names another vault than vaultUUID, or doesn't parse. A marker that isn't a regular
+// file is an error, never a reason: vault.ErrMarkerNotAFile also matches ErrBadMarker, so it
+// is checked first. Rebuild refuses such a marker before this runs; the check doesn't rely
+// on that.
+func markerNamesAnotherVault(dir string, opts ...fs.Option) func(vaultUUID string) (bool, error) {
+	return func(vaultUUID string) (bool, error) {
+		m, err := vault.ReadMarker(dir, opts...)
+		switch {
+		case errors.Is(err, vault.ErrMarkerNotAFile):
+			return false, err
+		case errors.Is(err, vault.ErrBadMarker):
+			return true, nil
+		case err != nil:
+			return false, err
+		}
+		return m.VaultUUID != "" && m.VaultUUID != vaultUUID, nil
+	}
 }
 
 // temps is step 3's handler: each temp is kept in r's recovery folder; an entry left in

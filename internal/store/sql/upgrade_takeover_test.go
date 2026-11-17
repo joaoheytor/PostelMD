@@ -81,6 +81,20 @@ func TestStuckUpgradeErrs(t *testing.T) {
 	if _, err := StuckUpgrade(ctx, dir, func(string) (bool, error) { return false, failing }); !errors.Is(err, failing) {
 		t.Fatalf("a marker read error: %v", err)
 	}
+	// A database whose meta table the identity query can't read (no key or value column): an
+	// error, not "no IDs".
+	dir = closedDB(t)
+	_, err = BeginUpgrade(dir, rebuildNow)
+	must(t, err)
+	mustRemove(t, filepath.Join(dir, AppDB))
+	db, err := openPool(filepath.Join(dir, AppDB), "", 1)
+	must(t, err)
+	_, err = db.Exec("CREATE TABLE meta (x)")
+	must(t, err)
+	must(t, db.Close())
+	if reason, err := StuckUpgrade(ctx, dir, noMarker); err == nil {
+		t.Fatalf("an unreadable meta table: %q, want an error", reason)
+	}
 	if os.Geteuid() != 0 {
 		must(t, os.Chmod(filepath.Join(dir, AppDB), 0))
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, AppDB), 0o600) })
