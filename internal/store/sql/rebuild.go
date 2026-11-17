@@ -51,6 +51,7 @@ type Rebuild struct {
 	HadDB     bool     `json:"had_db"`
 	Moves     []string `json:"moves"`
 	Migration bool     `json:"migration,omitempty"`
+	Upgrade   bool     `json:"upgrade,omitempty"` // it takes over a first upgrade: upgrade.intent moves too (ADR-0041)
 }
 
 // migrationLeftover is a file of an interrupted migration that step 2 moves with Migration.
@@ -70,12 +71,12 @@ func (r Rebuild) RecoveryDir() string { return filepath.Join("recovery", "rebuil
 func (r Rebuild) valid() bool {
 	t, err := time.Parse(time.RFC3339, r.Time)
 	if !uuidPattern.MatchString(r.UUID) || err != nil || t.UTC().Format(time.RFC3339) != r.Time ||
-		r.HadDB != slices.Contains(r.Moves, AppDB) {
+		r.HadDB != slices.Contains(r.Moves, AppDB) || r.Upgrade != slices.Contains(r.Moves, UpgradeIntent) {
 		return false
 	}
 	seen := map[string]bool{}
 	for _, n := range r.Moves {
-		known := slices.Contains(dbFiles, n) || r.Migration && migrationLeftover.MatchString(n)
+		known := slices.Contains(dbFiles, n) || r.Migration && migrationLeftover.MatchString(n) || r.Upgrade && n == UpgradeIntent
 		if seen[n] || !known {
 			return false
 		}
@@ -123,7 +124,19 @@ func BeginRebuild(ctx context.Context, stateDir string, now time.Time) (Rebuild,
 	return beginRebuild(ctx, stateDir, now, migrationFiles)
 }
 
+// BeginRebuildOverUpgrade is BeginRebuild taking over a first upgrade that can't finish
+// (StuckUpgrade gave a reason; ADR-0041): upgrade.intent joins the original move into the
+// damaged folder, and pre-format-2/ stays where it is. Without upgrade.intent, or with
+// anything but a regular file at its name, it refuses.
+func BeginRebuildOverUpgrade(ctx context.Context, stateDir string, now time.Time) (Rebuild, error) {
+	return beginRebuildWith(ctx, stateDir, now, migrationFiles, true)
+}
+
 func beginRebuild(ctx context.Context, stateDir string, now time.Time, fsys fs.FS) (Rebuild, error) {
+	return beginRebuildWith(ctx, stateDir, now, fsys, false)
+}
+
+func beginRebuildWith(ctx context.Context, stateDir string, now time.Time, fsys fs.FS, takeOver bool) (Rebuild, error) {
 	if err := checkAbs(stateDir); err != nil {
 		return Rebuild{}, err
 	}
@@ -132,6 +145,14 @@ func beginRebuild(ctx context.Context, stateDir string, now time.Time, fsys fs.F
 		return refuse(errors.Join(errors.New("rollback.intent is in the state directory: run db rollback first (ADR-0035)"), err))
 	}
 	r := Rebuild{UUID: NewUUID(), Time: now.UTC().Truncate(time.Second).Format(time.RFC3339)}
+	if takeOver {
+		if ok, err := regularFile(filepath.Join(stateDir, UpgradeIntent)); err != nil || !ok {
+			return refuse(errors.Join(errors.New("there is no upgrade.intent to take over"), err))
+		}
+		r.Upgrade = true
+	} else if err := UpgradeUnderWay(stateDir); err != nil {
+		return refuse(err)
+	}
 	for _, n := range dbFiles {
 		ok, err := regularFile(filepath.Join(stateDir, n))
 		if err != nil {
@@ -162,6 +183,9 @@ func beginRebuild(ctx context.Context, stateDir string, now time.Time, fsys fs.F
 			return refuse(err)
 		}
 		r.Migration, r.Moves = true, append(r.Moves, left...)
+	}
+	if r.Upgrade {
+		r.Moves = append(r.Moves, UpgradeIntent)
 	}
 	if _, err := os.Lstat(filepath.Join(stateDir, r.DamagedDir())); !errors.Is(err, fs.ErrNotExist) {
 		return refuse(errors.Join(fmt.Errorf("%s is already there; run this again in a second", r.DamagedDir()), err))

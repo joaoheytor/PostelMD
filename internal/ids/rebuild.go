@@ -59,7 +59,7 @@ func Rebuild(ctx context.Context, o RebuildOptions) (Rebuilt, error) {
 		if err := vault.CheckOpenable(o.Vault, o.FS...); err != nil {
 			return out, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, err)
 		}
-		b, err := sqlstore.BeginRebuild(ctx, o.State, o.Now)
+		b, err := beginRebuild(ctx, o)
 		if err != nil {
 			return out, err
 		}
@@ -91,6 +91,45 @@ func Rebuild(ctx context.Context, o RebuildOptions) (Rebuilt, error) {
 	}
 	killPoint("rebuild-format-written")
 	return out, sqlstore.FinishRebuild(o.State)
+}
+
+// beginRebuild writes rebuild.intent. Beside upgrade.intent it takes the first upgrade over
+// only when it can't finish (sqlstore.StuckUpgrade; ADR-0041), and otherwise refuses, saying
+// to start the server so the upgrade finishes.
+func beginRebuild(ctx context.Context, o RebuildOptions) (sqlstore.Rebuild, error) {
+	if sqlstore.UpgradeUnderWay(o.State) == nil {
+		return sqlstore.BeginRebuild(ctx, o.State, o.Now)
+	}
+	reason, err := sqlstore.StuckUpgrade(ctx, o.State, markerNamesAnotherVault(o.Vault, o.FS...))
+	switch {
+	case err != nil:
+		return sqlstore.Rebuild{}, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, err)
+	case reason == "":
+		return sqlstore.Rebuild{}, fmt.Errorf("%w: %w", sqlstore.ErrRebuildRefused, sqlstore.ErrUpgradeInProgress)
+	}
+	o.Log.Warn("db rebuild takes over a first upgrade that can't finish; its upgrade.intent goes into the damaged folder",
+		"reason", reason)
+	return sqlstore.BeginRebuildOverUpgrade(ctx, o.State, o.Now)
+}
+
+// markerNamesAnotherVault is StuckUpgrade's marker check for the vault at dir: true when the
+// marker names another vault than vaultUUID, or doesn't parse. A marker that isn't a regular
+// file is an error, never a reason: vault.ErrMarkerNotAFile also matches ErrBadMarker, so it
+// is checked first. Rebuild refuses such a marker before this runs; the check doesn't rely
+// on that.
+func markerNamesAnotherVault(dir string, opts ...fs.Option) func(vaultUUID string) (bool, error) {
+	return func(vaultUUID string) (bool, error) {
+		m, err := vault.ReadMarker(dir, opts...)
+		switch {
+		case errors.Is(err, vault.ErrMarkerNotAFile):
+			return false, err
+		case errors.Is(err, vault.ErrBadMarker):
+			return true, nil
+		case err != nil:
+			return false, err
+		}
+		return m.VaultUUID != "" && m.VaultUUID != vaultUUID, nil
+	}
 }
 
 // temps is step 3's handler: each temp is kept in r's recovery folder; an entry left in
@@ -144,15 +183,26 @@ func assign(ctx context.Context, db *sqlstore.DB, o RebuildOptions, r sqlstore.R
 		return err
 	}
 	defer func() { _ = v.Close() }()
-	obs, err := v.Survey(ctx)
+	a, err := assignment(ctx, v, sqlstore.NewUUID(), r.UUID, o.Now)
 	if err != nil {
 		return err
+	}
+	out.Files, out.Trash = len(a.Files), len(a.Trash)
+	return db.Assign(ctx, a)
+}
+
+// assignment is the first assignment's content (ADR-0031): every file of v at generation 1
+// and its trash items, under vaultUUID (and rebuildUUID, for db rebuild).
+func assignment(ctx context.Context, v *vault.Vault, vaultUUID, rebuildUUID string, now time.Time) (sqlstore.Assignment, error) {
+	obs, err := v.Survey(ctx)
+	if err != nil {
+		return sqlstore.Assignment{}, err
 	}
 	trash, err := v.TrashForImport()
 	if err != nil {
-		return err
+		return sqlstore.Assignment{}, err
 	}
-	a := sqlstore.Assignment{VaultUUID: sqlstore.NewUUID(), RebuildUUID: r.UUID, Now: o.Now}
+	a := sqlstore.Assignment{VaultUUID: vaultUUID, RebuildUUID: rebuildUUID, Now: now}
 	for _, f := range obs {
 		nf := sqlstore.NewFile{Path: f.Path, Stat: fileStat(f.Stat)}
 		if f.SHA256 != nil {
@@ -163,6 +213,5 @@ func assign(ctx context.Context, db *sqlstore.DB, o RebuildOptions, r sqlstore.R
 	for _, t := range trash {
 		a.Trash = append(a.Trash, sqlstore.TrashImport{OpID: t.ID, Name: t.Name, Kind: string(t.Kind), DeletedAt: t.DeletedAt})
 	}
-	out.Files, out.Trash = len(a.Files), len(a.Trash)
-	return db.Assign(ctx, a)
+	return a, nil
 }

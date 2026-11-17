@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-var rebuildSeq = flag.String("sql.rebuild-seq", "", "what the rebuild crash helper runs: steps, attempt or keep")
+var rebuildSeq = flag.String("sql.rebuild-seq", "", "what the rebuild crash helper runs: steps, attempt, keep or upgrade")
 
 // rebuildSteps runs db rebuild's state-directory steps as internal/ids does: the intent (or
 // the one there) and the move; with attempt, a half-built database (left open, as a crash
@@ -27,7 +27,11 @@ func rebuildSteps(dir string, attempt bool) (Rebuild, error) {
 		return Rebuild{}, err
 	}
 	if r == nil {
-		b, err := BeginRebuild(ctx, dir, rebuildNow)
+		begin := BeginRebuild
+		if exists(dir, UpgradeIntent) { // a first upgrade db rebuild takes over (ADR-0041)
+			begin = BeginRebuildOverUpgrade
+		}
+		b, err := begin(ctx, dir, rebuildNow)
 		if err != nil {
 			return b, err
 		}
@@ -66,6 +70,10 @@ func TestRebuildStepsHelper(t *testing.T) {
 	}
 	var err error
 	switch *rebuildSeq {
+	case "upgrade": // the first upgrade's intent (ADR-0041), written then removed
+		if _, err = BeginUpgrade(*crashDir, rebuildNow); err == nil {
+			err = FinishUpgrade(*crashDir)
+		}
 	case "keep":
 		err = KeepRecovered(*crashDir, Rebuild{UUID: NewUUID(), Time: "2026-11-17T10:00:00Z"}, "save-1",
 			bytes.NewReader([]byte("draft")))

@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/config"
+	sqlstore "github.com/joaoheytor/PostelMD/internal/store/sql"
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
@@ -54,6 +56,65 @@ func TestTheIdentityCommandsRefuseBeforeFormat2(t *testing.T) {
 
 // TestDBRebuildCommand: it makes a database whose IDs serve then scans, says where the old
 // one went, and refuses next to a live server.
+// TestTheIdentityCommandsRefuseDuringAnUpgrade: with upgrade.intent in the state directory,
+// for an upgrade the next start can finish (its vault UUID is the database's, the marker
+// empty), db rebuild and vault claim change nothing and say to start the server (ADR-0041).
+func TestTheIdentityCommandsRefuseDuringAnUpgrade(t *testing.T) {
+	identityReady(t)
+	data := rebuiltData(t)
+	state := filepath.Join(data, ".postelmd")
+	m, err := vault.ReadMarker(vaultOf(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := `{"vault_uuid":"` + m.VaultUUID + `","time":"2026-11-17T10:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(state, sqlstore.UpgradeIntent), []byte(intent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(markerOf(data), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runAndCheck(t, []string{"vault", "claim", "--force", "--data", data}, 1, "", "start the server so it finishes")
+	if b, _ := os.ReadFile(markerOf(data)); len(b) != 0 {
+		t.Fatal("vault claim wrote the marker during an upgrade")
+	}
+	runAndCheck(t, []string{"db", "rebuild", "--data", data}, 1, "", "start the server so it finishes")
+	if _, err := os.Lstat(filepath.Join(state, sqlstore.RebuildIntent)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("db rebuild started during an upgrade: %v", err)
+	}
+}
+
+// TestDBRebuildTakesOverAStuckUpgrade: an upgrade.intent whose vault UUID isn't the
+// database's can't finish; db rebuild takes it over, says so, and records it (ADR-0041).
+func TestDBRebuildTakesOverAStuckUpgrade(t *testing.T) {
+	identityReady(t)
+	data := rebuiltData(t)
+	state := filepath.Join(data, ".postelmd")
+	earlier, err := filepath.Glob(filepath.Join(state, "damaged-*"))
+	if err != nil || len(earlier) != 1 {
+		t.Fatalf("the first rebuild's damaged folder: %v, %v", earlier, err)
+	}
+	// This rebuild may run in the same second as the first: keep its folder's name free.
+	if err := os.Rename(earlier[0], filepath.Join(state, "first-rebuild")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlstore.BeginUpgrade(state, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr strings.Builder
+	if code := run([]string{"db", "rebuild", "--data", data}, &stdout, &stderr); code != 0 {
+		t.Fatalf("db rebuild = %d: %s", code, stderr.String())
+	}
+	for _, want := range []string{"took over a first upgrade that couldn't finish", `"took_over_upgrade":true`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout doesn't say %q: %s", want, stdout.String())
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(data, ".postelmd", sqlstore.UpgradeIntent)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("upgrade.intent is still there: %v", err)
+	}
+}
+
 func TestDBRebuildCommand(t *testing.T) {
 	identityReady(t)
 	data := t.TempDir()
