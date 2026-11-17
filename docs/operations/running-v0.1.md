@@ -62,7 +62,8 @@ Nothing important lives anywhere else:
 | `vaults/notes/.git/` | The vault's git history (your commits) |
 | `vaults/notes/.postelmd-trash/` | Deleted notes and folders (not in git) |
 | `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-1-2.db` (the database as it was before that upgrade) and `post-migration-started-1-2` (a record that the upgrade finished): keep both with `app.db` |
-| `.postelmd/damaged-<time>/`, `.postelmd/rollback-<time>/` | From data format 2: the database files `db rebuild` (or `db rollback`) moved aside; the only copy of the old file IDs |
+| `.postelmd/rollback-<time>/` | Written by `db rollback` (any data format): the database it replaced, with its `-wal` and `-shm`, and the pre-migration copy it restored from |
+| `.postelmd/damaged-<time>/` | From data format 2: the database files `db rebuild` moved aside (and any `attempt-<n>/` it made); the only copy of the old file IDs |
 | `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept |
 | `.postelmd/rebuild.intent` | Only while a `db rebuild` is unfinished: back it up with the rest, and restore it with them, so the restored instance finishes that rebuild |
 
@@ -787,35 +788,38 @@ needs at least the size of `app.db` plus that of the vault's `.postelmd-tmp/` fr
 data folder's filesystem (`df -h "$data"`; `du -sh "$data"/.postelmd/app.db*
 "$data"/vaults/notes/.postelmd-tmp`). It never deletes the old database to make room.
 
-**`/data` is a folder on the host.** Note `data=`, `notes=` and `IMAGE=` from the stopped
-container, as for `db rollback`, and run the command only when they are set:
+The block below reads how the server's container mounts `/data`, and runs the command the
+same way: a folder on the host (`bind`) as your user, with the notes folder if you adopted
+one; a named volume (`volume`) by its own name, as the image's user, which owns it. It reads
+the volume's name from the container, since a guessed one (with Compose it is
+`<project>_postelmd-data`) would silently create a new, empty volume. It runs nothing when
+a value is missing. Set `c` to your container's name, and the command on the `set --` line:
 
 ```sh
-data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' postelmd)
-notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' postelmd)
-IMAGE=$(docker inspect -f '{{.Image}}' postelmd)
-docker stop postelmd
-if [ -z "$data" ] || [ -z "$IMAGE" ]; then
-  echo "REBUILD STOPPED: \$data or \$IMAGE is empty" >&2
+c=postelmd
+set -- db rebuild; it=                # for vault claim: set -- vault claim; it=-it
+m=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}} {{.Name}}{{end}}{{end}}' "$c")
+data=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$c")
+notes=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data/vaults/notes"}}{{.Source}}{{end}}{{end}}' "$c")
+IMAGE=$(docker inspect -f '{{.Image}}' "$c")
+case "${m%% *}" in
+  bind) src=$data; user="$(id -u):$(id -g)" ;;
+  volume) src=${m#* }; user= ;;
+  *) src= ;;
+esac
+if [ -z "$src" ] || [ -z "$IMAGE" ]; then
+  echo "STOPPED: can't tell how $c mounts /data (\"$m\"), or IMAGE is empty; nothing was run" >&2
 else
-  docker run --rm --user "$(id -u):$(id -g)" -v "$data":/data ${notes:+-v "$notes":/data/vaults/notes} \
-    "$IMAGE" db rebuild || echo "REBUILD STOPPED" >&2
+  docker stop "$c" >/dev/null
+  docker run --rm $it ${user:+--user} ${user:+"$user"} -v "$src":/data \
+    ${notes:+-v} ${notes:+"$notes":/data/vaults/notes} "$IMAGE" "$@" || echo "STOPPED: $* failed" >&2
+  docker start "$c" >/dev/null
 fi
-docker start postelmd
 ```
 
-**`/data` is a named volume** (Docker Desktop, or `-v postelmd-data:/data`): the image's
-own user owns the volume, so leave out `--user`:
-
-```sh
-IMAGE=$(docker inspect -f '{{.Image}}' postelmd)
-docker stop postelmd
-[ -n "$IMAGE" ] && docker run --rm -v postelmd-data:/data "$IMAGE" db rebuild || echo "REBUILD STOPPED" >&2
-docker start postelmd
-```
-
-For `vault claim`, use the same block with `vault claim` in place of `db rebuild`, and add
-`-it` after `docker run` so it can ask you (see below).
+It works the same in `sh`, `bash` and `zsh` (each optional flag and its value are separate
+words, so `zsh`, which doesn't split a variable, passes them right). For `vault claim`, `it=-it`
+lets it ask you (see below).
 
 **`postelmd db rebuild`**, when the start refuses because `app.db` is missing or damaged,
 or the vault marker names another vault and this vault is the one to keep. It moves `app.db`
@@ -837,7 +841,8 @@ instance has run for a while and you have a new backup; then you may move it off
 (`.postelmd-tmp/.created-by-postelmd`) is missing, empty, unreadable or names another vault,
 and this is the right vault. It shows the vault's path, how many files it has, the vault UUID
 the marker names (when another one), and how many file IDs it found at their path with the
-same inode and size, then asks. To answer, it needs a terminal: run it with `docker run -it`.
+same inode and size, then asks. To answer, it needs a terminal: run it with `docker run -it`
+(`it=-it` in the block above).
 With `-t` alone (no `-i`), it can't read your answer and waits forever; without a terminal it
 refuses and names the flag to pass.
 
@@ -848,7 +853,7 @@ refuses and names the flag to pass.
   as `/data/vaults/notes`, not the host's), or pass `--force`. The next start then marks
   every file ID it doesn't find as missing, and those files get new IDs.
 - In a script, pass `--yes` (claims only when the check passes) or `--force` (always) instead
-  of `-it`.
+  of `-it`: `set -- vault claim --yes; it=`.
 
 A marker that is a symlink, a folder or a special file is refused: move it aside, then run
 `vault claim` again. Both commands write an audit record (`db.rebuilt`, `vault.claimed`) to

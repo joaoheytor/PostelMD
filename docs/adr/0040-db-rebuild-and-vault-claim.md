@@ -66,6 +66,16 @@ Offline, under the instance lock, after the data format check. Before step 1 it 
 changing nothing:
 - `rollback.intent` in the state directory, or a `migrate.intent` that `db rollback` can undo
   or retire (its own eligibility check, read only): that recovery comes first (ADR-0035);
+- a `migrate.intent` that `db rollback` refuses for any reason but the four below, with
+  rollback's own message: another build's migration ("run db rollback with the build that
+  started that migration"), a stray `app.db.tmp`, a snapshot temp or `app.db-journal` ("move
+  it aside"), the rollback folder already there, a version outside the intent's, or an I/O or
+  permission error reading the intent, a file's type or the database. db rebuild takes the
+  migration over only when rollback refuses because `app.db` is absent or not a regular
+  file; `app.db` is damaged or isn't a database (SQLite says so; a permission or I/O error
+  doesn't count); the new version started (a `post-migration-started` file or row); or the
+  snapshot doesn't verify. Each of those four is marked where rollback's check finds it,
+  never inferred from its text;
 - the vault can't be read; the vault marker is a symlink, a folder or a special file;
 - what step 4's `vault.Open` would refuse on: adoption's check (ADR-0027: a reserved folder
   without the marker holding entries PostelMD didn't create), and, where the temp folder
@@ -80,8 +90,8 @@ changing nothing:
   the second, whether `app.db` existed, and the files step 2 moves (the original move):
   `app.db`, `-wal`, `-shm` and `-journal` as they were there, and with `migration`, an
   interrupted migration's files (`migrate.intent`, `pre-migrate-*`,
-  `post-migration-started-*`) when `db rollback` can't undo it (app.db missing or unreadable,
-  or the new version started).
+  `post-migration-started-*`) when `db rollback` can't undo it for one of the four reasons
+  above.
 - **Folders,** in the state directory, named from the intent's time
   (`20060102T150405Z`): `damaged-<time>/` for the moved files, `recovery/rebuild-<time>/` for
   the temps. A copy is made in `recovery/.rebuild-<time>.copying` and renamed into its folder,

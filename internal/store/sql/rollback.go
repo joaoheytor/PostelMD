@@ -152,7 +152,9 @@ func checkEligible(ctx context.Context, stateDir string, last int, rb *rollbackI
 		return false, fmt.Errorf("migrate.intent names %d → %d, but this build's last migration is %d: "+
 			"run db rollback with the build that started that migration", in.From, in.To, last)
 	}
-	if ok, err := regularFile(filepath.Join(stateDir, markerName(in.From, in.To))); ok || err != nil {
+	if ok, err := regularFile(filepath.Join(stateDir, markerName(in.From, in.To))); ok && err == nil {
+		return false, pastRollback{fmt.Errorf("%s is there: the new version started after the migration", markerName(in.From, in.To))}
+	} else if err != nil {
 		return false, errors.Join(fmt.Errorf("%s is there: the new version started after the migration", markerName(in.From, in.To)), err)
 	}
 	uv, err := readForRollback(ctx, stateDir, in)
@@ -180,7 +182,7 @@ func checkEligible(ctx context.Context, stateDir string, last int, rb *rollbackI
 	if err := verifySnapshot(ctx, snap, in.From); err != nil {
 		// Not the cause's text: ErrDamaged's fix (move app.db aside) is for a start, and
 		// would leave migrate.intent behind, so the previous build would still refuse.
-		return false, errNoRestore("the pre-migration snapshot doesn't verify")
+		return false, pastRollback{errNoRestore("the pre-migration snapshot doesn't verify")}
 	}
 	if _, err := os.Lstat(filepath.Join(stateDir, rb.Dir)); !errors.Is(err, fs.ErrNotExist) {
 		return false, errors.Join(fmt.Errorf("%s is already there; run this again in a second", rb.Dir), err)
@@ -194,6 +196,9 @@ func checkEligible(ctx context.Context, stateDir string, last int, rb *rollbackI
 func readForRollback(ctx context.Context, stateDir string, in *intent) (int, error) {
 	path := filepath.Join(stateDir, AppDB)
 	if _, err := checkRegular(path); err != nil {
+		if ok, rerr := regularFile(path); !ok && (rerr == nil || errors.Is(rerr, errNotRegular)) {
+			return 0, pastRollback{err} // absent, or not a regular file
+		}
 		return 0, err
 	}
 	var beside [3]bool
@@ -215,21 +220,21 @@ func readForRollback(ctx context.Context, stateDir string, in *intent) (int, err
 	}
 	p, err := openPool(path, q, 1)
 	if err != nil {
-		return 0, errNoRestore("app.db can't be read")
+		return 0, unreadable(err)
 	}
 	defer func() { _ = p.Close() }()
 	var uv, rows int
 	if err := p.QueryRowContext(ctx, "PRAGMA user_version").Scan(&uv); err != nil {
-		return 0, errNoRestore("app.db can't be read")
+		return 0, unreadable(err)
 	}
 	if uv < in.From || uv > in.To {
 		return 0, fmt.Errorf("app.db is at version %d, outside migrate.intent's %d → %d", uv, in.From, in.To)
 	}
 	if err := p.QueryRowContext(ctx, "SELECT count(*) FROM meta WHERE key = ?", markerKey(in.From, in.To)).Scan(&rows); err != nil {
-		return 0, errNoRestore("app.db can't be read")
+		return 0, unreadable(err)
 	}
 	if rows != 0 {
-		return 0, errors.New("app.db has the post_migration_started row: the new version started after the migration")
+		return 0, pastRollback{errors.New("app.db has the post_migration_started row: the new version started after the migration")}
 	}
 	return uv, nil
 }
@@ -238,4 +243,23 @@ func readForRollback(ctx context.Context, stateDir string, in *intent) (int, err
 // go forward, not back.
 func errNoRestore(what string) error {
 	return fmt.Errorf("%s: fix forward with a newer image, or follow the upgrade runbook", what)
+}
+
+// pastRollback marks a refusal that leaves db rebuild as the way out (ADR-0040): app.db
+// absent, not a regular file or damaged; the new version started (a post-migration-started
+// file or row); or a snapshot that doesn't verify. Its text is the refusal's own. Every
+// other refusal (another build's migration, a stray file, an I/O or permission error) is
+// left unmarked, and db rebuild refuses with it too.
+type pastRollback struct{ error }
+
+func (e pastRollback) Unwrap() error { return e.error }
+
+// unreadable is readForRollback's refusal when app.db can't be read: marked when SQLite says
+// the file is damaged or isn't a database, not for a permission or I/O error.
+func unreadable(err error) error {
+	e := errNoRestore("app.db can't be read")
+	if errors.Is(damaged(err), ErrDamaged) {
+		return pastRollback{e}
+	}
+	return e
 }

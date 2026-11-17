@@ -149,8 +149,13 @@ func beginRebuild(ctx context.Context, stateDir string, now time.Time, fsys fs.F
 		if err != nil {
 			return Rebuild{}, err
 		}
-		if _, err := checkEligible(ctx, stateDir, len(ms), &rollbackIntent{Dir: rollbackDirName(now)}); err == nil {
+		_, err = checkEligible(ctx, stateDir, len(ms), &rollbackIntent{Dir: rollbackDirName(now)})
+		var past pastRollback
+		switch {
+		case err == nil:
 			return refuse(errors.New("a migration was interrupted (migrate.intent), and db rollback can undo it: run db rollback first (ADR-0035)"))
+		case !errors.As(err, &past):
+			return refuse(fmt.Errorf("a migration was interrupted (migrate.intent), and db rollback refuses it: %w", err))
 		}
 		left, err := migrationLeftovers(stateDir)
 		if err != nil {

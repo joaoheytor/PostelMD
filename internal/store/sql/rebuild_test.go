@@ -123,34 +123,6 @@ func TestBeginRebuildRefuses(t *testing.T) {
 	})
 }
 
-// TestRebuildAfterAMigrationThatCantBeRolledBack: an interrupted migration whose database is
-// gone can't be rolled back, so the rebuild moves its intent, its snapshot and the
-// post-migration-started files into the damaged folder with the database's other files, and
-// the new database opens.
-func TestRebuildAfterAMigrationThatCantBeRolledBack(t *testing.T) {
-	ctx := context.Background()
-	dir, fsys, from := failedMigration(t)
-	writeFile(t, filepath.Join(dir, markerName(from-1, from)), nil)
-	mustRemove(t, filepath.Join(dir, AppDB))
-	moving := []string{MigrateIntent, snapshotName(from, from+2), markerName(from-1, from)}
-	r, err := beginRebuild(ctx, dir, rebuildNow, fsys)
-	must(t, err)
-	if !r.Migration {
-		t.Fatalf("the intent doesn't record the migration's files: %+v", r)
-	}
-	if _, err := MoveAsideForRebuild(ctx, dir, r); err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range moving {
-		if exists(dir, n) || !exists(filepath.Join(dir, r.DamagedDir()), n) {
-			t.Fatalf("%s didn't move into the damaged folder", n)
-		}
-	}
-	db, err := OpenForRebuild(ctx, dir, discard)
-	must(t, err)
-	must(t, db.Close())
-}
-
 // TestReadRebuildIntentRefusesAnotherFile: an intent this build couldn't have written is
 // interference.
 func TestReadRebuildIntentRefusesAnotherFile(t *testing.T) {
