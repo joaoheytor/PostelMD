@@ -49,7 +49,7 @@ ID + generation ETag flips it.
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
 | [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Accepted |
-| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022; draft keys: see 0023; nested repositories: see 0026; save mismatch and temp sweep: see 0027; `412` over a file too large to read: see 0029) |
+| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022; draft keys: see 0023; nested repositories: see 0026; save mismatch and temp sweep: see 0027; `412` over a file too large to read: see 0029; a credential change that can't be saved: see 0038) |
 | [0021](0021-mermaid-in-a-sandboxed-frame.md) | Mermaid renders in a sandboxed frame, shown as images | Accepted |
 | [0022](0022-mvp-trash-layout.md) | The MVP trash keeps each item's name in a folder of its own | Accepted |
 | [0023](0023-a-draft-key-per-note-session.md) | A draft key per note session | Accepted |
@@ -67,3 +67,4 @@ ID + generation ETag flips it.
 | [0035](0035-db-rollback.md) | `postelmd db rollback` and retiring `migrate.intent` | Accepted |
 | [0036](0036-the-startup-scan.md) | The startup scan: one transaction per pass, re-checked under the vault mutex | Accepted (a read's full pass after a failed one: see 0037) |
 | [0037](0037-the-read-only-state.md) | The read-only state after a database write fault, and a full pass that keeps failing | Accepted |
+| [0038](0038-a-credential-change-that-cant-be-saved.md) | A credential change that can't be saved | Accepted |

@@ -42,7 +42,8 @@ func newEnv(t *testing.T) *env {
 
 func (e *env) open(t *testing.T) *Service {
 	t.Helper()
-	s, err := Open(e.root, audit.New(slog.New(slog.NewTextHandler(e.logs, nil))))
+	l := slog.New(slog.NewTextHandler(e.logs, nil))
+	s, err := Open(e.root, audit.New(l), l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,13 +329,13 @@ func TestStateFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.dir, credentialFile), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(e.root, audit.New(slog.New(slog.DiscardHandler))); err == nil || !strings.Contains(err.Error(), "reset-password") {
+	if _, err := Open(e.root, audit.New(slog.New(slog.DiscardHandler)), slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "reset-password") {
 		t.Fatalf("a damaged auth.json = %v, want a pointer to reset-password", err)
 	}
 	if err := os.WriteFile(filepath.Join(e.dir, secretFile), []byte("short"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(e.root, audit.New(slog.New(slog.DiscardHandler))); err == nil {
+	if _, err := Open(e.root, audit.New(slog.New(slog.DiscardHandler)), slog.New(slog.DiscardHandler)); err == nil {
 		t.Fatal("a short secret was accepted")
 	}
 }

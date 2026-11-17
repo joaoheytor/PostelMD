@@ -212,7 +212,8 @@ func notSavedMessage(route string) string {
 	const restart = "but the server couldn't save the change (is its disk full?), so a restart would undo it"
 	if route == "PUT /api/v1/password" {
 		return "every session is logged out and the new password works, " + restart +
-			"; free space on the server, log in with the new password and change it again"
+			"; free space on the server, log in with the new password and change it again; " +
+			"if the server restarted before you repeated it, the old password is back: log in with it and change the password again"
 	}
 	return "every session is logged out, " + restart + "; free space on the server, log in and log out everywhere again"
 }

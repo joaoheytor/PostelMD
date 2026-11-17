@@ -1,6 +1,6 @@
 # ADR-0020: MVP scope: one user, one vault, no database
 
-- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md), its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md), its "what `git add -A` would" commit bullet, for nested repositories, by [ADR-0026](0026-nested-repositories-in-the-vault.md), its save-mismatch and startup-sweep statements by [ADR-0027](0027-landed-retries-and-the-adoption-marker.md), and its save and restore `412` rows, for a file over the read limit, by [ADR-0029](0029-a-save-over-a-file-too-large-to-read.md)
+- **Status:** Accepted (2026-11-10, with the commit dialog's secret check, #99); its trash paragraph is superseded by [ADR-0022](0022-mvp-trash-layout.md), its draft-key bullets by [ADR-0023](0023-a-draft-key-per-note-session.md), its "what `git add -A` would" commit bullet, for nested repositories, by [ADR-0026](0026-nested-repositories-in-the-vault.md), its save-mismatch and startup-sweep statements by [ADR-0027](0027-landed-retries-and-the-adoption-marker.md), its save and restore `412` rows, for a file over the read limit, by [ADR-0029](0029-a-save-over-a-file-too-large-to-read.md), and its "bumps the epoch, which revokes every session" sentence, when `auth.json` can't be saved, by [ADR-0038](0038-a-credential-change-that-cant-be-saved.md)
 - **Date:** 2026-11-09
 
 ## Context
@@ -334,19 +334,3 @@ design.
 | No auth for a single user | Auth stays on (ADR-0005, FrankMD lesson); one password costs little. |
 | A few trusted accounts with equal access | Not needed yet: the maintainer is the only user. Accounts come with roles in v0.3. |
 | Push in the MVP, without the secret gate | Pushing a secret to a remote is the one MVP-sized mistake we can't undo; push waits for the gate. |
-
-## Clarifications
-- **2026-11-17, a revocation that can't be saved ([#187](https://github.com/joaoheytor/PostelMD/issues/187)).**
-  "Changing the password or 'log out everywhere' bumps the epoch, which revokes every
-  session" holds when `auth.json` can't be saved (a full disk, a read-only volume): the new
-  credential (epoch, and the new password's hash) becomes current in memory anyway, so
-  every earlier session and the old password stop working at once. Keeping the old
-  credential would leave a stolen cookie valid, which is what the bump exists to stop. The
-  request answers `500` with a message saying the change wasn't saved, clears the caller's
-  (already revoked) cookie and issues no new session, and logs the error without its text.
-  The audit record (`sessions.revoked` or `password.changed`) is still written, with
-  `saved=false`. A restart reads the old `auth.json` and brings the old sessions back, so
-  the message tells the user to free space and repeat the change; the repeated change saves
-  over the in-memory credential, whose epoch is already higher. `postelmd reset-password`
-  is unchanged: it runs with the server stopped, so there is no in-memory credential, and a
-  failed save fails the command without an audit record.

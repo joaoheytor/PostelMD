@@ -321,5 +321,6 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   operation and the system error (for example `open`, `EIO`), as the trash API does.
 - "Log out everywhere" and a password change now log out every session even when the
   server can't save the change (for example on a full disk), instead of leaving a stolen
-  session valid. The request still fails, and says that a restart would undo the change
-  until you free space and repeat it (#187).
+  session valid. The server saves the change on its own once space is freed. Until then
+  the request fails and says that a restart would undo the change (and, for a password
+  change, bring the old password back), so free space and repeat it (#187).

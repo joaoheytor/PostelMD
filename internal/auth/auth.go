@@ -50,18 +50,11 @@ func (e *WaitError) Unwrap() error {
 	return nil
 }
 
-// notSaved is ErrNotSaved with the save's error as its only cause, so the log can still
-// name that error's type (errattr.Pathless follows a single chain).
-type notSaved struct{ err error }
-
-func (e notSaved) Error() string        { return ErrNotSaved.Error() + ": " + e.err.Error() }
-func (e notSaved) Is(target error) bool { return target == ErrNotSaved }
-func (e notSaved) Unwrap() error        { return e.err }
-
 // Service is the single user's authentication.
 type Service struct {
 	root  *fs.Root // the state directory
 	audit *audit.Log
+	log   *slog.Logger // operational warnings, never an audit event
 	now   func() time.Time
 	sess  *sessions
 	bo    *backoff
@@ -75,6 +68,7 @@ type Service struct {
 
 	mu           sync.Mutex
 	cred         *credential // nil before setup
+	unsaved      bool        // cred is newer than auth.json (ADR-0038)
 	setupToken   string
 	setupExpires time.Time
 
@@ -82,8 +76,9 @@ type Service struct {
 	rejectSuppressed int       // bad setup tokens not recorded since
 }
 
-// Open loads the credential and the instance secret from the state directory.
-func Open(root *fs.Root, a *audit.Log) (*Service, error) {
+// Open loads the credential and the instance secret from the state directory. log gets
+// operational warnings; audit events go to a.
+func Open(root *fs.Root, a *audit.Log, log *slog.Logger) (*Service, error) {
 	secret, err := loadOrCreateSecret(root)
 	if err != nil {
 		return nil, err
@@ -92,19 +87,19 @@ func Open(root *fs.Root, a *audit.Log) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{root: root, audit: a, now: time.Now, cred: cred}
+	s := &Service{root: root, audit: a, log: log, now: time.Now, cred: cred}
 	s.sess = newSessions(secret, func() time.Time { return s.now() })
 	s.bo = newBackoff(func() time.Time { return s.now() })
 	return s, nil
 }
 
 // OpenDir is Open on the state directory dir; Close releases it.
-func OpenDir(dir string, a *audit.Log) (*Service, error) {
+func OpenDir(dir string, a *audit.Log, log *slog.Logger) (*Service, error) {
 	root, err := fs.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
-	s, err := Open(root, a)
+	s, err := Open(root, a, log)
 	if err != nil {
 		_ = root.Close()
 		return nil, err
@@ -130,6 +125,9 @@ func (s *Service) NeedsSetup() bool {
 
 // Login checks the password for a source IP and returns a session.
 func (s *Service) Login(ctx context.Context, ip, password string) (string, error) {
+	s.mu.Lock()
+	s.retryUnsaved()
+	s.mu.Unlock()
 	epoch, err := s.verify(ctx, ip, password)
 	if err != nil {
 		return "", err
@@ -141,6 +139,7 @@ func (s *Service) Login(ctx context.Context, ip, password string) (string, error
 // Check verifies a session cookie on every request (CLAUDE.md rule 16).
 func (s *Service) Check(cookie string) error {
 	s.mu.Lock()
+	s.retryUnsaved()
 	cred := s.cred
 	s.mu.Unlock()
 	if cred == nil {
@@ -264,34 +263,6 @@ func (s *Service) hash(password string) (string, error) {
 	defer s.hashMu.Unlock()
 	s.hashes.Add(1)
 	return HashPassword(password)
-}
-
-// anyEpoch: update applies whatever the current epoch is (epochs start at 1).
-const anyEpoch = 0
-
-// update applies change to a copy of the credential, saves it, then makes it current. With
-// an epoch, it is a compare-and-swap: ErrBadSession if the credential changed since then.
-//
-// Every change bumps the epoch, so it fails closed: when the save fails, the change is made
-// current anyway and the error wraps ErrNotSaved. Keeping the old credential would leave the
-// sessions it revokes (a stolen cookie, the old password) valid (#187).
-func (s *Service) update(epoch uint64, change func(*credential)) (uint64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cred == nil {
-		return 0, ErrNotSetUp
-	}
-	if epoch != anyEpoch && s.cred.Epoch != epoch {
-		return 0, ErrBadSession
-	}
-	c := *s.cred
-	change(&c)
-	err := saveCredential(s.root, &c)
-	s.cred = &c
-	if err != nil {
-		return 0, notSaved{err}
-	}
-	return c.Epoch, nil
 }
 
 // ResetPassword sets a new password offline in the state directory dir

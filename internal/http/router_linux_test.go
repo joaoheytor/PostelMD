@@ -36,7 +36,7 @@ func newLoggingServer(t *testing.T, tls bool, log *slog.Logger) (*httptest.Serve
 	if err := os.WriteFile(filepath.Join(notes, "a.md"), []byte("A"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	svc, err := auth.OpenDir(state, audit.New(slog.New(slog.DiscardHandler)))
+	svc, err := auth.OpenDir(state, audit.New(slog.New(slog.DiscardHandler)), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
