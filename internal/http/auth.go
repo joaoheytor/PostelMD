@@ -206,6 +206,17 @@ func (a *AuthAPI) password(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
+// notSavedMessage tells the caller of a change that took effect but wasn't saved what
+// happened and what to do.
+func notSavedMessage(route string) string {
+	const restart = "but the server couldn't save the change (is its disk full?), so a restart would undo it"
+	if route == "PUT /api/v1/password" {
+		return "every session is logged out and the new password works, " + restart +
+			"; free space on the server, log in with the new password and change it again"
+	}
+	return "every session is logged out, " + restart + "; free space on the server, log in and log out everywhere again"
+}
+
 func (a *AuthAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
 	var wait *auth.WaitError
 	if errors.As(err, &wait) {
@@ -225,6 +236,12 @@ func (a *AuthAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) 
 		writeError(w, stdhttp.StatusConflict, "already set up")
 	case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrBadProfile):
 		writeError(w, stdhttp.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, auth.ErrNotSaved):
+		// Every session is revoked in memory, this one too (#187), but a restart would
+		// bring them back: the caller has to repeat the change.
+		a.log.Error("auth change not saved", "route", r.Pattern, pathless(err))
+		setSession(w, r, "")
+		writeError(w, stdhttp.StatusInternalServerError, notSavedMessage(r.Pattern))
 	default:
 		a.log.Error("auth API", "route", r.Pattern, pathless(err))
 		writeError(w, stdhttp.StatusInternalServerError, "internal error")

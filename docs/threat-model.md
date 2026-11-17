@@ -21,8 +21,10 @@ the endpoint doesn't exist yet). In particular:
 The MVP adds:
 - **a stolen session cookie** is valid until it expires (7 days) or the password changes;
   one session can't be revoked server-side. Mitigations: `HttpOnly`, `SameSite=Lax`,
-  `Secure` on TLS, "log out everywhere" bumps the epoch, and a password change needs the
-  current password, so a stolen cookie can't lock the owner out;
+  `Secure` on TLS, "log out everywhere" bumps the epoch (in memory even when `auth.json`
+  can't be saved, so it fails closed until a restart, and the request says it must be
+  repeated; #187), and a password change needs the current password, so a stolen cookie
+  can't lock the owner out;
 - **`auth.json` and `secret.key`** in `/data/.postelmd/` (`0600`, reserved paths) are the
   whole credential: anyone who can read the volume can forge sessions, as with the key ring
   in the full design;

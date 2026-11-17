@@ -319,3 +319,7 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - An unexpected error in the notes or login API, or in the first import at setup, is logged
   without the error's text, which could name one of your notes: the log keeps the failed
   operation and the system error (for example `open`, `EIO`), as the trash API does.
+- "Log out everywhere" and a password change now log out every session even when the
+  server can't save the change (for example on a full disk), instead of leaving a stolen
+  session valid. The request still fails, and says that a restart would undo the change
+  until you free space and repeat it (#187).

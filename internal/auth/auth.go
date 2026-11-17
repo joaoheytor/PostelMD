@@ -22,6 +22,10 @@ var (
 	ErrBadToken     = errors.New("auth: invalid or expired setup token")
 	ErrBadPassword  = errors.New("auth: wrong password")
 	ErrBadProfile   = errors.New("auth: the name and email must be set, without control characters")
+	// ErrNotSaved: a password change or "log out everywhere" revoked every session in memory,
+	// but auth.json couldn't be saved. A restart would read the old credential and bring
+	// those sessions back, so the change must be repeated once the disk is writable (#187).
+	ErrNotSaved = errors.New("auth: the change took effect but wasn't saved")
 )
 
 // WaitError: this source must wait before trying a password again. Checked is set when this
@@ -45,6 +49,14 @@ func (e *WaitError) Unwrap() error {
 	}
 	return nil
 }
+
+// notSaved is ErrNotSaved with the save's error as its only cause, so the log can still
+// name that error's type (errattr.Pathless follows a single chain).
+type notSaved struct{ err error }
+
+func (e notSaved) Error() string        { return ErrNotSaved.Error() + ": " + e.err.Error() }
+func (e notSaved) Is(target error) bool { return target == ErrNotSaved }
+func (e notSaved) Unwrap() error        { return e.err }
 
 // Service is the single user's authentication.
 type Service struct {
@@ -157,6 +169,11 @@ func (s *Service) ChangePassword(ctx context.Context, ip, cookie, current, next 
 	// Saved only over the credential the current password was checked against: a change
 	// that saved in between (another session racing this one) wins, and this one is refused.
 	epoch, err := s.update(verified, func(c *credential) { c.PasswordHash = hash; c.Epoch++ })
+	if errors.Is(err, ErrNotSaved) {
+		// In effect until a restart, so audited; no session: the caller logs in again.
+		s.audit.Record(ctx, "password.changed", slog.String("ip", ip), slog.Bool("saved", false))
+		return "", err
+	}
 	if err != nil {
 		return "", err
 	}
@@ -169,7 +186,12 @@ func (s *Service) LogoutEverywhere(ctx context.Context, cookie string) error {
 	if err := s.Check(cookie); err != nil {
 		return err
 	}
-	if _, err := s.update(anyEpoch, func(c *credential) { c.Epoch++ }); err != nil {
+	_, err := s.update(anyEpoch, func(c *credential) { c.Epoch++ })
+	if errors.Is(err, ErrNotSaved) {
+		s.audit.Record(ctx, "sessions.revoked", slog.Bool("saved", false))
+		return err
+	}
+	if err != nil {
 		return err
 	}
 	s.audit.Record(ctx, "sessions.revoked")
@@ -249,6 +271,10 @@ const anyEpoch = 0
 
 // update applies change to a copy of the credential, saves it, then makes it current. With
 // an epoch, it is a compare-and-swap: ErrBadSession if the credential changed since then.
+//
+// Every change bumps the epoch, so it fails closed: when the save fails, the change is made
+// current anyway and the error wraps ErrNotSaved. Keeping the old credential would leave the
+// sessions it revokes (a stolen cookie, the old password) valid (#187).
 func (s *Service) update(epoch uint64, change func(*credential)) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -260,10 +286,11 @@ func (s *Service) update(epoch uint64, change func(*credential)) (uint64, error)
 	}
 	c := *s.cred
 	change(&c)
-	if err := saveCredential(s.root, &c); err != nil {
-		return 0, err
-	}
+	err := saveCredential(s.root, &c)
 	s.cred = &c
+	if err != nil {
+		return 0, notSaved{err}
+	}
 	return c.Epoch, nil
 }
 
