@@ -40,7 +40,7 @@ func TestARestartNeverRevivesARevokedCookie(t *testing.T) {
 }
 
 // TestAnUnsavedChangeIsSavedLater: while a change is held only in memory, the next login
-// or session check tries to save it again, and one pathless warning says it is unsaved.
+// or session check once retryEvery has passed tries to save it again, and one pathless warning says it is unsaved.
 func TestAnUnsavedChangeIsSavedLater(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -57,6 +57,7 @@ func TestAnUnsavedChangeIsSavedLater(t *testing.T) {
 			if err := s.LogoutEverywhere(ctx, cookie); !errors.Is(err, ErrNotSaved) {
 				t.Fatalf("revocation = %v, want ErrNotSaved", err)
 			}
+			e.now = e.now.Add(retryEvery)
 			tc.retry(s) // still read-only: the retry fails, and isn't logged again
 			again, _ := s.Login(ctx, "ip2", pw)
 			if err := s.LogoutEverywhere(ctx, again); !errors.Is(err, ErrNotSaved) {
@@ -68,6 +69,7 @@ func TestAnUnsavedChangeIsSavedLater(t *testing.T) {
 				t.Fatalf("want one pathless warning naming EACCES, logged %d:\n%s", n, out)
 			}
 			writable()
+			e.now = e.now.Add(retryEvery)
 			tc.retry(s)
 			if !strings.Contains(e.logs.String(), "now saved") {
 				t.Fatalf("the saved retry wasn't logged:\n%s", e.logs.String())

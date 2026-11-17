@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestCreateFile(t *testing.T) {
@@ -44,6 +46,57 @@ func TestCreateFile(t *testing.T) {
 		}
 		wantContent("secret", "SECRET")(t, filepath.Dir(vault))
 	})
+}
+
+// failFrom fails every step from the first one of kind from on with err, as a disk that
+// started failing (err EIO) or a process that was killed there (every later step refused).
+type failFrom struct {
+	from    OpKind
+	err     error
+	failing bool
+	only    bool // fail only the from step, so later steps (the cleanup) run
+}
+
+func (h *failFrom) Before(op Op) error {
+	if op.Kind == h.from {
+		h.failing = true
+		return h.err
+	}
+	if h.failing && !h.only {
+		return h.err
+	}
+	return nil
+}
+
+func (h *failFrom) After(Op, error) {}
+
+// TestCreateFileRemovesAFileItCouldNotSync: a failed fsync removes the new file, as a failed
+// write does, so a caller that retries doesn't leave one file per attempt (#189). A process
+// killed at the fsync leaves it (the removal is a step the hook refuses), for the startup
+// sweeps to find.
+func TestCreateFileRemovesAFileItCouldNotSync(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hook *failFrom
+		left bool
+	}{
+		{"fsync fails", &failFrom{from: OpSyncFile, err: unix.EIO, only: true}, false},
+		{"killed at the fsync", &failFrom{from: OpSyncFile, err: errors.New("killed")}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			r, err := OpenRoot(dir, WithHook(tc.hook))
+			mustDo(t, err)
+			t.Cleanup(func() { _ = r.Close() })
+			if err := r.CreateFile("new.tmp", []byte("x"), 0o600); !errors.Is(err, tc.hook.err) {
+				t.Fatalf("CreateFile with a failing fsync = %v, want %v", err, tc.hook.err)
+			}
+			_, err = os.Lstat(filepath.Join(dir, "new.tmp"))
+			if left := err == nil; left != tc.left {
+				t.Fatalf("after a failed fsync the file is left = %v, want %v (%v)", left, tc.left, err)
+			}
+		})
+	}
 }
 
 // TestCreateFileModeAndPerm: CreateFileMode sets exactly the bits asked for, even ones the

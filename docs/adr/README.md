@@ -67,4 +67,5 @@ ID + generation ETag flips it.
 | [0035](0035-db-rollback.md) | `postelmd db rollback` and retiring `migrate.intent` | Accepted |
 | [0036](0036-the-startup-scan.md) | The startup scan: one transaction per pass, re-checked under the vault mutex | Accepted (a read's full pass after a failed one: see 0037) |
 | [0037](0037-the-read-only-state.md) | The read-only state after a database write fault, and a full pass that keeps failing | Accepted |
-| [0038](0038-a-credential-change-that-cant-be-saved.md) | A credential change that can't be saved | Accepted |
+| [0038](0038-a-credential-change-that-cant-be-saved.md) | A credential change that can't be saved | Accepted (retry rate: see 0039) |
+| [0039](0039-a-held-credential-is-retried-at-most-every-five-seconds.md) | A held credential is retried at most every five seconds | Accepted |

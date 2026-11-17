@@ -69,6 +69,7 @@ type Service struct {
 	mu           sync.Mutex
 	cred         *credential // nil before setup
 	unsaved      bool        // cred is newer than auth.json (ADR-0038)
+	retryAt      time.Time   // while unsaved, no save is retried before then (ADR-0039)
 	setupToken   string
 	setupExpires time.Time
 

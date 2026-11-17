@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/errattr"
 )
@@ -56,19 +57,34 @@ func jumpEpoch(c *credential) {
 	c.Epoch += 1 + uint64(binary.BigEndian.Uint32(b[:]))
 }
 
+// retryEvery is the least time between two saves of a credential held only in memory
+// (ADR-0039): on a failing disk one save can be slow, and it runs under s.mu.
+const retryEvery = 5 * time.Second
+
 // holdUnsaved marks s.cred as held only in memory, warning once (without the error's
-// text, which names the state directory) until it is saved. s.mu is held.
+// text, which names the state directory) until it is saved. The next retry waits
+// retryEvery. s.mu is held.
 func (s *Service) holdUnsaved(err error) {
 	if !s.unsaved {
 		s.log.Warn("auth: a security change is held only in memory; a restart would undo it", errattr.Pathless(err))
 	}
 	s.unsaved = true
+	s.retryAt = s.now().Add(retryEvery)
 }
 
-// retryUnsaved saves a credential held only in memory. It runs on every login and session
-// check while one is held: one small atomic write, only until it succeeds. s.mu is held.
+// retryUnsaved saves a credential held only in memory. Logins and session checks call it
+// while one is held; it writes at most once every retryEvery, so the requests in between
+// neither touch the disk nor queue behind a slow write (#189). s.mu is held.
 func (s *Service) retryUnsaved() {
-	if !s.unsaved || s.cred == nil || saveCredential(s.root, s.cred) != nil {
+	if !s.unsaved || s.cred == nil {
+		return
+	}
+	now := s.now()
+	if now.Before(s.retryAt) {
+		return
+	}
+	if saveCredential(s.root, s.cred) != nil {
+		s.retryAt = now.Add(retryEvery)
 		return
 	}
 	s.unsaved = false

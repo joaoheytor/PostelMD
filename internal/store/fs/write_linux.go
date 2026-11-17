@@ -57,7 +57,11 @@ func (r *Root) createFile(rel string, data []byte, perm uint32, exact bool) erro
 	defer func() { _ = unix.Close(fd) }()
 	err = step(r.hook, Op{Kind: OpSyncFile, Path: rel}, func() error { return unix.Fsync(fd) })
 	if err != nil {
-		// Never retry a failed fsync (ADR-0003 §5): the caller fails the operation.
+		// Never retry a failed fsync (ADR-0003 §5): the caller fails the operation. The file
+		// is removed, as after a failed write, so a caller that retries (auth.json's held
+		// change, ADR-0038) doesn't leave one temp file per attempt (#189). The removal is a
+		// step of its own: after a simulated crash the hook refuses it, as a kill would.
+		_ = step(r.hook, Op{Kind: OpRemove, Path: rel}, func() error { return unix.Unlinkat(dfd, base, 0) })
 		return mapErr("sync", rel, err)
 	}
 	return nil
