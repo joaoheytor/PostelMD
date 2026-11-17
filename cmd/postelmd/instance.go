@@ -49,11 +49,25 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 		in.close(log, true)
 		return nil, err
 	}
+	// Before the scan, the first write after the boot UUID (ADR-0030's I/O errors, ADR-0037).
+	db.OnWriterFault(goReadOnly(in.vault, log))
 	if in.ids, in.stopIDs, err = startIDs(ctx, db, in.vault, paths.Vault, log); err != nil {
 		in.close(log, true)
 		return nil, err
 	}
 	return in, nil
+}
+
+// goReadOnly is the database's writer fault hook: it puts v read-only and logs it once, as an
+// error record without the failed write's text (the writer logs that, pathless; CLAUDE.md
+// rule 15).
+func goReadOnly(v *vault.Vault, log *slog.Logger) func() {
+	return func() {
+		if v.SetReadOnly() {
+			log.Error("the database couldn't be written, so the vault is read-only: reads work, changes are refused "+
+				"until the server restarts (ADR-0030). Check the disk and the state directory, then restart", "event", "read_only")
+		}
+	}
 }
 
 // close stops the scan's background work, then closes what is open. With checkpoint false

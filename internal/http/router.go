@@ -22,7 +22,7 @@ import (
 func NewRouter(a Auth, v Vault, ids IDs, ui fs.FS, build Build, log *slog.Logger) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("GET /healthz", ok)
-	mux.HandleFunc("GET /readyz", ok)
+	mux.HandleFunc("GET /readyz", readyz(v))
 	(&AuthAPI{auth: a, importer: v, log: log}).register(mux)
 	notesAPI := routed((&NotesAPI{notes: v, ids: ids, log: log}).mux())
 	private := stdhttp.NewServeMux()
@@ -52,9 +52,10 @@ type Vault interface {
 	Git
 	Trash
 	Importer
+	ReadOnly
 }
 
-// ok answers 200 with an empty body: /healthz and /readyz (ADR-0030, ADR-0004).
+// ok answers 200 with an empty body: /healthz (ADR-0030, ADR-0004).
 func ok(w stdhttp.ResponseWriter, _ *stdhttp.Request) { w.WriteHeader(stdhttp.StatusOK) }
 
 // setupGate implements ADR-0009's pre-setup routing: setup and health are served, any other

@@ -12,6 +12,8 @@ import (
 // appDB is what serve needs from the identity database, /data/.postelmd/app.db (ADR-0030).
 type appDB interface {
 	BootUUID(ctx context.Context) (string, error)
+	// OnWriterFault sets the hook a write fault runs once (ADR-0037).
+	OnWriterFault(hook func())
 	Close() error
 }
 

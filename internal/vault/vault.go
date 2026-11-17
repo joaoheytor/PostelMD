@@ -19,6 +19,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,8 +68,10 @@ type Vault struct {
 	opts []fs.Option
 	git  *git.Repo     // nil until EnableGit
 	mu   chan struct{} // the vault mutex; a channel so waiting is bounded
-	wait time.Duration
-	now  func() time.Time
+	// readOnly is set after a storage fault (SetReadOnly); mutations take writeLock.
+	readOnly atomic.Bool
+	wait     time.Duration
+	now      func() time.Time
 	// afterCheck, in tests only, runs once a commit's check has passed, still under the mutex.
 	afterCheck func()
 	// onWait, in tests only, runs when lock finds the mutex held, just before it waits.

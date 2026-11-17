@@ -339,11 +339,17 @@ Count them in the newest export (the setup lines aren't JSON, hence `fromjson?`)
 
 ```sh
 f=$(ls -t ~/postelmd-logs-*.jsonl | head -n 1)
-jq -cR 'fromjson? | select(.msg == "request" and .status >= 500 and .status != 503)' "$f"
+# 5xx except a busy 503; every 503 after a read_only record counts (see below)
+jq -cnR '[inputs | fromjson?] | (map(.event == "read_only") | index(true)) as $ro
+  | to_entries[] | select(.value.msg == "request" and .value.status >= 500
+    and (.value.status != 503 or ($ro != null and .key > $ro))) | .value' "$f"
 jq -cR 'fromjson? | select(.msg == "request" and .status == 412)' "$f" | wc -l
 ```
 
 A 503 with `Retry-After` (the vault was busy) is retried by the browser and isn't a failure.
+A 503 after an `"event":"read_only"` record is: the server refused the change because it is
+read-only ([Read-only after a storage error](#read-only-after-a-storage-error)). The request
+log doesn't record `Retry-After`, so the filter tells them apart by that record.
 
 ## Health
 
@@ -724,10 +730,37 @@ Your edits are safe meanwhile: the browser keeps them as drafts (IndexedDB) and 
 Don't close the tab or clear site data until a save succeeds. Then:
 
 - **Disk full:** free space on the filesystem holding the data folder (`df -h "$data"`, with
-  `$data` from [Where your data is](#where-your-data-is)). The next retry saves.
+  `$data` from [Where your data is](#where-your-data-is)). The next retry saves, unless the
+  log also has an `"event":"read_only"` record: then the database couldn't be written
+  either, and the server refuses changes until you restart it
+  ([Read-only after a storage error](#read-only-after-a-storage-error)).
 - **Permission denied:** something changed ownership, usually a `sudo` command or a `docker
   run` without `--user`. Fix it with `sudo chown -R "$(id -u):$(id -g)" "$data"` (and
   `"$notes"`, with an adopted folder).
+
+## Read-only after a storage error
+
+Builds after 0.1.0 only. Symptom: notes open and read, but nothing saves; the browser says
+the server is busy and keeps retrying. Every change (save, new note, move, delete, restore,
+commit) gets `503`. The log has one `ERROR` record with `"event":"read_only"`, and before it
+the error of the write that failed (`err` with `ENOSPC`, `EIO`, or a damaged database). `GET
+/readyz` answers `200` with the body `read-only`:
+
+```sh
+curl -s "http://localhost:$port/readyz"   # prints read-only ($port as in docker run's -p)
+```
+
+`docker ps` still shows the container **healthy**: its `HEALTHCHECK` uses `/healthz`, which
+doesn't look at this state. Check the log or `/readyz`'s body.
+
+The server stops writing `.postelmd/app.db` after a write failed there, because the disk
+was full or reported an I/O error, or the database is damaged. Only a restart ends it:
+
+1. **Keep the browser tab open.** Your edits are drafts in the browser; they save after the
+   restart. Don't clear site data.
+2. Fix the cause: free space (`df -h "$data"`), or check the disk (`dmesg` for I/O errors).
+3. Restart: `docker restart postelmd`. The start checks the database (`quick_check`); if it
+   is damaged, the start refuses and the message says what to do.
 
 ## State folder on a network filesystem
 

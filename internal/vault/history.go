@@ -252,7 +252,7 @@ func (v *Vault) RemoveGitLocks(ctx context.Context) error {
 	if v.git == nil {
 		return ErrNoGit
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return err
 	}

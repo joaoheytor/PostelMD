@@ -74,7 +74,8 @@ func (a *TrashAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 		writeError(w, stdhttp.StatusNotFound, "that folder doesn't exist")
 	case errors.Is(err, vault.ErrExists):
 		writeError(w, stdhttp.StatusConflict, "something with that name is already there; choose another name")
-	case errors.Is(err, vault.ErrNameTooLong), errors.Is(err, vault.ErrBusy), errors.Is(err, context.Canceled):
+	case errors.Is(err, vault.ErrNameTooLong), errors.Is(err, vault.ErrBusy), errors.Is(err, vault.ErrReadOnly),
+		errors.Is(err, context.Canceled):
 		a.notes.fail(w, r, err)
 	default:
 		a.log.Error("trash API", "route", r.Pattern, pathless(err))

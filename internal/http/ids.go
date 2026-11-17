@@ -6,6 +6,8 @@ import (
 	stdhttp "net/http"
 	"strconv"
 	"time"
+
+	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
 // IDs is what a read needs from file identity (ADR-0031, internal/ids). Seen gives a path
@@ -18,14 +20,15 @@ type IDs interface {
 // held runs a read's identity pass over p and reports whether it answered: a path held for
 // a rename match that resolves in the next seconds gets 503 with Retry-After (the client
 // keeps its draft and retries; ADR-0031). An error is logged and the read goes on: no file
-// ID is on the wire yet, and the next scan tries again.
+// ID is on the wire yet, and the next scan tries again. A read-only vault (ADR-0037) was
+// logged when it went read-only, so its refusal isn't logged per read.
 func (a *NotesAPI) held(w stdhttp.ResponseWriter, r *stdhttp.Request, p string) bool {
 	if a.ids == nil {
 		return false
 	}
 	wait, err := a.ids.Seen(r.Context(), p)
 	if err != nil {
-		if !errors.Is(err, context.Canceled) {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, vault.ErrReadOnly) {
 			a.log.Warn("a read couldn't record the file's identity; the next scan does", "route", r.Pattern, pathless(err))
 		}
 		return false
