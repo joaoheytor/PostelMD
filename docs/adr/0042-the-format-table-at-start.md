@@ -40,7 +40,10 @@ them by setting the build format to 2, not by skipping until it is.
   deleting a save's temp; and it writes an empty marker where there was none, which the
   table must tell from an empty one. So the first upgrade's refusals (the intent, the flag
   against the intent's vault UUID, the marker) run first and change nothing; the upgrade
-  itself runs once the vault is open. The format-2 rows, from ADR-0030:
+  itself runs once the vault is open. The auth state opens before these checks (after the
+  database, as in v0.1), so a refused first start can still write `auth.json` and
+  `secret.key` into the state directory: that is the instance's own state, and the vault is
+  untouched. The format-2 rows, from ADR-0030:
   the marker naming the stored vault UUID goes on; another UUID is refused (mount the right
   vault, or `db rebuild`); a marker that doesn't parse or isn't a regular file is refused,
   naming `vault claim`; a missing marker beside any row, or an empty one the identity check
@@ -65,8 +68,9 @@ them by setting the build format to 2, not by skipping until it is.
 - **Offline commands run as the state's owner.** From build format 2, `db rebuild`,
   `vault claim`, `db rollback` and `reset-password` refuse, before the layout check creates
   any folder and before the instance lock, when their effective UID isn't the owner of
-  `/data/.postelmd`, or of `/data` while `.postelmd` doesn't exist yet (`lstat`; a symlink or
-  a non-folder is refused too). What they create (a new `app.db`,
+  `/data/.postelmd` (`lstat`: a symlink or a non-folder there is refused too), or of `/data`
+  while `.postelmd` doesn't exist yet (`stat`: a data directory given as a symlink to a folder
+  is judged by its target). What they create (a new `app.db`,
   `rebuild.intent`, `damaged-<time>/`, `auth.json`) would belong to that UID, and the server,
   running as the owner, couldn't open it: a `docker run --rm … postelmd db rebuild` without
   `--user` runs as the image's user, and a `sudo` on the host as root. Root is no exception.

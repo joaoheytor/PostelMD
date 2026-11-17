@@ -20,13 +20,15 @@ var ErrNotOwner = errors.New("layout: this command must run as the user who owns
 // It runs before Prepare, which creates the folders as euid. What the command creates (a new
 // database, rebuild.intent, a moved folder) would belong to euid, and the server, running as
 // the owner, couldn't open it. Root is no exception. A state directory that is a symlink or not
-// a folder is refused too. It changes nothing.
+// a folder is refused too; a data directory that is a symlink is followed. It changes nothing.
 func CheckOwner(dataDir string, euid int) error {
 	dir := filepath.Join(dataDir, ".postelmd")
 	fi, err := os.Lstat(dir)
 	if errors.Is(err, os.ErrNotExist) {
+		// The data directory may be a symlink to a folder: its target's owner decides.
+		// .postelmd itself is never followed (Lstat above).
 		dir = dataDir
-		fi, err = os.Lstat(dir)
+		fi, err = os.Stat(dir)
 	}
 	if err != nil {
 		return fmt.Errorf("layout: the owner of the data: %w", err)

@@ -44,3 +44,18 @@ func TestCheckOwner(t *testing.T) {
 		t.Fatal("CheckOwner followed a symlinked state directory")
 	}
 }
+
+// TestCheckOwnerFollowsASymlinkedDataDir: before .postelmd exists, the data directory may be a
+// symlink to a folder (a host path given through a link); its target's owner decides. The
+// state directory itself is never followed (TestCheckOwner).
+func TestCheckOwnerFollowsASymlinkedDataDir(t *testing.T) {
+	me := os.Geteuid()
+	data := filepath.Join(t.TempDir(), "data")
+	must(t, os.Symlink(t.TempDir(), data))
+	if err := CheckOwner(data, me); err != nil {
+		t.Fatalf("CheckOwner on a symlinked data directory, as its owner = %v", err)
+	}
+	if err := CheckOwner(data, me+1); !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("CheckOwner on a symlinked data directory, as another user = %v, want ErrNotOwner", err)
+	}
+}
