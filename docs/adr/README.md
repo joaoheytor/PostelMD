@@ -71,3 +71,4 @@ ID + generation ETag flips it.
 | [0039](0039-a-held-credential-is-retried-at-most-every-five-seconds.md) | A held credential is retried at most every five seconds | Accepted |
 | [0040](0040-db-rebuild-and-vault-claim.md) | `db rebuild`, `vault claim` and the identity check: their mechanics | Accepted (step 2's file list, with an upgrade it takes over: see 0041) |
 | [0041](0041-the-first-upgrades-intent.md) | The first upgrade's intent and its mechanics | Accepted |
+| [0042](0042-the-format-table-at-start.md) | The format table at start, and offline commands run as the state's owner | Accepted |

@@ -27,7 +27,7 @@ func TestSetFormat(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(state, formatNew)); !os.IsNotExist(err) {
 		t.Fatalf("the temp is left: %v", err)
 	}
-	for _, n := range []int{0, FormatVersion + 1} {
+	for _, n := range []int{0, MaxFormat + 1} {
 		if err := SetFormat(state, n); err == nil {
 			t.Fatalf("SetFormat(%d) wrote it", n)
 		}

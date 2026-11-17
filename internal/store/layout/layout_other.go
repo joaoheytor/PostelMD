@@ -38,6 +38,16 @@ func EnsureFormat(state string, _ ...fs.Option) error {
 	return fmt.Errorf("layout: %s: %w", state, errors.ErrUnsupported)
 }
 
+// CheckFormat is unsupported outside Linux (issue #34).
+func CheckFormat(state string, _ int, _ ...fs.Option) (int, error) {
+	return 0, fmt.Errorf("layout: %s: %w", state, errors.ErrUnsupported)
+}
+
+// CheckOwner is unsupported outside Linux (issue #34).
+func CheckOwner(state string, _ int) error {
+	return fmt.Errorf("layout: %s: %w", state, errors.ErrUnsupported)
+}
+
 // Prepare is unsupported outside Linux (issue #34).
 func Prepare(dataDir string, _ Options) (Paths, Durability, error) {
 	return Paths{}, 0, fmt.Errorf("layout: %s: %w", dataDir, errors.ErrUnsupported)

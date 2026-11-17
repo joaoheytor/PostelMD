@@ -16,10 +16,14 @@ import (
 
 // dbRollback undoes a database migration that didn't finish (ADR-0035), with the server
 // stopped: it takes the instance lock, so it refuses to run next to a live server, and checks
-// the data format first, like every command that reads the state (ADR-0025).
+// the data format first, like every command that reads the state (ADR-0025), and from build
+// format 2 that it runs as the state's owner (ADR-0042).
 func dbRollback(cfg config.Config, stdout io.Writer) error {
 	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
 	if err != nil {
+		return err
+	}
+	if err := checkOwner(paths.State); err != nil {
 		return err
 	}
 	lk, err := lock.Acquire(paths.Lock)
@@ -27,7 +31,7 @@ func dbRollback(cfg config.Config, stdout io.Writer) error {
 		return fmt.Errorf("%w; stop the server first", err)
 	}
 	defer func() { _ = lk.Release() }()
-	if err := layout.EnsureFormat(paths.State); err != nil {
+	if _, err := layout.CheckFormat(paths.State, buildFormat); err != nil {
 		return err
 	}
 	r, err := sqlstore.Rollback(context.Background(), paths.State, time.Now())

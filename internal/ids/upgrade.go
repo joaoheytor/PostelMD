@@ -14,10 +14,18 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
-// ErrAnotherVault: the vault marker names another vault UUID than the one this upgrade
-// assigns. Nothing more was changed.
-var ErrAnotherVault = errors.New("ids: the vault marker names another vault than this state directory's; " +
-	"mount the vault this state belongs to (ADR-0030)")
+var (
+	// ErrAnotherVault: the vault marker names another vault UUID than the database's, or than
+	// the one a resumed upgrade assigns. Nothing more was changed.
+	ErrAnotherVault = errors.New("ids: the vault marker names another vault than this state directory's. " +
+		"Mount the vault this state belongs to; or, to use this one with new file IDs, run postelmd db rebuild " +
+		"with the server stopped (ADR-0030)")
+	// ErrStateNotHere: at data format 1, before any upgrade, the vault marker names a vault
+	// UUID: the vault belongs to a v0.2 instance whose state directory isn't this one.
+	ErrStateNotHere = errors.New("ids: the vault marker names a vault UUID, so this vault belongs to a v0.2 " +
+		"instance whose state directory isn't this one. Mount that state directory; after a rollback to v0.1 " +
+		"that didn't empty the marker, run postelmd db rebuild with the server stopped (ADR-0030)")
+)
 
 // UpgradeOptions are the first upgrade's inputs.
 type UpgradeOptions struct {
@@ -65,7 +73,10 @@ func Upgrade(ctx context.Context, db *sqlstore.DB, v *vault.Vault, o UpgradeOpti
 	if err != nil {
 		return out, err
 	}
-	if m.VaultUUID != "" && m.VaultUUID != want {
+	switch {
+	case m.VaultUUID != "" && in == nil:
+		return out, ErrStateNotHere
+	case m.VaultUUID != "" && m.VaultUUID != want:
 		return out, ErrAnotherVault
 	}
 	out.Resumed = in != nil

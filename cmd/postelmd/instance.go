@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
 
 	"github.com/joaoheytor/PostelMD/internal/audit"
 	"github.com/joaoheytor/PostelMD/internal/auth"
@@ -23,19 +24,43 @@ type instance struct {
 	stopIDs func()
 }
 
+// buildFormat is the data format this build writes, layout.FormatVersion. Tests set it to 2
+// to run format 2's startup and commands (ADR-0042) before FormatVersion is raised.
+var buildFormat = layout.FormatVersion
+
+// dataStart is what the format check found (ADR-0030's step 2).
+type dataStart struct {
+	format  int  // the data's format; a missing file is 1 from build format 2 (ADR-0042)
+	upgrade bool // build format 2: the first upgrade runs (format 1) or resumes (its intent is there)
+}
+
+// geteuid is os.Geteuid; tests replace it to be another user.
+var geteuid = os.Geteuid
+
+// checkOwner is the owner check of every command that changes the state with the server
+// stopped, from build format 2 (ADR-0042); at format 1 it checks nothing.
+func checkOwner(state string) error {
+	if buildFormat < 2 {
+		return nil
+	}
+	return layout.CheckOwner(state, geteuid())
+}
+
 // openInstance runs the startup steps after the listener (ADR-0030's order, as far as this
 // build goes): the data format (ADR-0025), app.db with its check, migrations and this start's
-// boot UUID, the auth state, go-git's transports, the vault (adoption check, temp sweep,
-// rename probe) and its git repository, then the startup scan's first pass when the vault
+// boot UUID, the auth state, go-git's transports, from build format 2 the format table's
+// vault check, the vault (adoption check, temp sweep, rename probe) and its git repository,
+// from build format 2 the first upgrade, then the startup scan's first pass when the vault
 // has file IDs (ADR-0031). Nothing is opened before the format check.
 func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slog.Logger) (*instance, error) {
 	if err := ctx.Err(); err != nil { // stopped while the listener came up
 		return nil, err
 	}
-	if err := layout.EnsureFormat(paths.State); err != nil {
+	start, err := checkDataFormat(paths.State)
+	if err != nil {
 		return nil, err
 	}
-	db, err := openAppDB(ctx, paths.State, boot, log)
+	db, err := openAppDB(ctx, paths.State, boot, start, log)
 	if err != nil {
 		return nil, err
 	}
@@ -45,12 +70,22 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 		return nil, err
 	}
 	installGitTransports()
+	// Before the vault opens: opening adopts the folder, writing a marker the table reads.
+	if err := checkVaultAtStart(ctx, db, start, paths.Vault, log); err != nil {
+		in.close(log, true)
+		return nil, err
+	}
 	if in.vault, err = openVault(paths.Vault, log); err != nil {
 		in.close(log, true)
 		return nil, err
 	}
-	// Before the scan, the first write after the boot UUID (ADR-0030's I/O errors, ADR-0037).
+	// Before the upgrade and the scan, the first writes after the boot UUID (ADR-0030's I/O
+	// errors, ADR-0037).
 	db.OnWriterFault(goReadOnly(in.vault, log))
+	if err := firstUpgrade(ctx, db, in.vault, start, paths, log); err != nil {
+		in.close(log, true)
+		return nil, err
+	}
 	if in.ids, in.stopIDs, err = startIDs(ctx, db, in.vault, paths.Vault, log); err != nil {
 		in.close(log, true)
 		return nil, err

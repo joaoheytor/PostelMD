@@ -13,14 +13,6 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
-// identityReady turns db rebuild and vault claim on for one test, as data format 2 will.
-func identityReady(t *testing.T) {
-	t.Helper()
-	old := identityCommandsReady
-	identityCommandsReady = true
-	t.Cleanup(func() { identityCommandsReady = old })
-}
-
 func vaultOf(data string) string { return filepath.Join(data, "vaults", "notes") }
 
 func markerOf(data string) string {
@@ -60,7 +52,7 @@ func TestTheIdentityCommandsRefuseBeforeFormat2(t *testing.T) {
 // for an upgrade the next start can finish (its vault UUID is the database's, the marker
 // empty), db rebuild and vault claim change nothing and say to start the server (ADR-0041).
 func TestTheIdentityCommandsRefuseDuringAnUpgrade(t *testing.T) {
-	identityReady(t)
+	atFormat2(t)
 	data := rebuiltData(t)
 	state := filepath.Join(data, ".postelmd")
 	m, err := vault.ReadMarker(vaultOf(data))
@@ -87,7 +79,7 @@ func TestTheIdentityCommandsRefuseDuringAnUpgrade(t *testing.T) {
 // TestDBRebuildTakesOverAStuckUpgrade: an upgrade.intent whose vault UUID isn't the
 // database's can't finish; db rebuild takes it over, says so, and records it (ADR-0041).
 func TestDBRebuildTakesOverAStuckUpgrade(t *testing.T) {
-	identityReady(t)
+	atFormat2(t)
 	data := rebuiltData(t)
 	state := filepath.Join(data, ".postelmd")
 	earlier, err := filepath.Glob(filepath.Join(state, "damaged-*"))
@@ -116,7 +108,7 @@ func TestDBRebuildTakesOverAStuckUpgrade(t *testing.T) {
 }
 
 func TestDBRebuildCommand(t *testing.T) {
-	identityReady(t)
+	atFormat2(t)
 	data := t.TempDir()
 	start(t, data).shutdown(t)
 	var stdout, stderr strings.Builder
@@ -144,7 +136,7 @@ func TestDBRebuildCommand(t *testing.T) {
 // and then writes it; a second run has nothing to do. When the identity check fails, --yes
 // isn't enough and --force is.
 func TestVaultClaimCommand(t *testing.T) {
-	identityReady(t)
+	atFormat2(t)
 	data := rebuiltData(t)
 	m, _ := vault.ReadMarker(vaultOf(data))
 	empty := func() {
@@ -194,7 +186,7 @@ func replaceFile(t *testing.T, p string) {
 // TestTheIdentityCommandsAudit: db rebuild and vault claim each write one audit record to
 // stdout, the sink serve uses; vault claim's says how it was confirmed.
 func TestTheIdentityCommandsAudit(t *testing.T) {
-	identityReady(t)
+	atFormat2(t)
 	data := t.TempDir()
 	start(t, data).shutdown(t)
 	var out strings.Builder
@@ -215,7 +207,7 @@ func TestTheIdentityCommandsAudit(t *testing.T) {
 // TestVaultClaimAsks: on a terminal, "yes" claims when the check passes, the vault's path
 // when it fails; any other answer changes nothing.
 func TestVaultClaimAsks(t *testing.T) {
-	identityReady(t)
+	atFormat2(t)
 	old := isTerminal
 	isTerminal = func(int) bool { return true }
 	t.Cleanup(func() { isTerminal = old })

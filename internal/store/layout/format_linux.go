@@ -40,26 +40,43 @@ var (
 // carries meaning, so a crash leaves no format file (the next start writes it) or a whole
 // one, and no intent is needed (CLAUDE.md rule 14).
 func EnsureFormat(state string, opts ...fs.Option) error {
+	_, err := CheckFormat(state, FormatVersion, opts...)
+	return err
+}
+
+// CheckFormat is EnsureFormat for a build that writes data format build (cmd/postelmd's
+// tests inject 2), and returns the format the data is at. A missing file at build 1 is
+// written; but from build 2 a missing file is v0.1 data or a new directory: it is format 1,
+// and nothing is written, so ADR-0030's format table runs the first upgrade, whose last step
+// writes the format (ADR-0041's follow-up).
+func CheckFormat(state string, build int, opts ...fs.Option) (int, error) {
 	r, err := fs.OpenRoot(state, opts...)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = r.Close() }()
 	b, err := r.ReadFile(formatFile)
 	switch {
 	case err == nil:
-		return checkFormat(state, b)
+		return checkFormat(state, b, build)
 	case !errors.Is(err, iofs.ErrNotExist):
-		return fmt.Errorf("layout: read %s/%s: %w", state, formatFile, err)
+		return 0, fmt.Errorf("layout: read %s/%s: %w", state, formatFile, err)
 	}
-	return writeFormat(r, state, FormatVersion)
+	if build >= 2 {
+		return 1, nil
+	}
+	return 1, writeFormat(r, state, build)
 }
+
+// MaxFormat is the newest data format this code can write: format 2's file IDs (ADR-0030).
+// FormatVersion is the one this build writes; part D of the IDs slice makes them equal.
+const MaxFormat = 2
 
 // SetFormat writes n into the format file, replacing what is there: the last step of the
 // first upgrade and of db rebuild (ADR-0030). Like EnsureFormat's write, it is one rename,
 // so a crash leaves the old format or n. The caller holds the instance lock.
 func SetFormat(state string, n int, opts ...fs.Option) error {
-	if n < 1 || n > FormatVersion {
+	if n < 1 || n > MaxFormat {
 		return fmt.Errorf("layout: data format %d isn't one this build writes", n)
 	}
 	r, err := fs.OpenRoot(state, opts...)
@@ -88,17 +105,17 @@ func writeFormat(r *fs.Root, state string, n int) error {
 	return nil
 }
 
-func checkFormat(state string, b []byte) error {
+func checkFormat(state string, b []byte, build int) (int, error) {
 	s := string(bytes.TrimSuffix(b, []byte("\n")))
 	n, err := strconv.Atoi(s)
 	if err != nil || n < 1 || s != strconv.Itoa(n) {
-		return fmt.Errorf("%w: %s/%s is damaged: it must hold a data format number. Back up the data "+
+		return 0, fmt.Errorf("%w: %s/%s is damaged: it must hold a data format number. Back up the data "+
 			"directory first. If only PostelMD 0.1 ever used it, delete that file and start again (it is written "+
 			"anew); otherwise restore the backup you took before the last upgrade (ADR-0025)", ErrBadFormat, state, formatFile)
 	}
-	if n > FormatVersion {
-		return fmt.Errorf("%w: this data was written by a newer PostelMD (format %d); run that version or newer",
+	if n > build {
+		return 0, fmt.Errorf("%w: this data was written by a newer PostelMD (format %d); run that version or newer",
 			ErrNewerFormat, n)
 	}
-	return nil
+	return n, nil
 }

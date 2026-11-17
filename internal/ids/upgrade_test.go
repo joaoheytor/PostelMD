@@ -157,7 +157,7 @@ func TestUpgradeRefuses(t *testing.T) {
 		}, sqlstore.ErrUpgradeInterference, false},
 		{"marker names another vault", func(e *env) {
 			must(t, vault.WriteMarker(e.dir, other, 1))
-		}, ErrAnotherVault, false},
+		}, ErrStateNotHere, false},
 		{"marker is a folder", func(e *env) {
 			p := filepath.Join(e.dir, vault.TmpDir, ".created-by-postelmd")
 			must(t, os.Remove(p))

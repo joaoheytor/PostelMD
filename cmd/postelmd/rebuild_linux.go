@@ -19,22 +19,25 @@ import (
 
 // identityCommandsReady: db rebuild and vault claim write the vault marker and the format of
 // data format 2, so they refuse, changing nothing, until this build's data format is 2
-// (ADR-0040). The tests turn it on to run them at format 1.
-var identityCommandsReady = layout.FormatVersion >= 2
+// (ADR-0040; tests set buildFormat to 2).
+func identityCommandsReady() bool { return buildFormat >= 2 }
 
 // errBeforeFormat2 is their refusal before data format 2.
 var errBeforeFormat2 = fmt.Errorf("this command arrives with data format 2, and this build writes data format %d; "+
 	"nothing was changed (ADR-0040)", layout.FormatVersion)
 
-// offline takes the instance lock and checks the data format, as every command that changes
-// the state does with the server stopped (ADR-0025), then runs fn. The lock is released
-// after fn.
+// offline checks the owner, takes the instance lock and checks the data format, as every
+// command that changes the state does with the server stopped (ADR-0025, ADR-0042), then
+// runs fn. The lock is released after fn.
 func offline(cfg config.Config, fn func(layout.Paths) error) error {
-	if !identityCommandsReady {
+	if !identityCommandsReady() {
 		return errBeforeFormat2
 	}
 	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
 	if err != nil {
+		return err
+	}
+	if err := checkOwner(paths.State); err != nil {
 		return err
 	}
 	lk, err := lock.Acquire(paths.Lock)
@@ -42,7 +45,7 @@ func offline(cfg config.Config, fn func(layout.Paths) error) error {
 		return fmt.Errorf("%w; stop the server first", err)
 	}
 	defer func() { _ = lk.Release() }()
-	if err := layout.EnsureFormat(paths.State); err != nil {
+	if _, err := layout.CheckFormat(paths.State, buildFormat); err != nil {
 		return err
 	}
 	return fn(paths)
@@ -55,7 +58,7 @@ func dbRebuild(cfg config.Config, stdout io.Writer) error {
 		ctx := context.Background()
 		log := slog.New(slog.NewJSONHandler(stdout, nil))
 		r, err := ids.Rebuild(ctx, ids.RebuildOptions{
-			State: paths.State, Vault: paths.Vault, Format: layout.FormatVersion, Now: time.Now(), Log: log,
+			State: paths.State, Vault: paths.Vault, Format: buildFormat, Now: time.Now(), Log: log,
 		})
 		if err != nil {
 			return err

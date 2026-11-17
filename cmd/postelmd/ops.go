@@ -30,12 +30,15 @@ func resetPassword(cfg config.Config, stdin *os.File, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if err := checkOwner(paths.State); err != nil { // from build format 2 (ADR-0042)
+		return err
+	}
 	lk, err := lock.Acquire(paths.Lock)
 	if err != nil {
 		return fmt.Errorf("%w; stop the server first", err)
 	}
 	defer func() { _ = lk.Release() }()
-	if err := layout.EnsureFormat(paths.State); err != nil { // never change a newer build's data
+	if _, err := layout.CheckFormat(paths.State, buildFormat); err != nil { // never change a newer build's data
 		return err
 	}
 	pw, err := readPassword(stdin, stdout)
