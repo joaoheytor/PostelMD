@@ -45,18 +45,23 @@ func (db *DB) OnWriterFault(hook func()) {
 // WriterFaulted reports whether a write transaction has failed with a writer fault.
 func (db *DB) WriterFaulted() bool { return db.fault.set.Load() }
 
-// check is called with every write transaction's error: a writer fault sets the fault and
-// fires the hook, and comes back wrapped with ErrWriterFault.
-func (f *fault) check(err error) error {
+// mark is called with a write transaction's error while the writer connection is still held,
+// so a writer waiting for the connection sees the fault once it gets it: a writer fault sets
+// the flag and comes back wrapped with ErrWriterFault. The hook runs later (fire), after the
+// connection is given back.
+func (f *fault) mark(err error) error {
 	if err == nil || !isWriterFault(err) {
 		return err
 	}
 	f.set.Store(true)
-	f.fire()
 	return errors.Join(ErrWriterFault, err)
 }
 
+// fire runs the hook, once, if a fault is set.
 func (f *fault) fire() {
+	if !f.set.Load() {
+		return
+	}
 	f.mu.Lock()
 	hook := f.hook
 	f.mu.Unlock()
@@ -65,14 +70,16 @@ func (f *fault) fire() {
 	}
 }
 
-// isWriterFault reports whether err carries SQLite's SQLITE_CORRUPT, SQLITE_IOERR or
-// SQLITE_FULL (their extended codes too, such as SQLITE_IOERR_WRITE).
+// isWriterFault reports whether err carries a SQLite error with a fault code.
 func isWriterFault(err error) bool {
 	var se *sqlite.Error
-	if !errors.As(err, &se) {
-		return false
-	}
-	switch se.Code() & 0xff {
+	return errors.As(err, &se) && isFaultCode(se.Code())
+}
+
+// isFaultCode reports whether a SQLite result code is SQLITE_CORRUPT, SQLITE_IOERR or
+// SQLITE_FULL, or one of their extended codes (such as SQLITE_IOERR_WRITE, 778).
+func isFaultCode(code int) bool {
+	switch code & 0xff {
 	case codeCorrupt, codeIOErr, codeFull:
 		return true
 	}

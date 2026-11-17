@@ -4,10 +4,12 @@ package ids
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/joaoheytor/PostelMD/internal/errattr"
+	sqlstore "github.com/joaoheytor/PostelMD/internal/store/sql"
 )
 
 // TombstoneTTL is how long an ended ID answers 410 before it is forgotten (ADR-0031).
@@ -59,11 +61,12 @@ func (s *Scanner) pass(ctx context.Context, n int) {
 func (s *Scanner) expire(ctx context.Context) {
 	t := time.NewTicker(s.expireEvery)
 	defer t.Stop()
+	logged := false
 	for {
 		n, err := s.db.ExpireTombstones(ctx, s.now().Add(-TombstoneTTL))
 		switch {
 		case err != nil && ctx.Err() == nil:
-			s.log.Warn("couldn't remove expired tombstones; the next run tries again", errattr.Pathless(err))
+			s.expireFailed(err, &logged)
 		case n > 0:
 			s.log.Info("expired tombstones removed", "count", n)
 		}
@@ -72,5 +75,18 @@ func (s *Scanner) expire(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// expireFailed logs a failed expiry. A writer fault is logged once (*logged): the database
+// refuses every write after it until a restart, so "the next run tries again" isn't true.
+func (s *Scanner) expireFailed(err error, logged *bool) {
+	if !errors.Is(err, sqlstore.ErrWriterFault) {
+		s.log.Warn("couldn't remove expired tombstones; the next run tries again", errattr.Pathless(err))
+		return
+	}
+	if !*logged {
+		*logged = true
+		s.log.Warn("couldn't remove expired tombstones: the database is read-only until a restart", errattr.Pathless(err))
 	}
 }

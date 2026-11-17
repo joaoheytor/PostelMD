@@ -19,9 +19,6 @@ func openAppDB(_ context.Context, state, _ string, _ *slog.Logger) (appDB, error
 	return nil, fmt.Errorf("sql: %s: %w", state, errors.ErrUnsupported)
 }
 
-// readOnlyOnFault has no database to watch outside Linux: openAppDB fails first.
-func readOnlyOnFault(appDB, *vault.Vault, *slog.Logger) {}
-
 // startIDs has nothing to scan outside Linux: openAppDB fails first.
 func startIDs(context.Context, appDB, *vault.Vault, string, *slog.Logger) (pmhttp.IDs, func(), error) {
 	return nil, func() {}, nil

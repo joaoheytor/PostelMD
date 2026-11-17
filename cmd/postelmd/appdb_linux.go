@@ -28,26 +28,6 @@ func openAppDB(ctx context.Context, state, boot string, log *slog.Logger) (appDB
 	return db, nil
 }
 
-// readOnlyOnFault makes a writer fault on db (SQLITE_CORRUPT, SQLITE_IOERR or SQLITE_FULL)
-// put v read-only (ADR-0030's I/O errors, ADR-0037). Call it before db's first write after
-// the boot UUID.
-func readOnlyOnFault(db appDB, v *vault.Vault, log *slog.Logger) {
-	if sdb, ok := db.(*sqlstore.DB); ok {
-		sdb.OnWriterFault(goReadOnly(v, log))
-	}
-}
-
-// goReadOnly puts v read-only and logs it once, as an error record without the failed
-// write's text (the writer logs that, pathless; CLAUDE.md rule 15).
-func goReadOnly(v *vault.Vault, log *slog.Logger) func() {
-	return func() {
-		if v.SetReadOnly() {
-			log.Error("the database couldn't be written, so the vault is read-only: reads work, changes are refused "+
-				"until the server restarts (ADR-0030). Check the disk and the state directory, then restart", "event", "read_only")
-		}
-	}
-}
-
 // startIDs runs the startup scan (ADR-0030's step 7, ADR-0031) when the database's file IDs
 // describe this vault: the "assigned" flag is set and the vault marker names the database's
 // vault UUID. Anything else is left as it is, without a scan: at data format 1 nothing

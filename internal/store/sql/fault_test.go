@@ -100,8 +100,9 @@ func TestAWriterFaultIsStickyAndRunsTheHookOnce(t *testing.T) {
 	}
 }
 
-// Other failures are not writer faults: a stale unit, a canceled context.
-func TestOtherWriteErrorsAreNotWriterFaults(t *testing.T) {
+// A write canceled by its context fails without a writer fault (a busy database is
+// TestABusyWriteIsNotAWriterFault; the codes are TestFaultCodes).
+func TestACanceledWriteIsNotAWriterFault(t *testing.T) {
 	db, _ := assigned(t)
 	var fired int
 	db.OnWriterFault(func() { fired++ })

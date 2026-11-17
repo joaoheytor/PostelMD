@@ -142,28 +142,40 @@ func failLevel(err error) slog.Level {
 
 // Close closes the read pool, checkpoints the WAL into the database (TRUNCATE, ADR-0030's
 // clean stop; a checkpoint a reader blocked is ErrCheckpointBusy) and closes the writer.
+// After a writer fault it forces no checkpoint into the faulted file: the WAL replays at the
+// next open, after its checks (ADR-0037).
 func (db *DB) Close() error {
 	rerr := db.r.Close()
-	var busy, logFrames, done int
-	cerr := db.w.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &done)
-	if cerr == nil && busy != 0 {
-		cerr = ErrCheckpointBusy
+	var cerr error
+	if !db.fault.set.Load() {
+		var busy, logFrames, done int
+		cerr = db.w.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &done)
+		if cerr == nil && busy != 0 {
+			cerr = ErrCheckpointBusy
+		}
 	}
 	return errors.Join(rerr, cerr, db.w.Close())
 }
 
 // writeTx runs fn in one write transaction (BEGIN IMMEDIATE). The writer connection is taken
 // within writerWait; fn must not use the writer pool itself (one connection: it would
-// deadlock, ADR-0030). After a writer fault it refuses without starting a transaction, and a
-// writer fault it meets comes back wrapped with ErrWriterFault (ADR-0037).
+// deadlock, ADR-0030). After a writer fault it refuses without starting a transaction, also
+// when the fault happened while it waited for the connection; a writer fault it meets comes
+// back wrapped with ErrWriterFault, and then the hook runs (ADR-0037).
 func (db *DB) writeTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	err := db.tx(ctx, fn)
+	if errors.Is(err, ErrWriterFault) {
+		db.fault.fire()
+	}
+	return err
+}
+
+// tx is writeTx while it holds the writer connection: the fault flag is set before the
+// connection is given back (mark runs before the deferred Close).
+func (db *DB) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	if db.fault.set.Load() {
 		return ErrWriterFault
 	}
-	return db.fault.check(db.tx(ctx, fn))
-}
-
-func (db *DB) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	wait, cancel := context.WithTimeout(ctx, writerWait)
 	conn, err := db.w.Conn(wait)
 	cancel()
@@ -171,6 +183,14 @@ func (db *DB) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 		return fmt.Errorf("sql: the writer is busy: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	if db.fault.set.Load() { // a write faulted while this one waited for the connection
+		return ErrWriterFault
+	}
+	return db.fault.mark(db.run(ctx, conn, fn))
+}
+
+// run runs fn in a transaction on conn and commits it.
+func (db *DB) run(ctx context.Context, conn *sql.Conn, fn func(*sql.Tx) error) error {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sql: begin: %w", err)

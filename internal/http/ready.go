@@ -14,6 +14,13 @@ type ReadOnly interface {
 const readOnlyMessage = "the server is read-only after a storage error; reading works, changes wait until " +
 	"an administrator fixes it and restarts the server"
 
+// writeReadOnly answers a change to a read-only vault: 503 with the code "read-only" (the web
+// app's follow-up #186 reads it) and no Retry-After, since it lasts until a restart
+// (ADR-0037). The client keeps its draft.
+func writeReadOnly(w stdhttp.ResponseWriter) {
+	writeJSON(w, stdhttp.StatusServiceUnavailable, map[string]string{"code": "read-only", "error": readOnlyMessage})
+}
+
 // readyz answers 200: reads still work while the vault is read-only, so an orchestrator must
 // not restart the server in a loop or take it out of service. The body is a state word only,
 // "read-only", never a path or error text (CLAUDE.md rule 15); empty otherwise.

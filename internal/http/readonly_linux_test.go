@@ -29,17 +29,18 @@ func TestAReadOnlyVault(t *testing.T) {
 	srv := httptest.NewServer(NewNotesAPI(v, slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 
-	ready := func() (int, string) {
+	ready := func() (int, string, stdhttp.Header) {
 		rec := httptest.NewRecorder()
 		readyz(v).ServeHTTP(rec, httptest.NewRequest(stdhttp.MethodGet, "/readyz", nil))
-		return rec.Code, rec.Body.String()
+		return rec.Code, rec.Body.String(), rec.Header()
 	}
-	if code, body := ready(); code != 200 || body != "" {
-		t.Fatalf("/readyz = %d %q, want 200 and an empty body", code, body)
+	if code, body, h := ready(); code != 200 || body != "" || h.Get("Cache-Control") != "no-store" {
+		t.Fatalf("/readyz = %d %q (Cache-Control %q), want 200, an empty body, no-store", code, body, h.Get("Cache-Control"))
 	}
 	v.SetReadOnly()
-	if code, body := ready(); code != 200 || body != "read-only\n" {
-		t.Fatalf("/readyz read-only = %d %q, want 200 \"read-only\"", code, body)
+	if code, body, h := ready(); code != 200 || body != "read-only\n" || h.Get("Cache-Control") != "no-store" ||
+		h.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("/readyz read-only = %d %q %v, want 200 \"read-only\", no-store, text/plain", code, body, h)
 	}
 	for _, c := range []call{
 		{method: "PUT", path: "/api/v1/notes/a.md", body: "B", header: map[string]string{"If-Match": revA()}},
@@ -47,7 +48,7 @@ func TestAReadOnlyVault(t *testing.T) {
 		{method: "DELETE", path: "/api/v1/notes/a.md"},
 	} {
 		resp, body := do(t, srv, c)
-		if resp.StatusCode != 503 || resp.Header.Get("Retry-After") != "" || body != fmt.Sprintf("{%q:%q}\n", "error", readOnlyMessage) {
+		if resp.StatusCode != 503 || resp.Header.Get("Retry-After") != "" || body != readOnlyBody {
 			t.Errorf("%s %s = %d (Retry-After %q) %s; want 503, no Retry-After, the read-only message", c.method, c.path,
 				resp.StatusCode, resp.Header.Get("Retry-After"), body)
 		}
@@ -65,7 +66,12 @@ func TestTheTrashAPIAnswersReadOnly(t *testing.T) {
 	rec := httptest.NewRecorder()
 	api := &TrashAPI{notes: &NotesAPI{log: slog.New(slog.DiscardHandler)}, log: slog.New(slog.DiscardHandler)}
 	api.fail(rec, httptest.NewRequest(stdhttp.MethodPost, "/api/v1/trash/x/restore", nil), fmt.Errorf("restore: %w", vault.ErrReadOnly))
-	if rec.Code != 503 || rec.Header().Get("Retry-After") != "" {
-		t.Fatalf("= %d (Retry-After %q), want 503 without Retry-After", rec.Code, rec.Header().Get("Retry-After"))
+	if rec.Code != 503 || rec.Header().Get("Retry-After") != "" || rec.Body.String() != readOnlyBody {
+		t.Fatalf("= %d (Retry-After %q) %s, want 503 without Retry-After, the read-only body", rec.Code,
+			rec.Header().Get("Retry-After"), rec.Body.String())
 	}
 }
+
+// readOnlyBody is the 503's JSON: a machine-readable code for the web app (#186) and the
+// message.
+var readOnlyBody = fmt.Sprintf("{%q:%q,%q:%q}\n", "code", "read-only", "error", readOnlyMessage)

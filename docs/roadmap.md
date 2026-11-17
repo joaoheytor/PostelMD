@@ -233,9 +233,12 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
     most once a minute (`TestAFailedFullPassIsNotRetriedByEveryRead`, ADR-0037);
   - a write to `app.db` that fails with `SQLITE_CORRUPT`, `SQLITE_IOERR` or `SQLITE_FULL`
     puts the vault read-only: every change gets `503`, reads work, `/readyz` stays `200`
-    with the body `read-only`, and the database isn't written again until a restart
-    (ADR-0037: `TestAWriterFaultIsStickyAndRunsTheHookOnce`,
-    `TestAReadOnlyVaultRefusesEveryChange`, `TestAReadOnlyVault`);
+    with the body `read-only`, and no transaction is written again until a restart, also
+    one waiting for the writer connection (ADR-0037:
+    `TestAWriterFaultIsStickyAndRunsTheHookOnce`,
+    `TestAWriterWaitingForTheConnectionIsRefusedAfterAFault`,
+    `TestAReadOnlyVaultRefusesEveryChange`, `TestAReadOnlyVault`, end to end through
+    `openInstance` in `TestADatabaseWriteFaultMakesServeReadOnly`);
   - the startup scan crashed at each row of ADR-0036's recovery table reaches that row's
     outcome, the 10 s counted across the restart (process-kill model done:
     `TestScanCrashPoints`, `TestApplyScanCrashPoints`; the power-loss model is #182);

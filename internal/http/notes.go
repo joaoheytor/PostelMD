@@ -247,8 +247,7 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 		w.Header().Set("Retry-After", "1")
 		writeError(w, stdhttp.StatusServiceUnavailable, "busy, retry")
 	case errors.Is(err, vault.ErrReadOnly):
-		// No Retry-After: it lasts until a restart (ADR-0037). The client keeps its draft.
-		writeError(w, stdhttp.StatusServiceUnavailable, readOnlyMessage)
+		writeReadOnly(w)
 	case errors.Is(err, context.Canceled):
 		// The client went away: nobody reads the answer, but the write log records it as
 		// 499, never as the 200 net/http would assume.
@@ -259,23 +258,6 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 		a.log.Error("notes API", "route", r.Pattern, pathless(err))
 		writeError(w, stdhttp.StatusInternalServerError, "internal error")
 	}
-}
-
-func writeJSON(w stdhttp.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w stdhttp.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
-// oneLine escapes line breaks so a value from a request stays on its log line.
-func oneLine(s string) string {
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	return strings.ReplaceAll(s, "\r", `\r`)
 }
 
 // decodeJSON reads a small JSON body into v, refusing other content types (a cross-site

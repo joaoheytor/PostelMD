@@ -99,9 +99,12 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - If a write to `.postelmd/app.db` fails because the disk is full, the disk reports an I/O
   error or the database is damaged, the server goes read-only until it restarts: notes still
   open and read, every change (save, create, move, delete, restore, commit) is refused with
-  `503` and the web app keeps your edits as drafts, `/readyz` stays `200` with the body
-  `read-only`, and the log has one error record with `"event":"read_only"`. Fix the disk,
-  then restart. Until data format 2 assigns file IDs, nothing writes the database at run time.
+  `503` (JSON `code` `read-only`) and the web app keeps your edits as drafts, no transaction
+  is written to the database again, `/readyz` stays `200` with the body `read-only`, and the
+  log has one error record with `"event":"read_only"`. `docker ps` still shows the container
+  healthy. Keep the tab open, fix the disk, then restart (the runbook's "Read-only after a
+  storage error"). Until data format 2 assigns file IDs, nothing writes the database at run
+  time.
 
 ### Changed
 - `/healthz` and `/readyz` answer `200` instead of `204`. The server answers `/healthz` as

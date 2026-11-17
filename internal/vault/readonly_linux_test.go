@@ -56,6 +56,9 @@ func TestAReadOnlyVaultRefusesEveryChange(t *testing.T) {
 	if _, err := v.Status(ctx); err != nil {
 		t.Fatalf("status: %v", err)
 	}
+	if h, err := v.History("notes/a.md", 1); err != nil || len(h) != 1 {
+		t.Fatalf("history: %v, %v", h, err)
+	}
 	for _, p := range []string{"new.md", "folder", "b.md", TrashDir} {
 		if _, err := os.Lstat(filepath.Join(dir, p)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s exists after the refused changes: %v", p, err)

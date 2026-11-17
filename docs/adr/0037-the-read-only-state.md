@@ -15,26 +15,34 @@ database keeps being written, or what ends the state. The v0.1 MVP has no read-o
 (threat model D4); this is the first one. Data format 2 turns the startup scan on, which
 makes the scan's transaction the first write at run time, so the state comes before it.
 
-Supersedes, in ADR-0036's "A read" section, the sentence: "when the hold is due (or a match
-would move at once), the read runs a **full pass** instead, which checks rule 2's uniqueness
-against every path, and then reads." While that full pass keeps failing (a folder the walk
-can't read), every read of the held path walks the whole vault again
-([#184](https://github.com/joaoheytor/PostelMD/issues/184)).
+Supersedes, in ADR-0036's "A read" section, two sentences:
+1. "when the hold is due (or a match would move at once), the read runs a **full pass**
+   instead, which checks rule 2's uniqueness against every path, and then reads." While that
+   full pass keeps failing (a folder the walk can't read), every read of the held path walks
+   the whole vault again ([#184](https://github.com/joaoheytor/PostelMD/issues/184));
+2. "If the pass fails, the failure is logged without the path and the read goes on: no ID is
+   on the wire yet." A pass refused because the vault is read-only would log on every read.
 
 ## Decision
 
 ### Writer faults
 - `store/sql` checks every write transaction's error. `SQLITE_CORRUPT`, `SQLITE_IOERR` or
   `SQLITE_FULL` (any of their extended codes) is a **writer fault**: the operation fails with
-  `ErrWriterFault`, and from then on **every write transaction is refused** with
-  `ErrWriterFault` without starting one, until the process ends. A damaged or full database
-  isn't written again by a background job; the next start's checks (`quick_check`,
-  ADR-0030) decide what happens to it. A canceled context, a busy writer or a stale scan unit
-  is not a fault.
-- The first fault runs a hook, once, that `serve` sets right after opening the vault and
-  before the startup scan: it puts the vault **read-only** and logs one error record (event
-  `read_only`, no path or error text). The failed operation logs its own error with
-  `pathless`, as before.
+  `ErrWriterFault`, and from then on **no transaction is written again**: every write
+  transaction is refused with `ErrWriterFault` without starting one, until the process ends.
+  The fault is recorded before the writer connection is given back, and a writer that was
+  waiting for the connection checks again once it has it, so no write queued behind the
+  fault runs. A canceled context, a busy writer (`SQLITE_BUSY`) or a stale scan unit is not
+  a fault.
+- After a fault, `Close` forces no WAL checkpoint (`wal_checkpoint(TRUNCATE)`) into the
+  faulted file: the WAL replays at the next open, after its checks (`quick_check`,
+  ADR-0030), which decide what happens to the file. SQLite may still checkpoint on its own
+  when the last connection closes; that copies committed transactions only.
+- The first fault runs a hook, once, after the connection is given back. `serve` sets it
+  (`appDB.OnWriterFault`) right after opening the vault and before the startup scan: it puts
+  the vault **read-only** and logs one error record (event `read_only`, no path or error
+  text). The failed operation logs its own error with `pathless`, as before; the hourly
+  tombstone expiry logs a writer fault once, not every hour.
 
 ### The read-only vault
 - Every change is refused with `vault.ErrReadOnly`: save (also one with the note's current
@@ -42,24 +50,36 @@ can't read), every read of the held path walks the whole vault again
   and from the trash, commit (and the initial import at setup), removing git locks, and the
   startup scan's commit (`Locked`). A change already holding the vault mutex finishes; one
   waiting for it is refused once it gets it. Reads, the change list and history work.
-- The HTTP answer is **`503`** with the message "the server is read-only after a storage
-  error; …" and **no `Retry-After`**: the state lasts until a restart, so there is no time to
-  give. The web app treats `503` as "busy", keeps the draft and retries, which is harmless.
-  ADR-0003 §6's `507` stays the answer to a file write that hits `ENOSPC` (not built yet).
+  Logging in, changing the password and revoking sessions are outside the state on purpose:
+  they write `auth.json`, not the vault or `app.db`, and an operator must be able to log in
+  to a read-only server.
+- The HTTP answer is **`503`** with the JSON `{"code": "read-only", "error": "the server is
+  read-only after a storage error; …"}` and **no `Retry-After`**: the state lasts until a
+  restart, so there is no time to give. The web app treats `503` as "busy", keeps the draft
+  and retries, which is harmless; it will read the code
+  ([#186](https://github.com/joaoheytor/PostelMD/issues/186)). ADR-0003 §6's `507` stays the
+  answer to a file write that hits `ENOSPC`; until ADR-0033's intents, that is still the
+  MVP's `500` and doesn't make the vault read-only.
 - `/readyz` answers `200` with the body `read-only` (`text/plain`), else `200` with an empty
   body: reads still work, so an orchestrator must neither restart the server in a loop nor
   take it out of service.
 - Only a restart ends the state. No intent is needed: the state is in memory, and a crash
   is the same as the restart the operator would do.
-- A read's identity pass (ADR-0036) that meets the read-only vault isn't logged per read.
+- A full pass on a read-only vault returns `ErrReadOnly` before it walks: it couldn't
+  commit.
 
-### A full pass that keeps failing (#184)
-Restating ADR-0036's sentence in full: when the hold is due (or a match would move at once),
-the read runs a **full pass** instead, which checks rule 2's uniqueness against every path,
-and then reads, **unless a full pass failed less than one minute (`FullPassRetry`) before**,
-by the scanner's clock: then the read goes on without one, as it does after a failed pass. A
-full pass that succeeds, whichever started it, clears the failure; a failure time in the
-future (the clock stepped back) counts as now. The scheduled passes are not held back.
+### A full pass that keeps failing (#184), and a read's failed pass
+Restating ADR-0036's two sentences in full:
+1. When the hold is due (or a match would move at once), the read runs a **full pass**
+   instead, which checks rule 2's uniqueness against every path, and then reads, **unless a
+   full pass failed less than one minute (`FullPassRetry`) before**, counted from when it
+   failed, by the scanner's clock: then the read goes on without one, as it does after a
+   failed pass. A full pass that succeeds, whichever started it, clears the failure; a pass
+   canceled by a stop isn't a failure; a failure time in the future (the clock stepped back)
+   counts as now. The scheduled passes are not held back.
+2. If the pass fails, the failure is logged without the path and the read goes on: no ID is
+   on the wire yet. **A pass refused because the vault is read-only isn't logged**: the
+   state was logged once when it began.
 
 ## Consequences
 - Positive: a full disk or a damaged `app.db` stops changes before the files and the
@@ -67,8 +87,9 @@ future (the clock stepped back) counts as now. The scheduled passes are not held
   read costs one walk a minute, not one per read.
 - Negative / costs:
   - a fault on a background write (the expiry, the scan) also stops saves until a restart;
-  - the web app says "the server is busy" for a read-only vault (it doesn't read the
-    message yet);
+  - the web app says "the server is busy" for a read-only vault until #186;
+  - `docker ps` still shows the container healthy: the image's `HEALTHCHECK` uses
+    `/healthz`, so the operator learns of the state from the log or `/readyz`'s body;
   - a held path waits up to a minute longer when the walk failed, then resolves on a read or
     the next start.
 - Follow-ups: the alert metric with v0.3's `/metrics` (ADR-0030); `ENOSPC` and `fsync`

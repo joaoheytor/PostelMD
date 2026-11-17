@@ -49,15 +49,18 @@ func New(db *sqlstore.DB, v *vault.Vault, log *slog.Logger) *Scanner {
 // Pass runs one full pass: every file on disk against every row and hold. A walk that fails
 // changes nothing (an unreadable folder is never taken for missing files); a file that can't
 // be hashed is left for the next pass. A failure holds the reads' full passes back for
-// FullPassRetry; a success lets them run again.
+// FullPassRetry from when it failed; a success lets them run again. A read-only vault
+// (ADR-0037) isn't walked: the pass couldn't commit.
 func (s *Scanner) Pass(ctx context.Context) (Totals, error) {
-	now := s.now()
-	t, err := s.fullPass(ctx, now)
+	if s.v.ReadOnly() {
+		return Totals{}, vault.ErrReadOnly
+	}
+	t, err := s.fullPass(ctx, s.now())
 	switch {
 	case err == nil:
 		s.fullPassed()
 	case ctx.Err() == nil:
-		s.fullFailed(now)
+		s.fullFailed(s.now())
 	}
 	return t, err
 }

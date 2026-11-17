@@ -1,6 +1,6 @@
 # ADR-0036: The startup scan: one transaction per pass, re-checked under the vault mutex
 
-- **Status:** Accepted (with the IDs slice's third part, the first code that depends on it); its sentence on a read's full pass for a due hold is superseded by [ADR-0037](0037-the-read-only-state.md) (no new full pass within a minute of a failed one)
+- **Status:** Accepted (with the IDs slice's third part, the first code that depends on it); its sentences on a read's full pass for a due hold and on a read's failed pass are superseded by [ADR-0037](0037-the-read-only-state.md) (no new full pass within a minute of a failed one; a read-only vault isn't logged per read)
 - **Date:** 2026-11-16
 
 ## Context
