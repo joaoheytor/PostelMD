@@ -32,6 +32,9 @@ var isTerminal = term.IsTerminal
 func vaultClaim(cfg config.Config, stdin *os.File, stdout io.Writer) error {
 	return offline(cfg, func(paths layout.Paths) error {
 		ctx := context.Background()
+		if err := sqlstore.UpgradeUnderWay(paths.State); err != nil {
+			return err
+		}
 		db, err := sqlstore.OpenExisting(ctx, paths.State, slog.New(slog.DiscardHandler))
 		if err != nil {
 			return err

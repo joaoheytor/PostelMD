@@ -118,6 +118,7 @@ Everything else consumes their interfaces.
     migrate.intent           # sidecar from before a migration's snapshot until it ends (ADR-0015)
     rebuild.intent           # sidecar while `postelmd db rebuild` runs; serve refuses to start beside it (ADR-0030, ADR-0040)
     rollback.intent          # sidecar while `postelmd db rollback` runs; serve refuses to start beside it (ADR-0035)
+    upgrade.intent           # sidecar while the first upgrade to format 2 runs; db rebuild and vault claim refuse beside it (ADR-0041)
     rollback-*/              # app.db, its WAL files and the snapshot `db rollback` replaced; never deleted automatically (ADR-0035)
     damaged-*/               # app.db files moved aside by `db rebuild` (damaged-<time>/, with its `moved` record and
                              # attempt-<n>/ for a half-built one), or by hand at format 1 (ADR-0034); never deleted automatically

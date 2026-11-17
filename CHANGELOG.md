@@ -112,8 +112,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   `.postelmd/recovery/rebuild-<time>/`, and a rebuild interrupted by a crash is finished by
   running it again (a start refuses until then). `vault claim` shows how many file IDs match
   the mounted vault and asks before it writes the marker (`--yes`, or `--force` when they
-  don't match). Each writes an audit record. See the runbook's "Database lost, or the vault
-  marker doesn't match".
+  don't match). Each writes an audit record. Both refuse, changing nothing, while the first
+  upgrade to data format 2 is under way (`.postelmd/upgrade.intent`): start the server so it
+  finishes. See the runbook's "Database lost, or the vault marker doesn't match".
 
 ### Changed
 - `/healthz` and `/readyz` answer `200` instead of `204`. The server answers `/healthz` as

@@ -144,15 +144,26 @@ func assign(ctx context.Context, db *sqlstore.DB, o RebuildOptions, r sqlstore.R
 		return err
 	}
 	defer func() { _ = v.Close() }()
-	obs, err := v.Survey(ctx)
+	a, err := assignment(ctx, v, sqlstore.NewUUID(), r.UUID, o.Now)
 	if err != nil {
 		return err
+	}
+	out.Files, out.Trash = len(a.Files), len(a.Trash)
+	return db.Assign(ctx, a)
+}
+
+// assignment is the first assignment's content (ADR-0031): every file of v at generation 1
+// and its trash items, under vaultUUID (and rebuildUUID, for db rebuild).
+func assignment(ctx context.Context, v *vault.Vault, vaultUUID, rebuildUUID string, now time.Time) (sqlstore.Assignment, error) {
+	obs, err := v.Survey(ctx)
+	if err != nil {
+		return sqlstore.Assignment{}, err
 	}
 	trash, err := v.TrashForImport()
 	if err != nil {
-		return err
+		return sqlstore.Assignment{}, err
 	}
-	a := sqlstore.Assignment{VaultUUID: sqlstore.NewUUID(), RebuildUUID: r.UUID, Now: o.Now}
+	a := sqlstore.Assignment{VaultUUID: vaultUUID, RebuildUUID: rebuildUUID, Now: now}
 	for _, f := range obs {
 		nf := sqlstore.NewFile{Path: f.Path, Stat: fileStat(f.Stat)}
 		if f.SHA256 != nil {
@@ -163,6 +174,5 @@ func assign(ctx context.Context, db *sqlstore.DB, o RebuildOptions, r sqlstore.R
 	for _, t := range trash {
 		a.Trash = append(a.Trash, sqlstore.TrashImport{OpID: t.ID, Name: t.Name, Kind: string(t.Kind), DeletedAt: t.DeletedAt})
 	}
-	out.Files, out.Trash = len(a.Files), len(a.Trash)
-	return db.Assign(ctx, a)
+	return a, nil
 }

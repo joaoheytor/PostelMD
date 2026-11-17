@@ -131,6 +131,9 @@ func beginRebuild(ctx context.Context, stateDir string, now time.Time, fsys fs.F
 	if ok, err := regularFile(filepath.Join(stateDir, RollbackIntent)); ok || err != nil {
 		return refuse(errors.Join(errors.New("rollback.intent is in the state directory: run db rollback first (ADR-0035)"), err))
 	}
+	if err := UpgradeUnderWay(stateDir); err != nil {
+		return refuse(err)
+	}
 	r := Rebuild{UUID: NewUUID(), Time: now.UTC().Truncate(time.Second).Format(time.RFC3339)}
 	for _, n := range dbFiles {
 		ok, err := regularFile(filepath.Join(stateDir, n))
