@@ -246,6 +246,9 @@ func (a *NotesAPI) fail(w stdhttp.ResponseWriter, r *stdhttp.Request, err error)
 	case errors.Is(err, vault.ErrBusy):
 		w.Header().Set("Retry-After", "1")
 		writeError(w, stdhttp.StatusServiceUnavailable, "busy, retry")
+	case errors.Is(err, vault.ErrReadOnly):
+		// No Retry-After: it lasts until a restart (ADR-0037). The client keeps its draft.
+		writeError(w, stdhttp.StatusServiceUnavailable, readOnlyMessage)
 	case errors.Is(err, context.Canceled):
 		// The client went away: nobody reads the answer, but the write log records it as
 		// 499, never as the 200 net/http would assume.

@@ -227,7 +227,8 @@ Safe mode and emergency disable are always available.
 
 **Probes:**
 - `/healthz` (liveness, no dependencies);
-- `/readyz` (index loaded and initial reconcile done; stays ready in vault read-only mode);
+- `/readyz` (index loaded and initial reconcile done; stays ready in vault read-only mode,
+  with the body `read-only`, ADR-0037);
 - `startupProbe` covers the first indexing.
 
 **Shutdown sequence**, with a hard deadline of 45 s and `terminationGracePeriodSeconds: 60`:

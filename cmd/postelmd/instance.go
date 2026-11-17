@@ -49,6 +49,7 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 		in.close(log, true)
 		return nil, err
 	}
+	readOnlyOnFault(db, in.vault, log)
 	if in.ids, in.stopIDs, err = startIDs(ctx, db, in.vault, paths.Vault, log); err != nil {
 		in.close(log, true)
 		return nil, err

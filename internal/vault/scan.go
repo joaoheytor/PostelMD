@@ -60,9 +60,9 @@ func (v *Vault) StatPath(p string) (st fs.Stat, ok bool, err error) {
 
 // Locked runs fn under the vault mutex (waiting as long as a save would, then ErrBusy). The
 // scan re-checks its paths and commits its pass inside fn: the vault mutex first, then the
-// write transaction (ADR-0030).
+// write transaction (ADR-0030). A read-only vault refuses it (ErrReadOnly): fn writes.
 func (v *Vault) Locked(ctx context.Context, fn func() error) error {
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return err
 	}

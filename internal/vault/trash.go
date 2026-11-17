@@ -179,7 +179,7 @@ func trashedItem(id, name string, at time.Time, e iofs.DirEntry, src, folder str
 // leaves that empty folder, which the listing skips; failing to remove it doesn't undo the
 // restore, so it is only logged.
 func (v *Vault) RestoreTrashed(ctx context.Context, id, folder, name string) (string, error) {
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return "", err
 	}

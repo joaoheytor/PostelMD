@@ -52,6 +52,7 @@ func TestReadOfAHeldPath(t *testing.T) {
 		{"held, under a second left", &fakeIDs{wait: time.Millisecond}, stdhttp.StatusServiceUnavailable, "1"},
 		{"not held", &fakeIDs{}, stdhttp.StatusOK, ""},
 		{"Seen failed", &fakeIDs{err: errors.New("disk I/O error at /data/vaults/notes/a.md")}, stdhttp.StatusOK, ""},
+		{"read-only", &fakeIDs{err: vault.ErrReadOnly}, stdhttp.StatusOK, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var logs strings.Builder
@@ -75,6 +76,9 @@ func TestReadOfAHeldPath(t *testing.T) {
 			}
 			if strings.Contains(logs.String(), "a.md") {
 				t.Fatalf("a log record names the path: %s", logs.String())
+			}
+			if errors.Is(c.ids.err, vault.ErrReadOnly) && logs.Len() != 0 {
+				t.Fatalf("a read of a read-only vault logged: %s", logs.String())
 			}
 		})
 	}

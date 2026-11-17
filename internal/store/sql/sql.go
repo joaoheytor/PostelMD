@@ -43,6 +43,8 @@ type DB struct {
 	path string
 	w    *sql.DB // one connection, BEGIN IMMEDIATE
 	r    *sql.DB // mode=ro, query_only
+	// fault is set by the first write that fails with a writer fault (ErrWriterFault).
+	fault fault
 }
 
 // Open opens (creating if absent) stateDir/app.db, checks it with quick_check and migrates
@@ -152,8 +154,16 @@ func (db *DB) Close() error {
 
 // writeTx runs fn in one write transaction (BEGIN IMMEDIATE). The writer connection is taken
 // within writerWait; fn must not use the writer pool itself (one connection: it would
-// deadlock, ADR-0030).
+// deadlock, ADR-0030). After a writer fault it refuses without starting a transaction, and a
+// writer fault it meets comes back wrapped with ErrWriterFault (ADR-0037).
 func (db *DB) writeTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	if db.fault.set.Load() {
+		return ErrWriterFault
+	}
+	return db.fault.check(db.tx(ctx, fn))
+}
+
+func (db *DB) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	wait, cancel := context.WithTimeout(ctx, writerWait)
 	conn, err := db.w.Conn(wait)
 	cancel()

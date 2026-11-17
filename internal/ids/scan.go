@@ -34,8 +34,9 @@ type Scanner struct {
 	secondAfter, expireEvery time.Duration
 	maxSize                  int64 // the largest file a read hashes (fs.MaxFileSize)
 
-	mu      sync.Mutex
-	flights map[string]*flight // the reads' passes in progress, by path
+	mu       sync.Mutex
+	flights  map[string]*flight // the reads' passes in progress, by path
+	failedAt time.Time          // when the last full pass failed; zero after one succeeds
 }
 
 // New returns a scanner of v's rows in db. The caller has checked that db's IDs describe v
@@ -47,9 +48,21 @@ func New(db *sqlstore.DB, v *vault.Vault, log *slog.Logger) *Scanner {
 
 // Pass runs one full pass: every file on disk against every row and hold. A walk that fails
 // changes nothing (an unreadable folder is never taken for missing files); a file that can't
-// be hashed is left for the next pass.
+// be hashed is left for the next pass. A failure holds the reads' full passes back for
+// FullPassRetry; a success lets them run again.
 func (s *Scanner) Pass(ctx context.Context) (Totals, error) {
 	now := s.now()
+	t, err := s.fullPass(ctx, now)
+	switch {
+	case err == nil:
+		s.fullPassed()
+	case ctx.Err() == nil:
+		s.fullFailed(now)
+	}
+	return t, err
+}
+
+func (s *Scanner) fullPass(ctx context.Context, now time.Time) (Totals, error) {
 	rows, err := s.db.Files(ctx)
 	if err != nil {
 		return Totals{}, err
@@ -58,6 +71,7 @@ func (s *Scanner) Pass(ctx context.Context) (Totals, error) {
 	if err != nil {
 		return Totals{}, err
 	}
+	killPoint("scan-walk")
 	disk, err := s.v.Stats(ctx)
 	if err != nil {
 		return Totals{}, err
@@ -157,6 +171,9 @@ func (s *Scanner) seen(ctx context.Context, p string) (time.Duration, error) {
 			return st, ok && err == nil
 		}}
 	units := pl.plan()
+	if pl.full && s.fullRetryWaits() {
+		return 0, nil // a full pass failed lately: the read goes on, as after that failure (#184)
+	}
 	if pl.full {
 		return s.once(ctx, fullPass, func() (time.Duration, error) { _, err := s.Pass(ctx); return 0, err })
 	}

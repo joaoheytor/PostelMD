@@ -60,7 +60,7 @@ func (v *Vault) commit(ctx context.Context, msg, name, email string, check func(
 	if msg == "" || len(msg) > 10000 || strings.ContainsRune(msg, 0) {
 		return git.Hash{}, ErrBadMessage
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return git.Hash{}, err
 	}

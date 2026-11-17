@@ -28,7 +28,7 @@ func (v *Vault) Save(ctx context.Context, p string, base Rev, content []byte) (R
 	if len(content) > MaxNoteSize {
 		return "", ErrTooLarge
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -76,7 +76,7 @@ func (v *Vault) Create(ctx context.Context, p string, content []byte) (Rev, erro
 	if len(content) > MaxNoteSize {
 		return "", ErrTooLarge
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -103,7 +103,7 @@ func (v *Vault) Mkdir(ctx context.Context, p string) error {
 	if err := checkNewPath(p); err != nil {
 		return err
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (v *Vault) Move(ctx context.Context, from, to string) error {
 	if strings.HasPrefix(to, from+"/") {
 		return ErrIntoItself
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (v *Vault) Delete(ctx context.Context, p string) (string, error) {
 	if err := checkPath(p); err != nil {
 		return "", err
 	}
-	unlock, err := v.lock(ctx)
+	unlock, err := v.writeLock(ctx)
 	if err != nil {
 		return "", err
 	}

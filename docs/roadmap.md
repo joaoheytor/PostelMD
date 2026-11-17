@@ -229,7 +229,13 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   - a read of a pending path within 10 s of the suspect answers `503` with `Retry-After`,
     and resolves the match after (done at the scanner and handler levels:
     `TestSeenOfAHeldPathWaitsThenResolves`, `TestReadOfAHeldPath`; inert until format 2
-    assigns IDs);
+    assigns IDs); while full passes keep failing, reads of a due hold walk the vault at
+    most once a minute (`TestAFailedFullPassIsNotRetriedByEveryRead`, ADR-0037);
+  - a write to `app.db` that fails with `SQLITE_CORRUPT`, `SQLITE_IOERR` or `SQLITE_FULL`
+    puts the vault read-only: every change gets `503`, reads work, `/readyz` stays `200`
+    with the body `read-only`, and the database isn't written again until a restart
+    (ADR-0037: `TestAWriterFaultIsStickyAndRunsTheHookOnce`,
+    `TestAReadOnlyVaultRefusesEveryChange`, `TestAReadOnlyVault`);
   - the startup scan crashed at each row of ADR-0036's recovery table reaches that row's
     outcome, the 10 s counted across the restart (process-kill model done:
     `TestScanCrashPoints`, `TestApplyScanCrashPoints`; the power-loss model is #182);
