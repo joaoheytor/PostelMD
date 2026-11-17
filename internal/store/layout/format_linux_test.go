@@ -25,15 +25,22 @@ func readFormat(t *testing.T, state string) string {
 	return string(b)
 }
 
-// TestEnsureFormat: a new data directory gets format 1, written durably; the same format
-// starts; a newer one, or anything that isn't a format number, is refused and left as it is.
-func TestEnsureFormat(t *testing.T) {
+// checkAt1 is CheckFormat for a build that writes data format 1.
+func checkAt1(state string, opts ...fs.Option) error {
+	_, err := CheckFormat(state, 1, opts...)
+	return err
+}
+
+// TestCheckFormatAtBuild1: at build format 1 a new data directory gets format 1, written
+// durably; the same format starts; a newer one, or anything that isn't a format number, is
+// refused and left as it is.
+func TestCheckFormatAtBuild1(t *testing.T) {
 	t.Run("missing: written", func(t *testing.T) {
 		state := t.TempDir()
 		if err := os.WriteFile(filepath.Join(state, formatNew), []byte("half"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := EnsureFormat(state); err != nil {
+		if err := checkAt1(state); err != nil {
 			t.Fatal(err)
 		}
 		if got := readFormat(t, state); got != "1\n" {
@@ -72,9 +79,9 @@ func TestEnsureFormat(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(state, formatFile), []byte(tc.content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			err := EnsureFormat(state)
+			err := checkAt1(state)
 			if !errors.Is(err, tc.want) || (tc.want != nil && !strings.Contains(err.Error(), tc.wantErr)) {
-				t.Fatalf("EnsureFormat with %q = %v, want %v containing %q", tc.content, err, tc.want, tc.wantErr)
+				t.Fatalf("CheckFormat with %q = %v, want %v containing %q", tc.content, err, tc.want, tc.wantErr)
 			}
 			if got := readFormat(t, state); got != tc.content {
 				t.Fatalf("format changed to %q", got)
@@ -91,8 +98,8 @@ func TestEnsureFormat(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(state, formatFile)); err != nil {
 			t.Fatal(err)
 		}
-		if err := EnsureFormat(state); !errors.Is(err, fs.ErrSymlink) {
-			t.Fatalf("EnsureFormat through a symlink = %v, want fs.ErrSymlink", err)
+		if err := checkAt1(state); !errors.Is(err, fs.ErrSymlink) {
+			t.Fatalf("CheckFormat through a symlink = %v, want fs.ErrSymlink", err)
 		}
 	})
 	t.Run("a directory", func(t *testing.T) {
@@ -100,24 +107,24 @@ func TestEnsureFormat(t *testing.T) {
 		if err := os.Mkdir(filepath.Join(state, formatFile), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := EnsureFormat(state); !errors.Is(err, fs.ErrNotRegular) {
-			t.Fatalf("EnsureFormat on a directory = %v, want fs.ErrNotRegular", err)
+		if err := checkAt1(state); !errors.Is(err, fs.ErrNotRegular) {
+			t.Fatalf("CheckFormat on a directory = %v, want fs.ErrNotRegular", err)
 		}
 	})
 }
 
-// TestEnsureFormatSurvivesEveryCrashPoint: writing the format is a temp file, its fsync, one
-// rename and the directory's fsync. A crash at any step, as a process kill or a power loss,
-// leaves no format file or a whole one, never a torn one that the next start would refuse;
-// and the next start finishes the job.
-func TestEnsureFormatSurvivesEveryCrashPoint(t *testing.T) {
+// TestCheckFormatSurvivesEveryCrashPoint: at build format 1, writing the format is a temp
+// file, its fsync, one rename and the directory's fsync. A crash at any step, as a process
+// kill or a power loss, leaves no format file or a whole one, never a torn one that the next
+// start would refuse; and the next start finishes the job.
+func TestCheckFormatSurvivesEveryCrashPoint(t *testing.T) {
 	for crashAt := 0; ; crashAt++ {
 		state := t.TempDir()
 		disk, err := faultfs.New(state, crashAt)
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = EnsureFormat(state, fs.WithHook(disk))
+		err = checkAt1(state, fs.WithHook(disk))
 		if err != nil && !errors.Is(err, faultfs.ErrCrashed) {
 			t.Fatalf("crash at step %d: %v", crashAt, err)
 		}
@@ -128,7 +135,7 @@ func TestEnsureFormatSurvivesEveryCrashPoint(t *testing.T) {
 				t.Errorf("crash at step %d, after a %s: format = %q (completed %v)", crashAt, model, got, completed)
 			}
 		}
-		if err := EnsureFormat(state); err != nil || readFormat(t, state) != "1\n" {
+		if err := checkAt1(state); err != nil || readFormat(t, state) != "1\n" {
 			t.Fatalf("crash at step %d: the next start = %v, format %q", crashAt, err, readFormat(t, state))
 		}
 		if completed {

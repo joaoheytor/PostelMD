@@ -73,6 +73,7 @@ func checkUpgraded(t *testing.T, e *env, vaultUUID string) {
 // TestUpgrade runs the first upgrade on v0.1 data.
 func TestUpgrade(t *testing.T) {
 	e := v01Env(t)
+	must(t, CheckUpgrade(ctx, e.db, upgradeOpts(e)))
 	u, err := Upgrade(ctx, e.db, e.v, upgradeOpts(e))
 	must(t, err)
 	if u.Resumed || u.Files != 2 || u.Trash != 1 || u.KeptCopy {
@@ -157,7 +158,7 @@ func TestUpgradeRefuses(t *testing.T) {
 		}, sqlstore.ErrUpgradeInterference, false},
 		{"marker names another vault", func(e *env) {
 			must(t, vault.WriteMarker(e.dir, other, 1))
-		}, ErrAnotherVault, false},
+		}, ErrStateNotHere, false},
 		{"marker is a folder", func(e *env) {
 			p := filepath.Join(e.dir, vault.TmpDir, ".created-by-postelmd")
 			must(t, os.Remove(p))
@@ -183,6 +184,9 @@ func TestUpgradeRefuses(t *testing.T) {
 			e := v01Env(t)
 			c.setup(e)
 			before, _ := vault.ReadMarker(e.dir)
+			if err := CheckUpgrade(ctx, e.db, upgradeOpts(e)); !errors.Is(err, c.want) {
+				t.Fatalf("CheckUpgrade = %v, want %v", err, c.want)
+			}
 			if _, err := Upgrade(ctx, e.db, e.v, upgradeOpts(e)); !errors.Is(err, c.want) {
 				t.Fatalf("Upgrade = %v, want %v", err, c.want)
 			}

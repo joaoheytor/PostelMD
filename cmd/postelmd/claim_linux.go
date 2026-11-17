@@ -53,7 +53,7 @@ func vaultClaim(cfg config.Config, stdin *os.File, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if err := ids.Claim(paths.Vault, c, layout.FormatVersion); err != nil {
+		if err := ids.Claim(paths.Vault, c, buildFormat); err != nil {
 			return err
 		}
 		// The audit record goes to stdout, the sink serve uses (ADR-0020), as reset-password's.

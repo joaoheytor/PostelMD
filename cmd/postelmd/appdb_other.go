@@ -12,12 +12,29 @@ import (
 
 	"github.com/joaoheytor/PostelMD/internal/config"
 	pmhttp "github.com/joaoheytor/PostelMD/internal/http"
+	"github.com/joaoheytor/PostelMD/internal/store/layout"
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
 // openAppDB is unsupported outside Linux, like the store it needs (internal/store/sql).
-func openAppDB(_ context.Context, state, _ string, _ *slog.Logger) (appDB, error) {
+func openAppDB(_ context.Context, state, _ string, _ dataStart, _ *slog.Logger) (appDB, error) {
 	return nil, fmt.Errorf("sql: %s: %w", state, errors.ErrUnsupported)
+}
+
+// checkDataFormat is unsupported outside Linux, like the layout it reads.
+func checkDataFormat(state string) (dataStart, error) {
+	_, err := layout.CheckFormat(state, buildFormat)
+	return dataStart{}, err
+}
+
+// checkVaultAtStart has nothing to check outside Linux: openAppDB fails first.
+func checkVaultAtStart(context.Context, appDB, dataStart, layout.Paths, *slog.Logger) error {
+	return nil
+}
+
+// firstUpgrade has nothing to run outside Linux: openAppDB fails first.
+func firstUpgrade(context.Context, appDB, *vault.Vault, dataStart, layout.Paths, *slog.Logger) error {
+	return nil
 }
 
 // startIDs has nothing to scan outside Linux: openAppDB fails first.
