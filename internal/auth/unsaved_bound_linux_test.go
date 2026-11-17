@@ -95,7 +95,9 @@ func TestAnUnsavedChangeIsRetriedAtMostEveryFewSeconds(t *testing.T) {
 	requests := func(at time.Duration) int {
 		t.Helper()
 		before := h.steps
-		_ = s.Check(other)
+		if s.Check(other) == nil || s.Check(cookie) == nil {
+			t.Fatalf("a revoked cookie works at +%s while the change is held or retried", at)
+		}
 		if _, err := s.Login(ctx, "ip2", pw); err != nil {
 			t.Fatalf("login at +%s: %v", at, err)
 		}

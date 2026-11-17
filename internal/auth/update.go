@@ -58,7 +58,9 @@ func jumpEpoch(c *credential) {
 }
 
 // retryEvery is the least time between two saves of a credential held only in memory
-// (ADR-0039): on a failing disk one save can be slow, and it runs under s.mu.
+// (ADR-0039): on a failing disk one save can be slow, and it runs under s.mu. now and
+// retryAt must keep Go's monotonic reading (no .UTC(), .Round(0) or .In()), or a wall-clock
+// step back would delay the retry.
 const retryEvery = 5 * time.Second
 
 // holdUnsaved marks s.cred as held only in memory, warning once (without the error's
