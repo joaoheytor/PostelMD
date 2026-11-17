@@ -117,13 +117,20 @@ docker run --rm -v postelmd-data:/data:ro busybox:1.37 stat -c %u:%g /data/.post
 
 Going back to 0.1 after a finished upgrade, with the format-2 server stopped cleanly (a
 `docker stop`, so no operation is open). You keep your notes, the trash, the git history,
-and the credentials as they are now (a password changed since the upgrade stays changed).
+and the credentials as they are now: format 2 doesn't change `auth.json` or `secret.key`,
+and 0.1 reads them as they are. The rollback never restores the copies in `pre-format-2/`;
+for a lost password, use [`reset-password`](running-v0.1.md#forgotten-password).
 **Lost:** the file IDs, and with them the ETags of open tabs (they reload) and the
 database's records, such as the trash's import times; edits made since the upgrade are
 kept, as files. The next start of a format-2 build runs a new first upgrade, with new IDs.
 
 If the upgrade didn't finish (`upgrade.intent` is in `.postelmd`), don't roll back: start
 the format-2 image again so it finishes, or restore the backup you took before it.
+
+**With Docker Compose,** set the service's `image:` to `$PREV` and run `docker compose up -d`
+after step 2, instead of step 3. For steps 1 and 2, `c` is the container's name
+(`docker compose ps`); in step 1, run `docker compose down` in place of its `docker rm`,
+and don't run `up` before step 2 printed `rolled back to format 1`.
 
 **1. Note the container's settings, then stop and remove it.** This reads how the container
 mounts `/data` (a host folder or a named volume), the notes folder if you adopted one, its
@@ -154,21 +161,22 @@ If it printed an empty `PREV`, set it to the digest you noted before the upgrade
 
 **2. Roll the data back.** This runs in a `busybox` helper container as the owner of
 `.postelmd`, so it works the same for a host folder and a named volume, and keeps every
-file's owner and mode. It runs only when the container of step 1 no longer exists. It refuses,
-changing nothing, unless the data is at format 2 with no operation open. Then it:
+file's owner and mode. It runs only when the container of step 1 no longer exists. It
+refuses, changing nothing, unless the data is at format 2 with no operation open, and this
+user can write the vault marker and `.postelmd`. Then it:
 
 1. moves `app.db` and the files beside it (`-wal`, `-shm`, `-journal`, the `pre-migrate-*`
-   copies and `post-migration-started-*` records) into `.postelmd/rolled-back-<time>/`;
+   copies and `post-migration-started-*` records; ADR-0043) into
+   `.postelmd/rolled-back-<time>/`;
 2. moves `pre-format-2/` to `pre-format-2-<time>/`, so the next upgrade takes a new copy;
 3. empties the vault marker in place (never delete it: 0.1 refuses a vault whose trash
    isn't empty without it);
-4. writes `1` into `.postelmd/format`, last.
+4. writes `1` into `.postelmd/format.new` (a copy of `format`, so it keeps its owner and
+   mode), syncs, renames it over `format`, and syncs again, last.
 
-Nothing is deleted. Leave `restore=` empty to keep the credentials you have now (the usual
-case); see [Restoring the credentials](#restoring-the-credentials) for `restore=credentials`.
+Nothing is deleted, and no credential is copied or moved.
 
 ```sh
-restore=
 if ! left=$(docker ps -aq --filter "name=^$c\$"); then
   echo "ROLLBACK STOPPED: docker ps failed, so it can't tell whether a server runs" >&2
 elif [ -n "$left" ]; then
@@ -179,47 +187,57 @@ elif ! owner=$(docker run --rm -v "$src":/data:ro busybox:1.37 stat -c %u:%g /da
   echo "ROLLBACK STOPPED: can't read the owner of .postelmd" >&2
 else
   docker run --rm -i --user "$owner" -v "$src":/data ${notes:+-v} ${notes:+"$notes":/data/vaults/notes} \
-    busybox:1.37 sh -s -- /data /data/vaults/notes ${restore:+"$restore"} <<'EOF'
+    busybox:1.37 sh -s -- /data /data/vaults/notes <<'EOF'
 set -u
 st=$1/.postelmd
 m=$2/.postelmd-tmp/.created-by-postelmd
-p=$st/pre-format-2
 stop() { echo "ROLLBACK STOPPED: $*" >&2; exit 1; }
 [ -d "$st" ] && [ -d "$2" ] || stop "no .postelmd or vault folder in the mounted data"
 [ "$(cat "$st/format" 2>/dev/null)" = 2 ] || stop "the data format isn't 2, so there is nothing to roll back; nothing was changed"
 for f in upgrade.intent rebuild.intent migrate.intent rollback.intent; do
-  [ ! -e "$st/$f" ] || stop "$f is in .postelmd: an operation didn't finish (see the runbook); nothing was changed"
+  if [ -e "$st/$f" ] || [ -L "$st/$f" ]; then
+    stop "$f is in .postelmd: an operation didn't finish (see the runbook); nothing was changed"
+  fi
 done
 [ -f "$m" ] && [ ! -L "$m" ] || stop "the vault marker isn't a regular file; nothing was changed"
-if [ "${3:-}" = credentials ]; then
-  [ -f "$p/complete" ] && [ ! -L "$p/complete" ] && grep -Eqx '[0-9a-f-]{36} [0-9TZ:-]+' "$p/complete" \
-    && [ -f "$p/auth.json" ] && [ -f "$p/secret.key" ] \
-    || stop "pre-format-2/ isn't complete, so its credentials can't be restored; nothing was changed"
-  echo "restoring the credentials of pre-format-2/, copied at $(cut -d ' ' -f 2 "$p/complete")"
-fi
+[ -w "$m" ] || stop "user $(id -u) can't write the vault marker (is the notes folder another user's?); nothing was changed"
+[ -w "$st" ] && [ -w "$st/format" ] || stop "user $(id -u) can't write .postelmd; nothing was changed"
 t=$(date +%Y%m%d-%H%M%S)
 d=$st/rolled-back-$t
 mkdir -m 700 "$d" || stop "can't create $d"
 for f in "$st"/app.db "$st"/app.db-wal "$st"/app.db-shm "$st"/app.db-journal "$st"/pre-migrate-* "$st"/post-migration-started-*; do
   [ ! -e "$f" ] || mv "$f" "$d/" || stop "$f didn't move; see $d"
 done
-if [ "${3:-}" = credentials ]; then
-  for f in auth.json secret.key; do
-    { [ ! -e "$st/$f" ] || mv "$st/$f" "$d/"; } && cp -p "$p/$f" "$st/$f" || stop "$f wasn't restored; see $d"
-  done
-fi
-[ ! -e "$p" ] || mv "$p" "$st/pre-format-2-$t" || stop "pre-format-2 didn't move"
+[ ! -e "$st/pre-format-2" ] || mv "$st/pre-format-2" "$st/pre-format-2-$t" || stop "pre-format-2 didn't move"
 : > "$m" || stop "the vault marker wasn't emptied"
-printf '1\n' > "$st/format" || stop "the format wasn't written"
+rm -f "$st/format.new" && cp -p "$st/format" "$st/format.new" && printf '1\n' > "$st/format.new" \
+  && sync && mv -f "$st/format.new" "$st/format" && sync || stop "the format wasn't written"
 echo "rolled back to format 1: the database is in .postelmd/rolled-back-$t; start 0.1 now"
 EOF
 fi
 ```
 
 If it stops part way (a full disk), fix the cause and run it again: the format stays `2`
-until the last step, and each step is safe to repeat. If it stopped after moving
-`pre-format-2/` with `restore=credentials`, the copy is now in `pre-format-2-<time>/`:
-run it again with `restore=` and copy `auth.json` and `secret.key` from there by hand.
+until the last step, and each step is safe to repeat. A crash can't leave `format` half
+written: the new one replaces it in one rename. If you still find it empty, or holding
+something other than a number (0.1 refuses it as damaged; a disk fault, or a rollback
+done by hand that wrote it in place), look at `.postelmd` before anything else:
+
+- `app.db` is still there: the rollback didn't move the database, so the data is at
+  format 2. Write `2` (below), then run step 2 again.
+- `app.db` is in a `rolled-back-*/` folder and the vault marker is empty: step 2 had reached
+  its last step. Write `1` (below), then step 3.
+- Anything else: restore the backup you took before the upgrade.
+
+Set `n` to the number, with `src`, `owner` and `c` from step 2 and the server stopped:
+
+```sh
+n=1
+[ -n "$src" ] && [ -n "$owner" ] && [ -z "$(docker ps -aq --filter "name=^$c\$")" ] \
+  && docker run --rm --user "$owner" -v "$src":/data busybox:1.37 \
+    sh -c 'printf "%s\n" "$1" > /data/.postelmd/format.new && sync && mv -f /data/.postelmd/format.new /data/.postelmd/format && sync' sh "$n" \
+  || echo "FORMAT NOT WRITTEN: src or owner is empty, the container exists, or the write failed" >&2
+```
 
 **3. Start 0.1.** Only if step 2 printed `rolled back to format 1`, start the image you
 noted, with the settings of step 1 (add any other flags you started it with):
@@ -236,59 +254,59 @@ noted, with the settings of step 1 (add any other flags you started it with):
 0.1 starts on the notes as files. It creates a new `app.db`; the old one stays in
 `rolled-back-<time>/`.
 
-### Restoring the credentials
-
-The rollback keeps the credentials you have now: format 2 doesn't change `auth.json` or
-`secret.key`, and 0.1 reads them as they are. `pre-format-2/` holds them as they were
-before the upgrade. Restore from it (`restore=credentials` in step 2) only if the current
-ones are lost or damaged. That brings back the password from before the upgrade, and can
-make sessions you logged out since then valid again. To end them all, run
-[`reset-password`](running-v0.1.md#forgotten-password) after the rollback: it logs out every
-session.
-
-Step 2 restores them only from a **complete** copy: `pre-format-2/complete` is a regular
-file holding `<vault UUID> <time>`, written after every copy was synced, so the copy is
-whole. A copy without it may be partial and is never restored. The UUID in `complete`
-normally matches the vault marker's (`sed -n 2p "$vault/.postelmd-tmp/.created-by-postelmd"`);
-after a `db rebuild`, the marker names the rebuilt database's UUID instead, and the copy is
-still the one from before the upgrade.
-
 ### A pre-format-2 left by an upgrade db rebuild took over
 
 When a first upgrade stopped on interference (`the first upgrade's files don't match its
 intent`) and `db rebuild` took it over, the rebuild moved `upgrade.intent` into
 `.postelmd/damaged-<time>/` with the old database, and left `pre-format-2/` where it was.
 The data is then at format 2 with the rebuilt database, and the rollback above applies as
-it is.
+it is: it moves that `pre-format-2/` aside like any other.
 
-- If `pre-format-2/complete` exists, that copy is whole: it holds `auth.json`,
-  `secret.key` (and `format` and `config.yaml` if 0.1 had them) as they were when the
-  stopped upgrade began, the time in `complete`. Its UUID is the stopped upgrade's, not the
-  marker's. It can be restored as above.
-- Without `complete`, the upgrade stopped while copying: the copy may be partial. Never
-  restore from it. The rollback moves it aside like any other, and the next first upgrade
-  would too.
+That copy holds `auth.json` and `secret.key` (and `format` and `config.yaml` if 0.1 had
+them) as they were when the stopped upgrade began. With `complete` (`<vault UUID> <time>`,
+the stopped upgrade's UUID, not the marker's), the copy is whole; without it, it may be
+partial. Either way it is only a safety copy: nothing in PostelMD or this runbook reads it
+back, and the credentials in use are the ones in `.postelmd`.
 
 ## Cleanup
 
 `rolled-back-*/`, `pre-format-2/`, `pre-format-2-*/`, `damaged-*/` and the `pre-migrate-*`
-copies are never removed automatically. To list them:
+copies are never removed automatically. The blocks below run in a `busybox` helper, so they
+work for a host folder and a named volume alike. To list them, with `c` set to your
+container's name (the server may run):
 
 ```sh
-find "$data/.postelmd" -maxdepth 1 \( -name 'rolled-back-*' -o -name 'pre-format-2*' -o -name 'damaged-*' -o -name 'pre-migrate-*' \) -exec du -sh {} +
+c=postelmd
+src=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' "$c")
+echo "src=$src"
+[ -n "$src" ] && docker run --rm -v "$src":/data:ro busybox:1.37 \
+  find /data/.postelmd -maxdepth 1 \( -name 'rolled-back-*' -o -name 'pre-format-2*' -o -name 'damaged-*' -o -name 'pre-migrate-*' \) -exec du -sh {} +
 ```
 
-Once the instance has run well for a while and you have a new backup, you may remove them
-with `rm -r` on each path, with the server stopped. `damaged-*/` is the only copy of an old
-database: move it to your backup storage rather than delete it. `recovery/rebuild-*/` holds
-unfinished saves a `db rebuild` kept: copy out anything you want within 7 days.
+Once the instance has run well for a while and you have a new backup, you may remove them.
+`damaged-*/` is the only copy of an old database: move it to your backup storage rather
+than delete it. `recovery/rebuild-*/` holds unfinished saves a `db rebuild` kept: copy out
+anything you want within 7 days.
 
 **After a password reset or a key compromise,** remove `pre-format-2/` and every
-`pre-format-2-*/` (and any backup that holds them): they hold the old password hash and the
-old `secret.key`, which a restore from them would bring back:
+`pre-format-2-*/` (and any backup that holds them). Besides `auth.json` and `secret.key`,
+they are the only places that hold credentials: the old password hash and the old
+`secret.key`. (`rolled-back-*/` and `damaged-*/` hold only database files, which have no
+credentials.) This stops the server, removes them as the owner of `.postelmd`, and starts
+it again:
 
 ```sh
-find "$data/.postelmd" -maxdepth 1 -name 'pre-format-2*' -exec rm -r {} +
+c=postelmd
+src=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' "$c")
+echo "src=$src"
+[ -n "$src" ] && docker stop "$c" \
+  && owner=$(docker run --rm -v "$src":/data:ro busybox:1.37 stat -c %u:%g /data/.postelmd) \
+  && docker run --rm --user "$owner" -v "$src":/data busybox:1.37 \
+    find /data/.postelmd -maxdepth 1 -name 'pre-format-2*' -exec rm -r {} + \
+  || echo "CLEANUP STOPPED" >&2
+docker start "$c"
 ```
 
-A rollback after that keeps the current credentials, which is the default.
+`reset-password` doesn't replace `secret.key`. After a key compromise, replace it: with the
+server stopped, move `secret.key` aside; the next start writes a new one, and every session
+is logged out.

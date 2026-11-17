@@ -698,9 +698,11 @@ docker start postelmd
 
 It asks for the new password twice (12 characters or more) and logs out every session.
 
-From data format 2, `.postelmd/pre-format-2/` and any `pre-format-2-<time>/` hold the old
-password hash and session secret: after a reset because the password leaked, remove them
-([Cleanup](upgrading-to-format-2.md#cleanup)).
+From data format 2, `.postelmd/pre-format-2/` and any `pre-format-2-<time>/` hold copies of
+the password hash and session secret from before the upgrade. Nothing reads them back, but
+after a reset because the password leaked, remove them, and from your backups
+([Cleanup](upgrading-to-format-2.md#cleanup)). `reset-password` keeps `secret.key`; the same
+section says how to replace it after a key compromise.
 
 ## "A git lock is blocking commits"
 

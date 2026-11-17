@@ -17,10 +17,14 @@ g config user.email test@example.invalid
 g config gpg.format ssh
 g config commit.gpgsign false
 g config tag.gpgsign false
+g config core.autocrlf false
 g remote add origin "$work/origin.git"
 mkdir -p "$work/repo/.github"
 echo "maintainer $(cat "$work/trusted.pub")" >"$work/repo/.github/allowed_signers"
-g add .github && g commit -q -m "add signers" && g push -q origin main
+mkdir -p "$work/repo/internal/store/layout" "$work/repo/cmd/postelmd"
+printf 'package layout\n\nconst FormatVersion = 1\n' >"$work/repo/internal/store/layout/format_linux.go"
+printf 'package main\n\nvar buildFormat = layout.FormatVersion\n' >"$work/repo/cmd/postelmd/instance.go"
+g add .github internal cmd && g commit -q -m "add signers" && g push -q origin main
 g fetch -q origin
 
 sign() { g -c user.signingkey="$work/$1.pub" tag -s -m "$2" "$2" "${3:-HEAD}"; }
@@ -82,18 +86,31 @@ expect pass v0.6.0-rc.3 "migration 0002 with this repository's cmd/postelmd/main
 # Release blocker (ADR-0030 follow-up 2, ADR-0042, #190 R6): a commit whose build writes data
 # format 2 or later ships only with the way back and the commands its refusals name. The
 # fixtures fake FormatVersion; each piece is removed in turn, then all are present.
-commit_main() { g add -A && g commit -q -m "$1" && g push -q origin main && g fetch -q origin; }
+commit_main() { g add -A && g commit -q --allow-empty -m "$1" && g push -q origin main && g fetch -q origin; }
 r=$work/repo
 mkdir -p "$r/internal/store/layout" "$r/docs/operations" "$r/.github/workflows"
 pieces() { # writes every piece the format-2 gate asks for
   printf 'package layout\n\nconst FormatVersion = %s\n' "$1" >"$r/internal/store/layout/format_linux.go"
   printf 'Commands:\n  db rollback      Undo\n  db rebuild       Rebuild\n  vault claim      Claim\n' >"$r/cmd/postelmd/main.go"
-  printf 'package main\n\nfunc identityCommandsReady() bool { return buildFormat >= 2 }\n' >"$r/cmd/postelmd/rebuild_linux.go"
+  printf 'package main\n\nvar buildFormat = layout.FormatVersion\n' >"$r/cmd/postelmd/instance.go"
+  switch 2
   printf 'package main\n\nfunc f() { return nil, sqlstore.NameRebuild(err) }\n' >"$r/cmd/postelmd/appdb_linux.go"
   printf 'package sql\n\nconst errRebuildFix = "run postelmd db rebuild: it moves app.db"\n' >"$r/internal/store/sql/conn.go"
   printf '# Upgrading\n\n## Rollback to 0.1\n\nSteps.\n' >"$r/docs/operations/upgrading-to-format-2.md"
   printf 'ci: lint test image-smoke image-smoke-upgrade image-scan\n\nimage-smoke-upgrade: image\n\tscripts/x.sh\n' >"$r/Makefile"
-  printf 'jobs:\n  image:\n    steps:\n      - run: make image-smoke-upgrade\n' >"$r/.github/workflows/ci.yaml"
+  workflow image "run: make image-smoke-upgrade"
+}
+switch() { # switch <N>: db rebuild and vault claim on from format N, as #193 left them
+  printf 'package main\n\nfunc identityCommandsReady() bool { return buildFormat >= %s }\n\nfunc run() error {\n\tif !identityCommandsReady() {\n\t\treturn errBeforeFormat2\n\t}\n\treturn nil\n}\n' "$1" >"$r/cmd/postelmd/rebuild_linux.go"
+}
+workflow() { # workflow <job> <step line>: ci.yaml with that step in that job; required needs lint and image
+  printf 'jobs:\n  lint:\n    steps:\n      - run: make lint\n  %s:\n    steps:\n      - uses: actions/checkout@0000\n      - %s\n  required:\n    if: always()\n    needs: [lint, image]\n    steps:\n      - run: "true"\n' "$1" "$2" >"$r/.github/workflows/ci.yaml"
+}
+case_() { # case_ pass|fail <description> [error text]: commits the fixture and checks a new tag
+  commit_main "$2"
+  n=$((n + 1))
+  sign trusted "v0.8.0-rc.$n"
+  expect "$1" "v0.8.0-rc.$n" "$2" "${3:-}"
 }
 pieces 1
 : >"$r/Makefile"
@@ -122,7 +139,7 @@ for case in "docs/operations/upgrading-to-format-2.md|## Rollback to 0.1|rollbac
   expect fail "v0.7.0-rc.$n" "format 2 without '$drop' in $file" "$why"
 done
 pieces 2
-printf 'package main\n\nfunc identityCommandsReady() bool { return buildFormat >= 3 }\n' >"$r/cmd/postelmd/rebuild_linux.go"
+switch 3
 commit_main "identity commands gated above the build's format"
 sign trusted v0.7.0-rc.20
 expect fail v0.7.0-rc.20 "format 2 with the identity commands on only from format 3" "are off"
@@ -138,10 +155,82 @@ rm "$r/docs/operations/upgrading-to-format-2.md"
 commit_main "format 12 without the runbook"
 sign trusted v0.7.0-rc.23
 expect fail v0.7.0-rc.23 "format 12 without the runbook" "rollback section"
+
+# G1: every way to spell FormatVersion either reads as its value or fails the tag; an
+# unreadable one never means format 1. Each spelling of 2 below has no runbook, so it fails.
+n=0
+fv=$r/internal/store/layout/format_linux.go
+for spelling in 'const FormatVersion = 2 // file IDs' 'const FormatVersion int = 2' \
+  'const (\n\tFormatVersion = 2\n\tMaxFormat = 2\n)' 'const FormatVersion = 2\r' 'var FormatVersion = 2'; do
+  pieces 2
+  rm "$r/docs/operations/upgrading-to-format-2.md"
+  printf '%b\n' "package layout\n\n$spelling" >"$fv"
+  case_ fail "FormatVersion spelled '$spelling' is read as 2" "writes data format 2"
+done
+for spelling in 'const FormatVersion = 1 + 1' 'const FormatVersion = 2\nconst FormatVersion = 1' \
+  'const FormatVersion = two' 'const FormatVersion = layout.Other'; do
+  pieces 1
+  printf '%b\n' "package layout\n\n$spelling" >"$fv"
+  case_ fail "FormatVersion spelled '$spelling' fails" "can't read FormatVersion"
+done
+pieces 1
+rm "$fv"
+case_ fail "format_linux.go moved away" "can't read FormatVersion"
+pieces 1
+printf 'package layout\n\nconst FormatVersion = 1 // v0.1\n' >"$fv"
+case_ pass "FormatVersion = 1 with a comment needs no format-2 piece"
+
+# G2: the format the build writes is buildFormat; raised alone, it is gated too.
+pieces 1
+rm "$r/docs/operations/upgrading-to-format-2.md"
+printf 'package main\n\nvar buildFormat = 2\n' >"$r/cmd/postelmd/instance.go"
+case_ fail "buildFormat raised to 2 with FormatVersion at 1" "writes data format 2"
+pieces 1
+printf 'package main\n\nvar buildFormat = layout.MaxFormat\n' >"$r/cmd/postelmd/instance.go"
+case_ fail "buildFormat set to something else than a number or FormatVersion" "can't read buildFormat"
+pieces 1
+printf 'package main\n\nvar buildFormat = 1\n' >"$r/cmd/postelmd/instance.go"
+case_ pass "buildFormat = 1 with FormatVersion at 1"
+pieces 2
+printf 'package main\n\nvar buildFormat = 1\n' >"$r/cmd/postelmd/instance.go"
+case_ pass "buildFormat lower than FormatVersion: the larger one gates"
+
+# G3: the switch on db rebuild and vault claim may go (part D removes it), or stay on.
+pieces 2
+printf 'package main\n\nfunc run() error { return rebuild() }\n' >"$r/cmd/postelmd/rebuild_linux.go"
+case_ pass "format 2 with the switch removed"
+pieces 2
+printf 'package main\n\nfunc run() error {\n\treturn errBeforeFormat2\n}\n' >"$r/cmd/postelmd/rebuild_linux.go"
+case_ fail "format 2 still returning errBeforeFormat2, with no switch" "are off"
+pieces 2
+printf 'package main\n\nfunc run() error { return rebuild() }\n' >"$r/cmd/postelmd/rebuild_linux.go"
+printf 'package main\n\nfunc claim() error {\n\treturn errBeforeFormat2\n}\n' >"$r/cmd/postelmd/claim_linux.go"
+case_ fail "format 2 with the switch gone but another file still refusing" "are off"
+rm "$r/cmd/postelmd/claim_linux.go"
+printf 'package main\n\nfunc claim() error {\n\treturn errBeforeFormat2\n}\n' >"$r/cmd/postelmd/claim_linux_test.go"
+pieces 2
+printf 'package main\n\nfunc run() error { return rebuild() }\n' >"$r/cmd/postelmd/rebuild_linux.go"
+case_ pass "format 2: a test file mentioning errBeforeFormat2 doesn't count"
+rm "$r/cmd/postelmd/claim_linux_test.go"
+
+# G4: CI must run the target in a job the required check needs.
+for step in "run: make image-multiarch image-smoke-upgrade" "run: make image-smoke-upgrade image-scan"; do
+  pieces 2
+  workflow image "$step"
+  case_ pass "CI step '$step'"
+done
+for step in "run: make image-smoke-upgrade-x" "# run: make image-smoke-upgrade" "run: echo make image-smoke-upgrade"; do
+  pieces 2
+  workflow image "$step"
+  case_ fail "CI step '$step'" "CI doesn't run"
+done
+pieces 2
+workflow optional "run: make image-smoke-upgrade"
+case_ fail "CI runs it in a job the required check doesn't need" "CI doesn't run"
 # This repository's own files, with FormatVersion faked to 2: until the upgrade smoke test
 # lands (part D), the gate refuses them.
 root=$(dirname "$script")/..
-for f in internal/store/layout/format_linux.go cmd/postelmd/main.go cmd/postelmd/rebuild_linux.go \
+for f in internal/store/layout/format_linux.go cmd/postelmd/main.go cmd/postelmd/rebuild_linux.go cmd/postelmd/instance.go \
   cmd/postelmd/appdb_linux.go internal/store/sql/conn.go docs/operations/upgrading-to-format-2.md \
   Makefile .github/workflows/ci.yaml; do
   cp "$root/$f" "$r/$f"

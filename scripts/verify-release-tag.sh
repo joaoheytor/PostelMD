@@ -51,10 +51,28 @@ fi
 
 # Release blocker (ADR-0030 follow-up 2, ADR-0042, #190 R6): a build that writes data format 2
 # or later changes data 0.1 can't read, so it ships only with the way back and the commands its
-# refusals name. Each piece is recognized by text in the tagged commit's files.
-at() { git show "$commit:$1" 2>/dev/null; }
-format=$(at internal/store/layout/format_linux.go | sed -n 's/^const FormatVersion = \([0-9][0-9]*\)$/\1/p')
-if [ "${format:-1}" -ge 2 ]; then
+# refusals name. Each piece is recognized by text in the tagged commit's files. It fails closed:
+# a format it can't read fails the tag, never counts as format 1.
+at() { git show "$commit:$1" 2>/dev/null | tr -d '\r'; }
+isnum() { case $1 in '' | *[!0-9]*) return 1 ;; esac; }
+# decl <file> <name>: the one top-level `[const|var] <name> [int] = <value> [// comment]` line's
+# value, or nothing when there are none, several, or another form.
+decl() {
+  lines=$(at "$1" | grep -E "^[[:space:]]*((const|var)[[:space:]]+)?$2([[:space:]]|=|\$)") || return 0
+  [ "$(printf '%s\n' "$lines" | wc -l)" -eq 1 ] || return 0
+  printf '%s\n' "$lines" | sed -n -E "s#^[[:space:]]*((const|var)[[:space:]]+)?$2([[:space:]]+int)?[[:space:]]*=[[:space:]]*([A-Za-z0-9_.]+)[[:space:]]*(//.*)?\$#\\4#p"
+}
+format=$(decl internal/store/layout/format_linux.go FormatVersion)
+isnum "$format" ||
+  fail "can't read FormatVersion in internal/store/layout/format_linux.go (one \`const FormatVersion = <n>\`), so the format-2 release blockers can't be checked"
+build=$(decl cmd/postelmd/instance.go buildFormat)
+case $build in
+  layout.FormatVersion) ;;
+  *) isnum "$build" ||
+    fail "can't read buildFormat in cmd/postelmd/instance.go (\`var buildFormat = layout.FormatVersion\` or a number)"
+    [ "$build" -le "$format" ] || format=$build ;;
+esac
+if [ "$format" -ge 2 ]; then
   f2() { fail "writes data format $format but $*: no release, RC included (docs/operations/releasing.md)"; }
   at docs/operations/upgrading-to-format-2.md | grep -qx '## Rollback to 0.1' ||
     f2 "docs/operations/upgrading-to-format-2.md has no rollback section (## Rollback to 0.1)"
@@ -62,15 +80,29 @@ if [ "${format:-1}" -ge 2 ]; then
     f2 "the Makefile has no upgrade smoke test (image-smoke-upgrade)"
   at Makefile | grep -Eq '^ci:.* image-smoke-upgrade( |$)' ||
     f2 "the upgrade smoke test (image-smoke-upgrade) is not in make ci"
-  at .github/workflows/ci.yaml | grep -Eq '^ +(- )?run: make image-smoke-upgrade$' ||
-    f2 "CI doesn't run make image-smoke-upgrade (.github/workflows/ci.yaml)"
+  # The job that runs it must be one the required check needs (`needs: [...]` on one line).
+  wf=$(at .github/workflows/ci.yaml)
+  runs=$(printf '%s\n' "$wf" | awk '
+    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { job = $1; sub(/:$/, "", job) }
+    /^[[:space:]]+(- )?run: make( [a-z0-9-]+)* image-smoke-upgrade( |$)/ { print job }')
+  needs=$(printf '%s\n' "$wf" | awk '
+    /^  [A-Za-z0-9_-]+:/ { r = ($1 == "required:") }
+    r && /^    needs: *\[/ { sub(/^    needs: *\[/, ""); sub(/\].*/, ""); gsub(/[ ,]+/, " "); print " " $0 " " }')
+  ok=
+  for j in $runs; do case $needs in *" $j "*) ok=1 ;; esac; done
+  [ -n "$ok" ] ||
+    f2 "CI doesn't run make image-smoke-upgrade in a job the required check needs (.github/workflows/ci.yaml)"
   usage=$(at cmd/postelmd/main.go)
   printf '%s\n' "$usage" | grep -Eq '^ +db rebuild +[A-Za-z]' || f2 "has no \`postelmd db rebuild\`"
   printf '%s\n' "$usage" | grep -Eq '^ +vault claim +[A-Za-z]' || f2 "has no \`postelmd vault claim\`"
-  on=$(at cmd/postelmd/rebuild_linux.go |
-    sed -n 's/^func identityCommandsReady() bool { return buildFormat >= \([0-9][0-9]*\) }$/\1/p')
-  [ -n "$on" ] && [ "$on" -le "$format" ] ||
-    f2 "db rebuild and vault claim are off (identityCommandsReady in cmd/postelmd/rebuild_linux.go)"
+  # Part D removes their switch (errBeforeFormat2); while some non-test file still returns it,
+  # the switch must turn them on at this format.
+  if git grep -q 'return errBeforeFormat2' "$commit" -- 'cmd/postelmd/*.go' ':!*_test.go'; then
+    on=$(at cmd/postelmd/rebuild_linux.go |
+      sed -n 's/^func identityCommandsReady() bool { return buildFormat >= \([0-9][0-9]*\) }$/\1/p')
+    { isnum "$on" && [ "$on" -le "$format" ]; } ||
+      f2 "db rebuild and vault claim are off (errBeforeFormat2, identityCommandsReady in cmd/postelmd/rebuild_linux.go)"
+  fi
   damaged="ErrDamaged doesn't name db rebuild (errRebuildFix in internal/store/sql/conn.go, NameRebuild in cmd/postelmd/appdb_linux.go)"
   at internal/store/sql/conn.go | grep -q 'postelmd db rebuild' || f2 "$damaged"
   at cmd/postelmd/appdb_linux.go | grep -q 'NameRebuild(' || f2 "$damaged"
