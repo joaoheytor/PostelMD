@@ -1,6 +1,6 @@
 # ADR-0030: v0.2 storage: SQLite in /data, its driver, migrations and data format 2
 
-- **Status:** Accepted; its "Checks at start" fix for a damaged database at format 1, and the order and done conditions of its follow-up 2, are superseded by [ADR-0034](0034-app-db-before-format-2.md); the fix its format table names for a marker that is a symlink, a folder or a special file, and `vault claim`'s refusal of one, by [ADR-0031](0031-v02-file-identity.md) (move it aside, then run again)
+- **Status:** Accepted; its "Checks at start" fix for a damaged database at format 1, and the order and done conditions of its follow-up 2, are superseded by [ADR-0034](0034-app-db-before-format-2.md); the fix its format table names for a marker that is a symlink, a folder or a special file, and `vault claim`'s refusal of one, by [ADR-0031](0031-v02-file-identity.md) (move it aside, then run again); `db rebuild`'s step 2 file list (it also moves `app.db-journal`, and an interrupted migration's files that `db rollback` can't undo) and step 3's "left in place" (the vault's start-up sweep removes what isn't copied) by [ADR-0040](0040-db-rebuild-and-vault-claim.md)
 - **Date:** 2026-11-12
 
 ## Context
@@ -333,3 +333,8 @@ generation bumps, suspects, tombstones).
 - **2026-11-13, measured image size.** With the driver linked into `serve` (#175), the
   `amd64` image is 38,711,508 bytes against the 40 MB budget (`docs/ci-cd.md`); the binary grew by
   4.3 MB, from 19.0 to 23.3 MB.
+- **2026-11-17, the mechanics of `db rebuild`, `vault claim` and the identity check.** The
+  rebuild intent's content, its folder names, its crash points and recovery table, the
+  identity check's sample, and what each command refuses before its first side effect are in
+  [ADR-0040](0040-db-rebuild-and-vault-claim.md), which also supersedes two parts of
+  `db rebuild` here (see the status line).

@@ -147,3 +147,8 @@ tests.
 | Count the 10 s from the process's own first pass | A restart within the 10 s would wait another 10 s, and a crash loop would never tombstone |
 | A second pass for the suspects and holds only | The same rows and a smaller walk, but two planners to keep right; a full pass is the same code |
 | Fail startup when the first pass fails | No ID is on the wire yet; a scan that can't read one folder would stop the server |
+
+## Clarifications
+- **2026-11-17, at data format 2.** What "serve before data format 2" becomes at format 2
+  (the format table refuses where this ADR skips the scan with a warning; a failed first
+  pass still doesn't stop the start) is in [ADR-0040](0040-db-rebuild-and-vault-claim.md).

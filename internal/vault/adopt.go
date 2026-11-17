@@ -68,6 +68,36 @@ func (v *Vault) checkUnowned() error {
 	return nil
 }
 
+// CheckOpenable runs, before db rebuild's intent, the checks Open would refuse on after it:
+// adoption's (ErrForeignReserved, read only) and the RENAME_NOREPLACE probe. The probe
+// needs a file of its own, so it runs only where the temp folder already exists; it is
+// removed again, as Open's is. Without the temp folder (a vault never served), a filesystem
+// without RENAME_NOREPLACE still refuses at Open, after the intent (ADR-0040). The caller
+// holds the instance lock (CLAUDE.md rule 12).
+func CheckOpenable(dir string, opts ...fs.Option) error {
+	root, err := fs.OpenRoot(dir, opts...)
+	if err != nil {
+		return err
+	}
+	v := &Vault{root: root}
+	defer func() { _ = root.Close() }()
+	_, err = root.ReadFile(TmpDir + "/" + ownerMarker)
+	switch {
+	case errors.Is(err, iofs.ErrNotExist):
+		if err := v.checkUnowned(); err != nil {
+			return err
+		}
+	case err != nil && !errors.Is(err, fs.ErrTooLarge):
+		return fmt.Errorf("vault: check %s: %w", TmpDir, err)
+	}
+	if _, err := root.ReadDir(TmpDir); errors.Is(err, iofs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("vault: check %s: %w", TmpDir, err)
+	}
+	return v.probeNoReplace()
+}
+
 // sweepTemps removes every leftover temp file, apart from the marker: a save that didn't
 // finish never answered 200, so its edit is still the client's draft.
 func (v *Vault) sweepTemps() error {

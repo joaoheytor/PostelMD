@@ -116,10 +116,12 @@ Everything else consumes their interfaces.
     app.db                   # SQLite WAL, 0600: identity, ACLs, file IDs, findings, outbox, intent log (ADR-0030)
     index.db                 # SQLite WAL, 0600: FTS and links; derived, rebuilt by `reindex` (ADR-0030)
     migrate.intent           # sidecar from before a migration's snapshot until it ends (ADR-0015)
-    rebuild.intent           # sidecar while `postelmd db rebuild` runs (ADR-0030)
+    rebuild.intent           # sidecar while `postelmd db rebuild` runs; serve refuses to start beside it (ADR-0030, ADR-0040)
     rollback.intent          # sidecar while `postelmd db rollback` runs; serve refuses to start beside it (ADR-0035)
     rollback-*/              # app.db, its WAL files and the snapshot `db rollback` replaced; never deleted automatically (ADR-0035)
-    damaged-*/               # app.db files moved aside by `db rebuild`, or by hand at format 1 (ADR-0034); never deleted automatically (ADR-0030)
+    damaged-*/               # app.db files moved aside by `db rebuild` (damaged-<time>/, with its `moved` record and
+                             # attempt-<n>/ for a half-built one), or by hand at format 1 (ADR-0034); never deleted automatically
+    recovery/rebuild-<time>/ # the vault's temp files `db rebuild` kept (ADR-0030, ADR-0040)
     pre-format-2/            # 0600 copies of format, auth.json, secret.key, config.yaml as v0.1 left them (ADR-0030)
     pre-format-2-*/, rolled-back-*/  # set aside by a v0.2 → v0.1 rollback or a redone copy; removed by the runbook
     keys/                    # key ring, one key per purpose, versioned, 0600 (ADR-0005)
