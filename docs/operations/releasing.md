@@ -31,6 +31,20 @@ or reused.
   run against existing databases ships the rollback). Check with
   `git ls-tree -r --name-only <commit> -- internal/store/sql/migrations/` and
   `postelmd help`.
+- **No `v*` tag on a commit whose build writes data format 2 or later** (`const
+  FormatVersion` in `internal/store/layout/format_linux.go`) unless that commit has all of
+  (ADR-0030 follow-up 2, ADR-0042, #190):
+  - the rollback section of [Upgrading to data format 2](upgrading-to-format-2.md)
+    (`## Rollback to 0.1`);
+  - the image upgrade smoke test, `make image-smoke-upgrade`, in the `ci:` target and run
+    by `.github/workflows/ci.yaml` (CI runs the targets one by one, not `make ci`);
+  - `postelmd db rebuild` and `postelmd vault claim` in `postelmd help`, and turned on at
+    that format (`identityCommandsReady` in `cmd/postelmd/rebuild_linux.go`);
+  - the damaged-database error naming `db rebuild` (`errRebuildFix` in
+    `internal/store/sql/conn.go`, `NameRebuild` in `cmd/postelmd/appdb_linux.go`).
+
+  The release notes of that release say, first, to copy the data before upgrading, and link
+  the runbook.
 
 ## 1. Release candidate
 
