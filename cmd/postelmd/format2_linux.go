@@ -29,15 +29,19 @@ func checkDataFormat(state string) (dataStart, error) {
 	return dataStart{format: format, upgrade: format < 2 || in != nil}, nil
 }
 
-// checkVaultAtStart runs, from build format 2, ADR-0030's format table for data at format 2
-// with no upgrade to finish (ids.CheckVault), before the vault opens. The format-1 rows are
-// the first upgrade's own refusals (ADR-0041).
-func checkVaultAtStart(ctx context.Context, db appDB, start dataStart, vaultDir string, log *slog.Logger) error {
+// checkVaultAtStart runs, from build format 2, ADR-0030's format table before the vault
+// opens, whose adoption, temp sweep and rename probe would change a vault the table refuses:
+// the first upgrade's refusals (the format-1 rows, ADR-0041) when it is to run, else the
+// format-2 rows (ids.CheckVault).
+func checkVaultAtStart(ctx context.Context, db appDB, start dataStart, paths layout.Paths, log *slog.Logger) error {
 	sdb, ok := db.(*sqlstore.DB)
-	if buildFormat < 2 || start.upgrade || !ok {
+	switch {
+	case buildFormat < 2 || !ok:
 		return nil
+	case start.upgrade:
+		return ids.CheckUpgrade(ctx, sdb, ids.UpgradeOptions{State: paths.State, Vault: paths.Vault})
 	}
-	return ids.CheckVault(ctx, sdb, vaultDir, buildFormat, log)
+	return ids.CheckVault(ctx, sdb, paths.Vault, buildFormat, log)
 }
 
 // firstUpgrade runs or resumes the first upgrade (ADR-0030, ADR-0041) when the format check

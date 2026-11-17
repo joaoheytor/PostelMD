@@ -33,19 +33,14 @@ var ErrNoVolume = errors.New("layout: no volume is mounted at /data")
 // FormatVersion is the format of the data this build writes in /data (ADR-0025).
 const FormatVersion = 1
 
-// EnsureFormat is unsupported outside Linux (issue #34).
-func EnsureFormat(state string, _ ...fs.Option) error {
-	return fmt.Errorf("layout: %s: %w", state, errors.ErrUnsupported)
-}
-
 // CheckFormat is unsupported outside Linux (issue #34).
 func CheckFormat(state string, _ int, _ ...fs.Option) (int, error) {
 	return 0, fmt.Errorf("layout: %s: %w", state, errors.ErrUnsupported)
 }
 
 // CheckOwner is unsupported outside Linux (issue #34).
-func CheckOwner(state string, _ int) error {
-	return fmt.Errorf("layout: %s: %w", state, errors.ErrUnsupported)
+func CheckOwner(dataDir string, _ int) error {
+	return fmt.Errorf("layout: %s: %w", dataDir, errors.ErrUnsupported)
 }
 
 // Prepare is unsupported outside Linux (issue #34).

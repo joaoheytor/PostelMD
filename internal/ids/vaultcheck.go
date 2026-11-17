@@ -58,7 +58,8 @@ func CheckVault(ctx context.Context, db *sqlstore.DB, dir string, format int, lo
 	if err != nil {
 		return err
 	}
-	if m.Present && !c.Passes() || !m.Present && c.Sampled > 0 {
+	// A missing marker is rewritten only with no ID at all, live or suspect (ADR-0042).
+	if m.Present && !c.Passes() || !m.Present && c.Rows > 0 {
 		return fmt.Errorf("%w; %d of %d sampled rows match", ErrVaultNotClaimed, c.Matched, c.Sampled)
 	}
 	if err := vault.WriteMarker(dir, id.VaultUUID, format, opts...); err != nil {

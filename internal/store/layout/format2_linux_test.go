@@ -39,19 +39,6 @@ func TestCheckFormatAtFormat2(t *testing.T) {
 	}
 }
 
-// TestCheckFormatAtFormat1: a format-1 build writes 1 for a missing file, as EnsureFormat
-// always has, and refuses 2 as newer.
-func TestCheckFormatAtFormat1(t *testing.T) {
-	state := t.TempDir()
-	if n, err := CheckFormat(state, 1); n != 1 || err != nil || readFormat(t, state) != "1\n" {
-		t.Fatalf("CheckFormat(missing, 1) = %d, %v; file %q", n, err, readFormat(t, state))
-	}
-	must(t, os.WriteFile(filepath.Join(state, formatFile), []byte("2\n"), 0o600))
-	if _, err := CheckFormat(state, 1); !errors.Is(err, ErrNewerFormat) {
-		t.Fatalf("CheckFormat(2, 1) = %v, want ErrNewerFormat", err)
-	}
-}
-
 // TestSetFormatWritesFormat2: the first upgrade's last step writes 2 at any FormatVersion;
 // a format newer than this code knows is refused.
 func TestSetFormatWritesFormat2(t *testing.T) {

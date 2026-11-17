@@ -198,11 +198,17 @@ func TestServeAtFormat2RefusesByTheFormatTable(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			data := c.data(t)
+			// The tree tells a missing marker from an empty one (and catches a sweep or a
+			// probe); the bytes tell one UUID from another.
+			beforeTree := tree(t, vaultOf(data))
 			before, _ := os.ReadFile(marker(data)) //nolint:gosec // G304: the test's data
 			format := formatOf(t, data)
 			err := refusedStart(t, data)
 			if !errors.Is(err, c.want) || !strings.Contains(err.Error(), c.fix) {
 				t.Fatalf("serve = %v, want %v naming %q", err, c.want, c.fix)
+			}
+			if after := tree(t, vaultOf(data)); after != beforeTree {
+				t.Fatalf("the refused start changed the vault:\nbefore:\n%s\nafter:\n%s", beforeTree, after)
 			}
 			if after, _ := os.ReadFile(marker(data)); string(after) != string(before) { //nolint:gosec // G304: the test's data
 				t.Fatalf("the marker changed: %q, was %q", after, before)

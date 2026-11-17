@@ -54,6 +54,31 @@ func TestOfflineCommandsRefuseAnotherUser(t *testing.T) {
 	}
 }
 
+// TestOfflineCommandsRefuseAnotherUserBeforeCreatingAnything: with no .postelmd yet, the
+// check is on the data directory, before the layout creates its folders, so a command run as
+// another user (root without --user) creates nothing that the server couldn't open.
+func TestOfflineCommandsRefuseAnotherUserBeforeCreatingAnything(t *testing.T) {
+	atFormat2(t)
+	asAnotherUser(t)
+	stdin, err := os.Open(os.DevNull)
+	must(t, err)
+	t.Cleanup(func() { _ = stdin.Close() })
+	for name, run := range map[string]func(config.Config) error{
+		"db rebuild":     func(cfg config.Config) error { return dbRebuild(cfg, &syncBuffer{}) },
+		"vault claim":    func(cfg config.Config) error { return vaultClaim(cfg, stdin, &syncBuffer{}) },
+		"db rollback":    func(cfg config.Config) error { return dbRollback(cfg, &syncBuffer{}) },
+		"reset-password": func(cfg config.Config) error { return resetPassword(cfg, stdin, &syncBuffer{}) },
+	} {
+		data := t.TempDir()
+		if err := run(config.Config{DataDir: data, Yes: true}); !errors.Is(err, layout.ErrNotOwner) {
+			t.Errorf("%s as another user = %v, want ErrNotOwner", name, err)
+		}
+		if got := listing(t, data); got != "" {
+			t.Errorf("%s as another user created %s", name, got)
+		}
+	}
+}
+
 // TestTheOwnerCheckIsInertAtFormat1: a format-1 build runs db rollback as any user, as it
 // always has.
 func TestTheOwnerCheckIsInertAtFormat1(t *testing.T) {

@@ -19,11 +19,11 @@ import (
 // the data format first, like every command that reads the state (ADR-0025), and from build
 // format 2 that it runs as the state's owner (ADR-0042).
 func dbRollback(cfg config.Config, stdout io.Writer) error {
-	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
-	if err != nil {
+	if err := checkOwner(cfg.DataDir); err != nil {
 		return err
 	}
-	if err := checkOwner(paths.State); err != nil {
+	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
+	if err != nil {
 		return err
 	}
 	lk, err := lock.Acquire(paths.Lock)

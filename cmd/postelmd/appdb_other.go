@@ -28,7 +28,9 @@ func checkDataFormat(state string) (dataStart, error) {
 }
 
 // checkVaultAtStart has nothing to check outside Linux: openAppDB fails first.
-func checkVaultAtStart(context.Context, appDB, dataStart, string, *slog.Logger) error { return nil }
+func checkVaultAtStart(context.Context, appDB, dataStart, layout.Paths, *slog.Logger) error {
+	return nil
+}
 
 // firstUpgrade has nothing to run outside Linux: openAppDB fails first.
 func firstUpgrade(context.Context, appDB, *vault.Vault, dataStart, layout.Paths, *slog.Logger) error {

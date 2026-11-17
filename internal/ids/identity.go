@@ -18,9 +18,9 @@ const sampleSize = 1000
 
 // Identity is the identity check's answer (ADR-0030, mechanics in ADR-0040): how many live
 // rows it sampled and how many it found at their path with the same inode and size, and how
-// many files the vault holds.
+// many files the vault holds. Rows counts every row, live or suspect: a suspect is still an ID.
 type Identity struct {
-	Sampled, Matched, Files int
+	Sampled, Matched, Files, Rows int
 }
 
 // Passes reports whether at least 90% of the sample matched; an empty sample passes.
@@ -46,7 +46,7 @@ func CheckIdentity(ctx context.Context, db *sqlstore.DB, dir string, opts ...fs.
 	if err != nil {
 		return Identity{}, err
 	}
-	c := Identity{Sampled: len(s), Files: in.Files}
+	c := Identity{Sampled: len(s), Files: in.Files, Rows: len(rows)}
 	for _, r := range s {
 		if st, ok := in.Stats[r.Path]; ok && st.Inode == r.Stat.Inode && st.Size == r.Stat.Size {
 			c.Matched++

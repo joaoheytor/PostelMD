@@ -33,11 +33,11 @@ func offline(cfg config.Config, fn func(layout.Paths) error) error {
 	if !identityCommandsReady() {
 		return errBeforeFormat2
 	}
-	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
-	if err != nil {
+	if err := checkOwner(cfg.DataDir); err != nil {
 		return err
 	}
-	if err := checkOwner(paths.State); err != nil {
+	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, true))
+	if err != nil {
 		return err
 	}
 	lk, err := lock.Acquire(paths.Lock)

@@ -63,19 +63,19 @@ func TestTheIdentityCheck(t *testing.T) {
 			t.Fatalf("CheckIdentity = %+v, want %+v", got, want)
 		}
 	}
-	check(Identity{Sampled: 20, Matched: 20, Files: 20})
+	check(Identity{Sampled: 20, Matched: 20, Files: 20, Rows: 20})
 	e.write("n00.md", "a longer note 0") // another size
 	e.rm("n01.md")
 	e.cp("n02.md", "c")
 	e.rm("n02.md")
 	e.mv("c", "n02.md") // another inode
-	check(Identity{Sampled: 20, Matched: 17, Files: 19})
+	check(Identity{Sampled: 20, Matched: 17, Files: 19, Rows: 20})
 	if (Identity{Sampled: 20, Matched: 18}).Passes() != true || (Identity{Sampled: 20, Matched: 17}).Passes() {
 		t.Fatal("the 90% line is wrong")
 	}
 	e.rm("n03.md")
 	must(t, os.Symlink("n04.md", filepath.Join(e.dir, "n03.md")))
-	check(Identity{Sampled: 20, Matched: 16, Files: 18}) // a symlink is neither a file nor a match
+	check(Identity{Sampled: 20, Matched: 16, Files: 18, Rows: 20}) // a symlink is neither a file nor a match
 
 	other := t.TempDir() // another vault: nothing matches
 	must(t, os.WriteFile(filepath.Join(other, "x.md"), []byte("x"), 0o600))

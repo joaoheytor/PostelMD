@@ -29,26 +29,20 @@ var (
 	ErrBadFormat = errors.New("layout: damaged data format file")
 )
 
-// EnsureFormat checks the data format in the state directory, under the instance lock, before
-// the app state is read and before the vault is opened or swept (ADR-0025):
-//   - missing: a new or a pre-format data directory; it writes FormatVersion;
-//   - equal: nothing to do;
+// CheckFormat checks the data format in the state directory for a build that writes data
+// format build (FormatVersion; cmd/postelmd's tests inject 2), under the instance lock, before
+// the app state is read and before the vault is opened or swept (ADR-0025), and returns the
+// format the data is at:
+//   - missing: a new or a pre-format data directory. At build 1 it writes 1. From build 2 it
+//     is format 1 and nothing is written: ADR-0030's format table runs the first upgrade,
+//     whose last step writes the format (ADR-0041's follow-up, ADR-0042);
+//   - at most build: nothing to do;
 //   - newer: refused, so an older binary never touches data it doesn't understand;
 //   - anything else: refused as damaged.
 //
 // The write is a synced temp file, one rename and the directory's fsync: one step that
 // carries meaning, so a crash leaves no format file (the next start writes it) or a whole
 // one, and no intent is needed (CLAUDE.md rule 14).
-func EnsureFormat(state string, opts ...fs.Option) error {
-	_, err := CheckFormat(state, FormatVersion, opts...)
-	return err
-}
-
-// CheckFormat is EnsureFormat for a build that writes data format build (cmd/postelmd's
-// tests inject 2), and returns the format the data is at. A missing file at build 1 is
-// written; but from build 2 a missing file is v0.1 data or a new directory: it is format 1,
-// and nothing is written, so ADR-0030's format table runs the first upgrade, whose last step
-// writes the format (ADR-0041's follow-up).
 func CheckFormat(state string, build int, opts ...fs.Option) (int, error) {
 	r, err := fs.OpenRoot(state, opts...)
 	if err != nil {
@@ -73,7 +67,7 @@ func CheckFormat(state string, build int, opts ...fs.Option) (int, error) {
 const MaxFormat = 2
 
 // SetFormat writes n into the format file, replacing what is there: the last step of the
-// first upgrade and of db rebuild (ADR-0030). Like EnsureFormat's write, it is one rename,
+// first upgrade and of db rebuild (ADR-0030). Like CheckFormat's write, it is one rename,
 // so a crash leaves the old format or n. The caller holds the instance lock.
 func SetFormat(state string, n int, opts ...fs.Option) error {
 	if n < 1 || n > MaxFormat {

@@ -26,11 +26,11 @@ import (
 // so it refuses to run next to a live server. On a terminal the password is read twice
 // without echo; otherwise one line is read from stdin.
 func resetPassword(cfg config.Config, stdin *os.File, stdout io.Writer) error {
-	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, false))
-	if err != nil {
+	if err := checkOwner(cfg.DataDir); err != nil { // from build format 2 (ADR-0042)
 		return err
 	}
-	if err := checkOwner(paths.State); err != nil { // from build format 2 (ADR-0042)
+	paths, _, err := layout.Prepare(cfg.DataDir, layoutOptions(cfg, false))
+	if err != nil {
 		return err
 	}
 	lk, err := lock.Acquire(paths.Lock)

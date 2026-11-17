@@ -30,16 +30,25 @@ them by setting the build format to 2, not by skipping until it is.
   as a vault whose state directory isn't here, naming the right mount and `db rebuild`.
   Data at format 2 runs the table below.
 - **At format 2, `app.db` must be there.** It is opened without being created; a missing
-  one is refused, naming `db rebuild` (ADR-0030's "2, absent" row).
-- **The table runs before the vault opens** (after the database and its migrations, ADR-0030's
-  step 5). Opening adopts the folder (ADR-0027), which writes an empty marker where there was
-  none, and the table must tell a missing marker from an empty one. The rows, from ADR-0030:
+  one is refused, naming `db rebuild` (ADR-0030's "2, absent" row). With `upgrade.intent`
+  there it is created like any start's, even at format 2 (a kill after step 5, then the
+  database lost): the resumed upgrade assigns again under the intent's vault UUID. No ID has
+  left the server before the upgrade ends (ADR-0041), so nothing a client holds is lost.
+- **Every row is checked before the vault opens** (after the database and its migrations,
+  ADR-0030's step 5). Opening adopts the folder (ADR-0027), sweeps its temp folder and runs
+  the rename probe, so a start refused after it would have changed the vault it refuses,
+  deleting a save's temp; and it writes an empty marker where there was none, which the
+  table must tell from an empty one. So the first upgrade's refusals (the intent, the flag
+  against the intent's vault UUID, the marker) run first and change nothing; the upgrade
+  itself runs once the vault is open. The format-2 rows, from ADR-0030:
   the marker naming the stored vault UUID goes on; another UUID is refused (mount the right
   vault, or `db rebuild`); a marker that doesn't parse or isn't a regular file is refused,
-  naming `vault claim`; a missing marker with live rows, or an empty one the identity check
-  doesn't pass, is refused, naming the mount and `vault claim`; a missing marker with no
-  live rows, or an empty one the identity check passes, is rewritten with the stored UUID
-  and the format, with a warning. A rewrite is one rename (ADR-0031), so it needs no intent
+  naming `vault claim`; a missing marker beside any row, or an empty one the identity check
+  doesn't pass, is refused, naming the mount and `vault claim`; a missing marker beside no
+  row at all, or an empty one the identity check passes, is rewritten with the stored UUID
+  and the format, with a warning. ADR-0030 says "no live rows" for the missing marker; a
+  suspect row (ADR-0031) is still an ID, so it counts too, and only a database with no ID
+  at all, which nothing can misattribute, gets the rewrite. A rewrite is one rename (ADR-0031), so it needs no intent
   (CLAUDE.md rule 14) and adds no kill point.
 - **A database at format 2 without the "assigned" flag is refused**, naming `db rebuild`:
   the first upgrade sets the flag before it writes `2`, and `db rebuild` before it does, so
@@ -54,9 +63,10 @@ them by setting the build format to 2, not by skipping until it is.
   from build format 2 naming `postelmd db rebuild`, on data at format 1 or 2, with SQLite's
   error; the manual move of ADR-0034 is format 1's text only.
 - **Offline commands run as the state's owner.** From build format 2, `db rebuild`,
-  `vault claim`, `db rollback` and `reset-password` refuse, before the instance lock and
-  before changing anything, when their effective UID isn't the owner of `/data/.postelmd`
-  (`lstat`; a symlink or a non-folder is refused too). What they create (a new `app.db`,
+  `vault claim`, `db rollback` and `reset-password` refuse, before the layout check creates
+  any folder and before the instance lock, when their effective UID isn't the owner of
+  `/data/.postelmd`, or of `/data` while `.postelmd` doesn't exist yet (`lstat`; a symlink or
+  a non-folder is refused too). What they create (a new `app.db`,
   `rebuild.intent`, `damaged-<time>/`, `auth.json`) would belong to that UID, and the server,
   running as the owner, couldn't open it: a `docker run --rm … postelmd db rebuild` without
   `--user` runs as the image's user, and a `sudo` on the host as root. Root is no exception.

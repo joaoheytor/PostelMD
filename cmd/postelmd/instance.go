@@ -38,12 +38,13 @@ type dataStart struct {
 var geteuid = os.Geteuid
 
 // checkOwner is the owner check of every command that changes the state with the server
-// stopped, from build format 2 (ADR-0042); at format 1 it checks nothing.
-func checkOwner(state string) error {
+// stopped, from build format 2 (ADR-0042), run before layout.Prepare creates any folder; at
+// format 1 it checks nothing.
+func checkOwner(dataDir string) error {
 	if buildFormat < 2 {
 		return nil
 	}
-	return layout.CheckOwner(state, geteuid())
+	return layout.CheckOwner(dataDir, geteuid())
 }
 
 // openInstance runs the startup steps after the listener (ADR-0030's order, as far as this
@@ -71,7 +72,7 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 	}
 	installGitTransports()
 	// Before the vault opens: opening adopts the folder, writing a marker the table reads.
-	if err := checkVaultAtStart(ctx, db, start, paths.Vault, log); err != nil {
+	if err := checkVaultAtStart(ctx, db, start, paths, log); err != nil {
 		in.close(log, true)
 		return nil, err
 	}

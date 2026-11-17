@@ -44,6 +44,14 @@ func TestCheckVault(t *testing.T) {
 		{"absent, live rows", notes, func(e *env) { must(t, os.Remove(markerPath(e))) },
 			ErrVaultNotClaimed, "postelmd vault claim", false},
 		{"absent, no live rows", nil, func(e *env) { must(t, os.Remove(markerPath(e))) }, nil, "", true},
+		{"absent, only suspect rows", notes, func(e *env) { // suspects are still IDs
+			e.rm("a.md")
+			e.rm("sub/b.md")
+			if tot := e.pass(); tot.Suspects != 2 {
+				t.Fatalf("the pass made %d suspects, want 2", tot.Suspects)
+			}
+			must(t, os.Remove(markerPath(e)))
+		}, ErrVaultNotClaimed, "postelmd vault claim", false},
 		{"empty, the identity check passes", notes, func(*env) {}, nil, "", true},
 		{"empty, the identity check fails", notes, func(e *env) {
 			e.rm("a.md")
