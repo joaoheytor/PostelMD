@@ -43,7 +43,12 @@ class WriteTargets(unittest.TestCase):
     CASES = [
         ("sed -i 's/a/b/' CLAUDE.md", ["CLAUDE.md"]),
         ("sed --in-place -e 's/a/b/' a.go b.go", ["a.go", "b.go"]),
-        ("sed -i.bak -E 's/a/b/' x.md", ["x.md"]),
+        ("sed -i.bak -E 's/a/b/' x.md", ["x.md", "x.md.bak"]),  # the backup is written too
+        ("sed -i'd/*' s/a/b/ x/y.md", ["x/y.md", "d/y.md"]),
+        ("sed --in-place='*.orig' s/a/b/ x/y.md", ["x/y.md", "x/y.md.orig"]),
+        ("echo x >! a.md", ["a.md"]),                     # zsh: clobber a.md
+        ("echo x >>! a.md; echo y &>! b.md", ["a.md", "b.md"]),
+        ("echo x >| a.md", ["a.md"]),
         ("sed -n 1,5p CLAUDE.md", []),
         ("perl -pi -e 's/a/b/' x.go", ["x.go"]),
         ("perl -ne 'print' x.go", []),

@@ -170,6 +170,18 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   PRs, any other `gh api` and repo settings stay permission prompts. The guard is a
   guardrail for agents, not the gate: the allowed test runners (`make`, `go test`, `npm`)
   can run any code, so GitHub branch protection and rulesets are the hard gate.
+  The maintainer may opt in per project with a file outside it,
+  `${XDG_CONFIG_HOME:-$HOME/.config}/postelmd/guard-trust.json` (`.claude/hooks/trust.py`):
+  then shell writes by a few text tools (echo, cat, tee, grep, …; `sed --sandbox -i …`,
+  so write sed edits that way, with no backup suffix or a plain one such as `-i.bak`),
+  reading only files inside the project, to literal, unprotected paths inside it, CAN'T
+  PARSE on a command whose words are all literal (no `$( )`, no outward tool, no path
+  outside the project; it may still run the project's own code) and edits to Accepted ADRs
+  stop asking. Every other ask and every deny stay. Any command or edit that names that
+  file asks (in the end this relies on Claude Code's sandbox keeping agents' writes in the
+  project), and so do shell writes by redirect, tee, sed, perl -i, sort -o or uniq to git,
+  GitHub and guard files, even git-ignored ones, and to globbed or `$` targets in the
+  project. Writes by other tools (cp, git apply, …) are not seen (#198).
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
   acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
   in `.claude/agents/` for a PR.
