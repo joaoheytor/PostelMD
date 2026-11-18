@@ -35,9 +35,9 @@ func (db *DB) CompleteSave(ctx context.Context, opID string, stat FileStat) erro
 }
 
 // CompleteCreate records an applied create: a new ID at generation 1 for the destination,
-// and the intent ended, in one transaction. A suspect row on the destination (a file missing
-// since the scan) is tombstoned first, since files.path is unique (ADR-0031); a live one is
-// ErrIntentStale. It returns the new ID.
+// and the intent ended, in one transaction. A row still on the destination (its file went
+// since the last scan) is vacated first, and a hold on it released (freeTree). It returns
+// the new ID.
 func (db *DB) CompleteCreate(ctx context.Context, opID string, stat FileStat, now time.Time) (string, error) {
 	id := NewID(now)
 	err := db.intentTx(ctx, "create-complete", func(tx *sql.Tx) error {
@@ -45,7 +45,7 @@ func (db *DB) CompleteCreate(ctx context.Context, opID string, stat FileStat, no
 		if err := readOpen(ctx, tx, opID, &p); err != nil {
 			return err
 		}
-		if err := freePath(ctx, tx, string(p.Path), nil, now); err != nil {
+		if err := freeTree(ctx, tx, string(p.Path), nil, now); err != nil {
 			return err
 		}
 		return errors.Join(insertRow(ctx, tx, id, string(p.Path), p.NewSHA256, stat), deleteIntent(ctx, tx, opID))
@@ -60,8 +60,8 @@ func (db *DB) CompleteCreate(ctx context.Context, opID string, stat FileStat, no
 // destination and a generation bump, IDs kept, and the intent ends, in one transaction.
 // stats holds the moved files' stats by ID (a rename changes the renamed item's ctime); a
 // file missing from it keeps its stat, and the scan finds it. Holds on paths under the
-// source are released (the next scan sees those paths again), and suspect rows on the new
-// paths are tombstoned as for a create.
+// source are released (the next scan sees those paths again), and rows and holds on the new
+// paths are vacated and released as for a create, before any moved row takes its path.
 func (db *DB) CompleteMove(ctx context.Context, opID string, stats map[string]FileStat, now time.Time) error {
 	return db.intentTx(ctx, "move-complete", func(tx *sql.Tx) error {
 		var p MoveIntent
@@ -72,10 +72,8 @@ func (db *DB) CompleteMove(ctx context.Context, opID string, stats map[string]Fi
 		for _, f := range p.Files {
 			moving[f.ID] = true
 		}
-		for _, f := range p.Files {
-			if err := freePath(ctx, tx, movedPath(string(f.Path), string(p.From), string(p.To)), moving, now); err != nil {
-				return err
-			}
+		if err := freeTree(ctx, tx, string(p.To), moving, now); err != nil {
+			return err
 		}
 		for _, f := range p.Files {
 			if err := moveRow(ctx, tx, f, movedPath(string(f.Path), string(p.From), string(p.To)), stats); err != nil {
@@ -112,25 +110,44 @@ func readOpen(ctx context.Context, tx *sql.Tx, opID string, p Payload) error {
 	return in.Decode(p)
 }
 
-// freePath makes path free for a row an operation puts there. The operation's no-clobber
-// rename proved the path absent on disk, so a row on it (usually a suspect; a live one whose
-// file went since the last scan), unless its ID is in keep (it moves itself), is tombstoned
-// as missing, and a hold on it, whose file went too, is released (ADR-0031: files.path is
-// unique). Refusing instead would leave recovery unable to finish the intent.
-func freePath(ctx context.Context, tx *sql.Tx, path string, keep map[string]bool, now time.Time) error {
-	f, err := scanFile(tx.QueryRowContext(ctx, "SELECT "+fileColumns+" FROM files WHERE path = ?", []byte(path)))
-	switch {
-	case errors.Is(err, ErrNoFile), err == nil && keep[f.ID]:
-	case err != nil:
+// freeTree makes root and every path under it free for the rows an operation puts there
+// (ADR-0033, "Giving a path a row"). The operation's no-clobber rename proved root absent on
+// disk, so every row there, unless its ID is in keep (it moves itself), is a file that went
+// since the last scan: it is vacated, never tombstoned (displace), and every hold there,
+// whose file went too, is released. It runs before any row takes a path there: files.path is
+// unique. Refusing instead would leave recovery unable to finish the intent.
+func freeTree(ctx context.Context, tx *sql.Tx, root string, keep map[string]bool, now time.Time) error {
+	lo, hi := subtree(root)
+	stale, err := queryFilesOn(ctx, tx, "SELECT "+fileColumns+" FROM files WHERE path = ? OR (path >= ? AND path < ?)",
+		[]byte(root), lo, hi)
+	if err != nil {
 		return err
-	default:
-		err := TombstoneFile{Row: Row{ID: f.ID, Path: f.Path, Generation: f.Generation}, Reason: "missing"}.apply(ctx, tx, now)
-		if err != nil {
-			return staleAs(err, ErrIntentStale)
+	}
+	for _, f := range stale {
+		if keep[f.ID] {
+			continue
+		}
+		if err := displace(ctx, tx, f, now); err != nil {
+			return err
 		}
 	}
-	return Release{Path: path}.apply(ctx, tx, now)
+	return releaseUnder(ctx, tx, root)
 }
+
+// displace takes f off its path and leaves it suspect, its ID, hash, stat and generation
+// kept, so the scan's rules 1 and 2 and its two-pass absence decide for it as for any missing
+// row (ADR-0031). Its path becomes displacedPath, which no file can have; displaced_from
+// keeps the path it had, for its tombstone. A suspect keeps its clock; a live row's starts.
+func displace(ctx context.Context, tx *sql.Tx, f File, now time.Time) error {
+	err := one(ctx, tx, "vacate a path", `UPDATE files SET path = ?, displaced_from = path, state = 'suspect',
+		suspect_since_ms = coalesce(suspect_since_ms, ?) WHERE id = ? AND path = ? AND generation = ?`,
+		displacedPath(f.ID), now.UnixMilli(), f.ID, []byte(f.Path), f.Generation)
+	return staleAs(err, ErrIntentStale)
+}
+
+// displacedPath is a vacated row's placeholder path: a NUL byte, which no file name has (the
+// vault refuses it, store/fs.IsReserved), then its ID, so it is unique.
+func displacedPath(id string) []byte { return append([]byte{0}, id...) }
 
 // insertRow gives path the new ID id at generation 1.
 func insertRow(ctx context.Context, tx *sql.Tx, id, path string, sha256 []byte, stat FileStat) error {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -105,7 +106,9 @@ func decodeStrict(b []byte, v any) error {
 	if err := dec.Decode(v); err != nil {
 		return err
 	}
-	if dec.More() {
+	// Only whitespace may follow: Token is io.EOF then. dec.More alone misses a stray '}' or
+	// ']', which it reads as the end of an enclosing value.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return errors.New("sql: data after the value")
 	}
 	return nil

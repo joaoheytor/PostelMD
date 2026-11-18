@@ -127,9 +127,9 @@ func TestCompleteSave(t *testing.T) {
 	}
 }
 
-// TestCompleteCreate: a new ID at generation 1; a row left on the path by a file that went
-// (a suspect, or a live row the scan hasn't caught up with) is tombstoned as missing, and a
-// hold on it released, since the create's no-clobber rename proved the path free.
+// TestCompleteCreate: a new ID at generation 1. A suspect left on the path (a file that
+// went) is vacated, keeping its suspect clock, since the create's no-clobber rename proved
+// the path free; a live row on the path is intents_free_test.go's case.
 func TestCompleteCreate(t *testing.T) {
 	db, rows := assigned(t)
 	ctx := context.Background()
@@ -138,27 +138,18 @@ func TestCompleteCreate(t *testing.T) {
 	must(t, err)
 	must(t, db.Begin(ctx, opA, CreateIntent{Path: "notes/b.md", NewSHA256: sum(5)}, t0))
 	st := FileStat{Size: 5, Inode: 55}
-	id, err := db.CompleteCreate(ctx, opA, st, t0)
+	id, err := db.CompleteCreate(ctx, opA, st, t0.Add(time.Hour))
 	must(t, err)
 	got, err := db.FileByPath(ctx, "notes/b.md")
 	must(t, err)
 	if got.ID != id || id == b.ID || got.Generation != 1 || got.Suspect || got.Stat != st {
 		t.Fatalf("the created row: %+v (ID %s, old %s)", got, id, b.ID)
 	}
-	if ts, err := db.TombstoneByID(ctx, b.ID); err != nil || ts.Reason != "missing" {
-		t.Fatalf("the old row's tombstone: %+v, %v", ts, err)
+	assertDisplaced(t, db, b)
+	if old, err := db.FileByID(ctx, b.ID); err != nil || !old.SuspectSince.Equal(t0) {
+		t.Fatalf("the vacated suspect: %+v, %v; want its clock kept at %v", old, err, t0)
 	}
 	noIntent(t, db)
-
-	// A live row on the destination.
-	a := rows["a.md"]
-	must(t, db.Begin(ctx, opB, CreateIntent{Path: "a.md", NewSHA256: sum(6)}, t0))
-	if _, err := db.CompleteCreate(ctx, opB, st, t0); err != nil {
-		t.Fatal(err)
-	}
-	if ts, err := db.TombstoneByID(ctx, a.ID); err != nil || ts.Reason != "missing" {
-		t.Fatalf("the live row's tombstone: %+v, %v", ts, err)
-	}
 }
 
 // TestCompleteMoveOfAFolder: every row under the folder gets its new path and a generation

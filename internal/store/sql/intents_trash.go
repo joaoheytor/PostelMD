@@ -79,12 +79,12 @@ func (db *DB) CompleteRestore(ctx context.Context, opID string, files []NewFile,
 		if err := readOpen(ctx, tx, opID, &p); err != nil {
 			return err
 		}
+		if err := freeTree(ctx, tx, string(p.To), nil, now); err != nil {
+			return err
+		}
 		for _, f := range files {
 			if !under(f.Path, string(p.To)) && f.Path != string(p.To) {
 				return ErrBadIntent
-			}
-			if err := freePath(ctx, tx, f.Path, nil, now); err != nil {
-				return err
 			}
 			if err := insertRow(ctx, tx, NewID(now), f.Path, f.SHA256, f.Stat); err != nil {
 				return err

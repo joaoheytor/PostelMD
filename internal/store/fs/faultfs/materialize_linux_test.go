@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+
+	"github.com/joaoheytor/PostelMD/internal/store/fs"
 )
 
 // inode returns the inode number of path.
@@ -81,6 +83,32 @@ func TestMaterializeWritesTheSurvivingState(t *testing.T) {
 	}
 	if inode(t, filepath.Join(out, "a.md")) == inode(t, filepath.Join(out, "sub", "b.md")) {
 		t.Fatal("two distinct files share an inode")
+	}
+}
+
+// TestMaterializeWritesSyncedDataOnly: an entry whose folder was synced but whose data never
+// was survives a power loss empty, and one whose data changed after its last sync has the
+// synced bytes. The steps go to the model directly: the store syncs every file it creates.
+// Files are written 0600 and folders 0700, as the vault keeps them.
+func TestMaterializeWritesSyncedDataOnly(t *testing.T) {
+	_, disk := open(t, -1)
+	disk.After(fs.Op{Kind: fs.OpCreate, Path: "sub/never-synced", Data: []byte("lost")}, nil)
+	disk.After(fs.Op{Kind: fs.OpSyncDir, Path: "sub"}, nil)
+	out := filepath.Join(t.TempDir(), "after")
+	must(t, disk.Materialize(out))
+	p := filepath.Join(out, "sub", "never-synced")
+	if got := read(t, p); got != "" {
+		t.Fatalf("a file whose data was never synced = %q; want it empty", got)
+	}
+	if got := read(t, filepath.Join(out, "a.md")); got != "old" {
+		t.Fatalf("a.md = %q; want its synced bytes", got)
+	}
+	for path, want := range map[string]os.FileMode{p: 0o600, filepath.Join(out, "a.md"): 0o600, filepath.Join(out, "sub"): 0o700 | os.ModeDir} {
+		fi, err := os.Lstat(path)
+		must(t, err)
+		if fi.Mode() != want {
+			t.Errorf("%s: mode %v, want %v", filepath.Base(path), fi.Mode(), want)
+		}
 	}
 }
 

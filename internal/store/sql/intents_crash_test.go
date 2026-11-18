@@ -54,9 +54,53 @@ func restoreFolder() RestoreIntent {
 
 func nothing(context.Context, *DB) error { return nil }
 
+// applyAll applies units as a scan would, failing if any was skipped.
+func applyAll(ctx context.Context, db *DB, units ...[]Change) error {
+	applied, err := db.ApplyScan(ctx, t0, units)
+	if err == nil && slices.Contains(applied, false) {
+		err = fmt.Errorf("a setup unit was skipped: %v", applied)
+	}
+	return err
+}
+
+// staleIn leaves dir with what a completion must clear when an item lands there: a.md's row
+// on dir/old.md (its file went since the last scan), and a hold on dir/held.md.
+func staleIn(dir string) func(ctx context.Context, db *DB) error {
+	return func(ctx context.Context, db *DB) error {
+		a := rowAt(ctx, db, "a.md")
+		err := applyAll(ctx, db, []Change{UpdateFile{Row: rowOf(a), NewPath: dir + "/old.md", SHA256: a.SHA256, Stat: a.Stat}},
+			[]Change{InsertFile{Path: "x.md", SHA256: sum(8), Stat: FileStat{Inode: 80}}})
+		if err != nil {
+			return err
+		}
+		x := rowAt(ctx, db, "x.md")
+		return applyAll(ctx, db, []Change{Suspect{Row: rowOf(x)},
+			Hold{Path: dir + "/held.md", FileID: x.ID, SHA256: x.SHA256, Stat: FileStat{Size: 2, Inode: 99}}})
+	}
+}
+
+// holdUnderNotes holds notes/held.md for a.md: a delete of notes releases it.
+func holdUnderNotes(ctx context.Context, db *DB) error {
+	a := rowAt(ctx, db, "a.md")
+	return applyAll(ctx, db, []Change{Suspect{Row: rowOf(a)},
+		Hold{Path: "notes/held.md", FileID: a.ID, SHA256: a.SHA256, Stat: FileStat{Size: 2, Inode: 98}}})
+}
+
+// then runs the setups in order, stopping at the first error.
+func then(steps ...func(context.Context, *DB) error) func(context.Context, *DB) error {
+	return func(ctx context.Context, db *DB) error {
+		for _, s := range steps {
+			if err := s(ctx, db); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
 func intentCases() map[string]intentCase {
 	save := func(ctx context.Context, db *DB) error { return db.Begin(ctx, opA, aSave(rowAt(ctx, db, "a.md")), t0) }
-	// A suspect on the create's destination: the completion tombstones it in the same
+	// A suspect on the create's destination: the completion vacates it in the same
 	// transaction.
 	suspect := func(ctx context.Context, db *DB) error {
 		_, err := db.ApplyScan(ctx, t0, [][]Change{{Suspect{Row: rowOf(rowAt(ctx, db, "a.md"))}}})
@@ -65,7 +109,7 @@ func intentCases() map[string]intentCase {
 	beginCreate := func(ctx context.Context, db *DB) error {
 		return db.Begin(ctx, opA, CreateIntent{Path: "a.md", NewSHA256: sum(5)}, t0)
 	}
-	create := func(ctx context.Context, db *DB) error { return errors.Join(suspect(ctx, db), beginCreate(ctx, db)) }
+	create := then(suspect, beginCreate)
 	move := func(ctx context.Context, db *DB) error { return db.Begin(ctx, opA, moveFolder(ctx, db), t0) }
 	del := func(ctx context.Context, db *DB) error {
 		return db.BeginDelete(ctx, stamp, folderPayload(ctx, db), folderItem, t0)
@@ -83,12 +127,12 @@ func intentCases() map[string]intentCase {
 			return err
 		}},
 		"move-begin":      {"move-begin", nothing, move},
-		"move-complete":   {"move-complete", move, func(ctx context.Context, db *DB) error { return db.CompleteMove(ctx, opA, nil, t0) }},
+		"move-complete":   {"move-complete", then(staleIn("archive"), move), func(ctx context.Context, db *DB) error { return db.CompleteMove(ctx, opA, nil, t0) }},
 		"delete-begin":    {"delete-begin", nothing, del},
-		"delete-complete": {"delete-complete", del, func(ctx context.Context, db *DB) error { return db.CompleteDelete(ctx, stamp, t0) }},
+		"delete-complete": {"delete-complete", then(holdUnderNotes, del), func(ctx context.Context, db *DB) error { return db.CompleteDelete(ctx, stamp, t0) }},
 		"delete-drop":     {"drop", del, func(ctx context.Context, db *DB) error { return db.Drop(ctx, stamp) }},
 		"restore-begin":   {"restore-begin", nothing, restore},
-		"restore-complete": {"restore-complete", restore, func(ctx context.Context, db *DB) error {
+		"restore-complete": {"restore-complete", then(staleIn("drafts"), restore), func(ctx context.Context, db *DB) error {
 			return db.CompleteRestore(ctx, opA, []NewFile{{Path: "drafts/x.md", SHA256: sum(6), Stat: FileStat{Inode: 60}}}, t0)
 		}},
 		"restore-drop": {"drop", restore, func(ctx context.Context, db *DB) error { return db.Drop(ctx, opA) }},

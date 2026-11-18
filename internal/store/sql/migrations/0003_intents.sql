@@ -16,3 +16,14 @@ CREATE TABLE intents (
     payload  TEXT NOT NULL CHECK (length(payload) > 0),
     at_ms    INTEGER NOT NULL
 ) STRICT, WITHOUT ROWID;
+
+-- A row an operation vacated (ADR-0033, "Giving a path a row"): PostelMD put a file on a path
+-- its no-clobber rename proved absent, while the database still had a row there (its file
+-- went outside since the last scan). The row stays, suspect, so the scan's rename rules and
+-- two-pass absence still decide its ID (ADR-0031); its path becomes X'00' || id, a
+-- placeholder no file can have (a NUL byte), so files.path stays unique, and the path it had
+-- is kept here, for its tombstone. NULL for every other row, and set exactly while the path
+-- is a placeholder.
+ALTER TABLE files ADD COLUMN displaced_from BLOB
+    CHECK ((displaced_from IS NULL) = (substr(path, 1, 1) IS NOT X'00')
+        AND (displaced_from IS NULL OR (length(displaced_from) > 0 AND state = 'suspect')));

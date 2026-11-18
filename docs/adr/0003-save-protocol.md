@@ -90,6 +90,14 @@ never seen, or whose tombstone has expired, returns `404 {"code": "unknown-file"
   startup is in ADR-0004). Applying the DB side and clearing the intent happen in one
   transaction. "Same inode" always means the same device and inode as recorded.
 
+  **The tables PostelMD implements are [ADR-0033](0033-v02-intents.md)'s "Recovery
+  tables"** (v0.2: save, create, `rename-noreplace` move, delete, restore and purge), each
+  row with one action: drop, roll forward or flag. Where the tables below differ, ADR-0033's
+  govern: an ordinary race (a `412` or `409`, an outside change) drops the intent without a
+  recovery copy, and interference keeps the intent, flagged, instead of dropping it. The
+  tables below remain the design for the `link-unlink` and `rename-checked` mechanisms, which
+  come with ADR-0006's fallbacks.
+
   **Any state not listed in the table is interference.** Interference (a state the
   operation can't produce by itself) never guesses: both sides are copied into
   `.postelmd/recovery/<op-id>/`, the vault is flagged, the recorded paths stay read-only, and
@@ -266,18 +274,13 @@ the temp path. It holds no content: until the client gets a `200`, its draft is 
 8. Release the locks. Indexing and the git auto-commit are queued with `(fileID, generation)`.
 
 **Save recovery** (startup, per open save intent; the temp is judged by its hash, so a
-partly written temp never counts as the new content):
-
-| Target | Temp | Action |
-|---|---|---|
-| Base hash | Any | Not applied: remove the temp, drop the intent. The client's retry succeeds. |
-| New hash | Absent | Applied: roll forward (scan, generation, hash, findings, outbox) and clear the intent in one transaction |
-| New hash | Present, **same inode** as the target | Applied: a power loss undid the temp folder's side of the rename. Unlink the temp name, then roll forward ([ADR-0033](0033-v02-intents.md)) |
-| New hash | Present, new hash, another inode | An external writer installed the same bytes: remove the temp, drop the intent; the reconciler records an external change |
-| Other content | Present, new hash | Interference: move the temp to `.postelmd/recovery/<op-id>/`, drop the intent, flag it to the user; the reconciler records the external change |
-| Other content | Absent or partial | Interference: remove any temp, drop the intent; the reconciler records the external change. Nothing is lost: the client never got a `200`, so its retry gets `412` and the conflict view shows its draft |
-| Absent | Present, new hash | External delete or move: keep the temp in recovery as above; the reconciler handles the absence (ADR-0004) |
-| Absent | Absent or partial | External delete or move: remove any temp, drop the intent; the client's retry gets `410` or `412` with its draft intact |
+partly written temp never counts as the new content) is the save table of
+[ADR-0033](0033-v02-intents.md)'s "Recovery tables". In short: the target at the base hash
+drops the intent; at the new hash, with the temp gone or the temp the same inode as the
+target (a power loss), it rolls forward; another writer's change to the target, or its
+absence, is the `412`-type race and drops the intent (the client never got a `200`, so its
+retry gets `412` or `410` and the conflict view shows its draft); only a state no
+operation or race produces is interference, which keeps the intent, flagged.
 
 **Idempotent retries.** A precondition mismatch where the file ID is live and the **current
 content hash equals the hash of the submitted content** returns `200` with the current ETag
