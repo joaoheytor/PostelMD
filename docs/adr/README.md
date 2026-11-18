@@ -49,20 +49,20 @@ ID + generation ETag flips it.
 | [0017](0017-backup-and-restore.md) | Backup and restore consistency | Proposed |
 | [0018](0018-account-and-session-lifecycle.md) | Account, session and permission lifecycle | Proposed |
 | [0019](0019-ui-shell-framework.md) | UI shell framework: Lit, light DOM, editor in a shadow root | Accepted |
-| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022; draft keys: see 0023; nested repositories: see 0026; save mismatch and temp sweep: see 0027; `412` over a file too large to read: see 0029; a credential change that can't be saved: see 0038) |
+| [0020](0020-mvp-scope.md) | MVP scope: one user, one vault, no database | Accepted (trash: see 0022; draft keys: see 0023; nested repositories: see 0026; save mismatch and temp sweep: see 0027; `412` over a file too large to read: see 0029; a credential change that can't be saved: see 0038; no intents: see 0033) |
 | [0021](0021-mermaid-in-a-sandboxed-frame.md) | Mermaid renders in a sandboxed frame, shown as images | Accepted |
-| [0022](0022-mvp-trash-layout.md) | The MVP trash keeps each item's name in a folder of its own | Accepted |
+| [0022](0022-mvp-trash-layout.md) | The MVP trash keeps each item's name in a folder of its own | Accepted (no intent: see 0033) |
 | [0023](0023-a-draft-key-per-note-session.md) | A draft key per note session | Accepted |
-| [0024](0024-restore-from-the-trash.md) | Restore from the trash | Accepted |
+| [0024](0024-restore-from-the-trash.md) | Restore from the trash | Accepted (no intent, and the listing's source: see 0033) |
 | [0025](0025-data-format-version.md) | A data format number in /data | Accepted |
 | [0026](0026-nested-repositories-in-the-vault.md) | Nested repositories in the vault are left out of commits | Accepted (`.git` match: see 0028) |
-| [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted (`412` over a file too large to read: see 0029; the marker's content: see 0031) |
+| [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted (`412` over a file too large to read: see 0029; the marker's content: see 0031; the sweep: see 0033) |
 | [0028](0028-dot-git-when-git-folds-case.md) | A nested repository's .git in any letter case when git folds case | Accepted |
 | [0029](0029-a-save-over-a-file-too-large-to-read.md) | A save over a file too large to read | Accepted |
 | [0030](0030-v02-storage-sqlite.md) | v0.2 storage: SQLite in /data, its driver, migrations and data format 2 | Accepted (damaged database at format 1, follow-up 2's parts: see 0034; the fix for a marker that is a symlink, folder or special file: see 0031; `db rebuild`'s step 2 file list and step 3's "left in place": see 0040; the first upgrade's crash rows and step 1's kept copy: see 0041; the rollback's step 1 file list and step 4's write: see 0043) |
 | [0031](0031-v02-file-identity.md) | v0.2 file identity: IDs, generations, renames and tombstones | Accepted |
 | [0032](0032-v02-etag-and-api.md) | v0.2 ETag and API: ID + generation + hash, and saves by file ID | Proposed |
-| [0033](0033-v02-intents.md) | v0.2 intents: saves, creates and structural operations | Proposed |
+| [0033](0033-v02-intents.md) | v0.2 intents: saves, creates and structural operations | Accepted |
 | [0034](0034-app-db-before-format-2.md) | app.db in serve before data format 2 | Accepted |
 | [0035](0035-db-rollback.md) | `postelmd db rollback` and retiring `migrate.intent` | Accepted |
 | [0036](0036-the-startup-scan.md) | The startup scan: one transaction per pass, re-checked under the vault mutex | Accepted (a read's full pass after a failed one: see 0037) |

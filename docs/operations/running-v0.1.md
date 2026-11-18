@@ -61,7 +61,7 @@ Nothing important lives anywhere else:
 | `vaults/notes/` | Your notes, as `.md` files |
 | `vaults/notes/.git/` | The vault's git history (your commits) |
 | `vaults/notes/.postelmd-trash/` | Deleted notes and folders (not in git) |
-| `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-1-2.db` (the database as it was before that upgrade) and `post-migration-started-1-2` (a record that the upgrade finished): keep both with `app.db` |
+| `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-<from>-<to>.db` (the database as it was before an upgrade from version `<from>` to `<to>`, such as `pre-migrate-1-2.db`) and `post-migration-started-<from>-<to>` (a record that the upgrade finished): keep both with `app.db` |
 | `.postelmd/rollback-<time>/` | Written by `db rollback` (any data format): the database it replaced, with its `-wal` and `-shm`, and the pre-migration copy it restored from |
 | `.postelmd/damaged-<time>/` | From data format 2: the database files `db rebuild` moved aside (and any `attempt-<n>/` it made); the only copy of the old file IDs |
 | `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept |
@@ -423,14 +423,21 @@ is lost: at format 1 they hold only the boot ID. If the migration **didn't finis
 first start stopped with `database migration refused or failed`), use `postelmd db rollback`
 instead (below): it restores the database the earlier `:main` wrote.
 
+**Upgrading to `:main` after the intents table** (version 3): the same, with the files
+named after the versions the start migrates between: `pre-migrate-2-3.db` and
+`post-migration-started-2-3` from a database at version 2, `pre-migrate-1-3.db` and
+`post-migration-started-1-3` from one at version 1. The blocks below move every one of
+these names that is there.
+
 **Move the database aside** (used below), for the setup this runbook uses, a container
 started with `docker run --name postelmd`. It runs only when `docker ps` works and finds no
 `postelmd` container (run it after `docker rm`; a docker error stops it too) and `$data` is
-set; it moves each file of its first line only if it is there (after a clean stop there is
+set; it moves each file its `set --` line names only if it is there (after a clean stop there is
 no `app.db-wal` or `app.db-shm`), and works the same in `sh`, `bash` and `zsh`:
 
 ```sh
-set -- app.db app.db-wal app.db-shm pre-migrate-1-2.db post-migration-started-1-2
+set -- app.db app.db-wal app.db-shm pre-migrate-1-2.db post-migration-started-1-2 \
+  pre-migrate-1-3.db post-migration-started-1-3 pre-migrate-2-3.db post-migration-started-2-3
 if ! c=$(docker ps -aq --filter 'name=^postelmd$'); then
   echo "MOVE STOPPED: docker ps failed, so it can't tell whether a server runs" >&2
 elif [ -n "$c" ]; then
@@ -454,9 +461,9 @@ fi
 After `MOVE STOPPED: a file didn't move`, move the files already in `$d` back into
 `"$data"/.postelmd/`, don't start a server, and report the error `mv` printed.
 
-`pre-migrate-1-2.db` must move too: left behind, the next upgrade refuses to migrate with
+The `pre-migrate-*.db` copy must move too: left behind, the next upgrade refuses to migrate with
 `a pre-migration snapshot is already there without an intent`. Moving
-`post-migration-started-1-2` is a precaution that keeps it with its database; left behind it
+the `post-migration-started-*` record is a precaution that keeps it with its database; left behind it
 does no harm.
 
 **If a start refuses with that message** (the snapshot was left behind, and no
@@ -481,8 +488,8 @@ everything and follow the message):
    If any of them printed empty, stop here: the container's configuration isn't what this
    runbook made, so start it again by hand with the flags you used.
 2. Stop **and remove** the container: `docker stop postelmd && docker rm postelmd`.
-3. Run the **Move the database aside** block with its first line changed to
-   `set -- pre-migrate-1-2.db post-migration-started-1-2`, so `app.db` stays.
+3. Run the **Move the database aside** block with its `set --` line changed to
+   `set -- pre-migrate-1-2.db post-migration-started-1-2 pre-migrate-1-3.db post-migration-started-1-3 pre-migrate-2-3.db post-migration-started-2-3`, so `app.db` stays.
 4. Only if it printed `moved into …`, start it again (with an adopted notes folder, add
    `-v "$notes":/data/vaults/notes` before `"$IMAGE"`, and `[ -n "$notes" ]` to the checks):
 

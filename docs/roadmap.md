@@ -217,6 +217,11 @@ The order after v0.1 is a starting point; the MVP's findings decide it.
   - move, delete (with ADR-0022's power-loss duplicate), restore from the trash and the
     purge (`trashed` → `purging` committed before the first removal; a restore of a
     `purging` record is `409`), crashed at every step, reach ADR-0003's rows;
+  - every transaction that begins, completes, drops or flags an intent, or changes a trash
+    record's state, killed before its commit leaves `app.db` as it was, and killed after it
+    as a run that wasn't killed leaves it (done in `internal/store/sql`:
+    `TestIntentCrashPoints`); the power-loss model writes one file under two names where a
+    power loss keeps both entries of a rename (`faultfs`, `TestMaterializeKeepsFileIdentity`);
   - the v0.1 → v0.2 upgrade crashed at each of its five steps resumes from its intent
     (ADR-0041; process-kill model done: `TestUpgradeCrashPoints`,
     `TestUpgradeIntentCrashPoints`; step 1's power-loss model:

@@ -27,7 +27,16 @@ func (db *DB) FilesMatching(ctx context.Context, sha256 []byte, device, inode ui
 }
 
 func (db *DB) queryFiles(ctx context.Context, query string, args ...any) ([]File, error) {
-	rows, err := db.r.QueryContext(ctx, query, args...)
+	return queryFilesOn(ctx, db.r, query, args...)
+}
+
+// querier is a *sql.DB or a *sql.Tx.
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func queryFilesOn(ctx context.Context, q querier, query string, args ...any) ([]File, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sql: read the file rows: %w", err)
 	}

@@ -145,8 +145,8 @@ func (c UpdateFile) apply(ctx context.Context, tx *sql.Tx, _ time.Time) error {
 		bump = 1
 	}
 	return one(ctx, tx, "update a file row", `UPDATE files SET path = ?, generation = generation + ?, sha256 = ?,
-		size = ?, device = ?, inode = ?, mtime_ns = ?, ctime_ns = ?, state = 'live', suspect_since_ms = NULL
-		WHERE id = ? AND path = ? AND generation = ?`,
+		size = ?, device = ?, inode = ?, mtime_ns = ?, ctime_ns = ?, state = 'live', suspect_since_ms = NULL,
+		displaced_from = NULL WHERE id = ? AND path = ? AND generation = ?`,
 		append([]any{[]byte(c.NewPath), bump, hashArg(c.SHA256)}, append(statArgs(c.Stat), c.ID, []byte(c.Path), c.Generation)...)...)
 }
 
@@ -157,14 +157,14 @@ func (c Suspect) apply(ctx context.Context, tx *sql.Tx, now time.Time) error {
 }
 
 func (c TombstoneFile) apply(ctx context.Context, tx *sql.Tx, now time.Time) error {
-	if err := one(ctx, tx, "end a file ID", "DELETE FROM files WHERE id = ? AND path = ? AND generation = ?",
-		c.ID, []byte(c.Path), c.Generation); err != nil {
+	// A vacated row's tombstone names the path it had, not its placeholder (ADR-0033).
+	if err := one(ctx, tx, "record a tombstone", `INSERT INTO tombstones (id, last_path, last_generation, at_ms, reason)
+		SELECT id, coalesce(displaced_from, path), generation, ?, ? FROM files WHERE id = ? AND path = ? AND generation = ?`,
+		now.UnixMilli(), c.Reason, c.ID, []byte(c.Path), c.Generation); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO tombstones (id, last_path, last_generation, at_ms, reason)
-		VALUES (?, ?, ?, ?, ?)`, c.ID, []byte(c.Path), c.Generation, now.UnixMilli(), c.Reason)
-	if err != nil {
-		return fmt.Errorf("sql: record a tombstone: %w", err)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM files WHERE id = ?", c.ID); err != nil {
+		return fmt.Errorf("sql: end a file ID: %w", err)
 	}
 	return nil
 }

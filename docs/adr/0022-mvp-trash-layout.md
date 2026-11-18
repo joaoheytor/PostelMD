@@ -1,6 +1,6 @@
 # ADR-0022: The MVP trash keeps each item's name in a folder of its own
 
-- **Status:** Accepted
+- **Status:** Accepted; its "no intent is needed" sentence is superseded by [ADR-0033](0033-v02-intents.md) (a delete has an intent and a trash record)
 - **Date:** 2026-11-10
 
 ## Context
