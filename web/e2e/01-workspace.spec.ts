@@ -73,7 +73,9 @@ test("an edit made outside the editor is a conflict, not an overwrite", async ({
   await login(page);
   await page.getByRole("button", { name: "hello.md" }).click();
   const text = page.getByRole("textbox", { name: "Text of hello.md" });
-  await expect(text).toBeVisible();
+  // The open's read has the old bytes (the previous test's save) before the outside write:
+  // visible alone could come before the read, which would then get the new bytes.
+  await expect(text).toContainText("Saved by the browser.");
 
   const file = join(env("PM_E2E_VAULT"), "hello.md");
   writeFileSync(file, "# Changed on disk\n");
