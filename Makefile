@@ -90,7 +90,7 @@ test-go:
 test-web: web-deps
 	cd web && npm test
 
-e2e: build ## Playwright smoke tests against bin/postelmd (once: `cd web && npx playwright install --with-deps chromium`)
+e2e: build ## Playwright smoke tests against bin/postelmd (once: `cd web && npx playwright install --with-deps --only-shell chromium`)
 	cd web && npx playwright test
 
 test-scripts: ## Tests for release scripts, git hooks and the agent guard hook (throwaway repos and SSH keys)
