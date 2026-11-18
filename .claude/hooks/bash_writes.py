@@ -56,20 +56,74 @@ def is_punct(tok):
     return bool(tok) and all(c in "();<>|&" for c in tok)
 
 
+SED_ADDRESS = re.compile(r"(?:\d+|\$|/(?:\\.|[^/\\])*/[IM]?)(?:\s*,\s*(?:\d+|\$|[+~]\d+"
+                         r"|/(?:\\.|[^/\\])*/[IM]?))?\s*!?\s*")
+
+
+def sed_w_files(script):
+    """The files a sed script's w/W commands and s///w flags write (an approximation: it
+    splits commands at ; and newlines)."""
+    files = []
+    for line in re.split(r"[;\n]", script):
+        line = line.strip().lstrip("{}").strip()
+        m = SED_ADDRESS.match(line)
+        rest = line[m.end():] if m else line
+        if rest[:1] in ("w", "W"):
+            files.append(rest[1:].strip())
+        elif rest[:1] == "s" and len(rest) > 2:
+            delim, i, seen = rest[1], 2, 0
+            while i < len(rest) and seen < 2:
+                seen += rest[i] == delim
+                i += 2 if rest[i] == "\\" else 1
+            flags = re.match(r"[gpiImMe0-9]*w\s*(.*)", rest[i:]) if seen == 2 else None
+            if flags:
+                files.append(flags.group(1).strip())
+    return [f for f in files if f]
+
+
 def sed_targets(args):
-    if not any(re.match(r"-[a-zA-Z]*i", a) or a.startswith("--in-place") for a in args):
-        return []
-    files, script_given, skip = [], False, False
+    """sed -i's files, and the files its scripts write with w, W and s///w."""
+    files, scripts, skip = [], [], None
+    for a in args:
+        if skip:
+            scripts += [a] if skip == "e" else []
+            skip = None
+        elif a in ("-e", "--expression", "-f", "--file"):
+            skip = "e" if a in ("-e", "--expression") else "f"
+        elif a.startswith(("--expression=", "--file=")):
+            scripts += [a.split("=", 1)[1]] if a.startswith("--e") else ["\n"]
+        elif not a.startswith("-"):
+            files.append(a)
+    if not scripts and files and skip is None and not any(
+            a in ("-f", "--file") or a.startswith("--file=") for a in args):
+        scripts, files = [files[0]], files[1:]
+    in_place = any(re.match(r"-[a-zA-Z]*i", a) or a.startswith("--in-place") for a in args)
+    return (files if in_place else []) + [f for s in scripts for f in sed_w_files(s)]
+
+
+def sort_targets(args):
+    """sort -o FILE, -oFILE, -ro FILE, --output[=]FILE."""
+    out = []
+    for i, a in enumerate(args):
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        if a.startswith("--output"):
+            out.append(a.split("=", 1)[1] if "=" in a else nxt)
+        elif re.match(r"-[a-zA-Z]*o", a):
+            out.append(a[a.index("o", 1) + 1:] or nxt)
+    return [o for o in out if o]
+
+
+def uniq_targets(args):
+    """uniq's second operand, its output file."""
+    pos, skip = [], False
     for a in args:
         if skip:
             skip = False
-        elif a in ("-e", "-f", "--expression", "--file"):
-            script_given = skip = True
-        elif a.startswith(("--expression=", "--file=")):
-            script_given = True
-        elif not a.startswith("-"):
-            files.append(a)
-    return files if script_given else files[1:]
+        elif a in ("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"):
+            skip = True
+        elif a == "-" or not a.startswith("-"):
+            pos.append(a)
+    return pos[1:2] if pos[1:2] != ["-"] else []
 
 
 def perl_targets(args):
@@ -87,7 +141,8 @@ def perl_targets(args):
 
 
 def command_targets(words):
-    """Files the command itself writes: tee's arguments, sed -i's and perl -i's files."""
+    """Files the command itself writes: tee's arguments, sed -i's and perl -i's files, sed's
+    w files, sort -o's and uniq's output."""
     while words and (words[0] in PREFIXES or re.match(r"\w+=", words[0])):
         words = words[1:]
     if not words:
@@ -99,7 +154,7 @@ def command_targets(words):
         return sed_targets(args)
     if name == "perl":
         return perl_targets(args)
-    return []
+    return {"sort": sort_targets, "uniq": uniq_targets}.get(name, lambda _: [])(args)
 
 
 def write_targets(cmd):
@@ -170,7 +225,7 @@ def resolve(target, cwd, project):
 
 def repo_write_targets(cmd, cwd):
     """The targets of cmd that are repository files (in a git work tree, not ignored)."""
-    if not re.search(r">|\btee\b|\bsed\b|\bperl\b", cmd):
+    if not re.search(r">|\btee\b|\bsed\b|\bperl\b|\bsort\b|\buniq\b", cmd):
         return []
     found = []
     project = os.environ.get("CLAUDE_PROJECT_DIR", "")

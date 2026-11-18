@@ -19,10 +19,10 @@ from relax_test import HOME, Fixture
 
 ALL = ["shell-writes", "unparsed-local", "accepted-adr"]
 SHELL_WRITES = [
-    "sed -i s/a/b/ README.md",
-    "perl -pi -e 's/a/b/' sub/x.go",
+    "sed --sandbox -i s/a/b/ README.md",
+    "sed --sandbox -i -e 's/a/b/' sub/x.go",
     "echo x > notes.md",
-    "ls | tee sub/list.txt",
+    "grep x README.md | tee sub/list.txt",
     "echo x > {r}/sub/y.md",
     "echo x > {i}/notes.md",  # a worktree under .claude/worktrees/
 ]
@@ -137,7 +137,7 @@ class ShellWrites(TrustFixture):
         self.trust(["shell-writes"])
         self.assert_cases(["sed -i s/a/b/ docs/adr/0001-x.md"], "ask")
         self.trust()
-        self.assert_cases(["sed -i s/a/b/ docs/adr/0001-x.md"], None)
+        self.assert_cases(["sed --sandbox -i s/a/b/ docs/adr/0001-x.md"], None)
 
     def test_targets_outside_the_project_are_not_trusted(self):
         """In this fixture they live in a temp dir, where the guard sees scratch files and

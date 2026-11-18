@@ -14,9 +14,9 @@ those checks read is literal, so they judge what will run:
     --no-pager, go only GO_LOCAL (env without -w), npm only NPM_LOCAL (no ci or install);
   - in a git, go, npm or make command no word holds $ or `, except an operand after a
     literal --; anywhere else a word with $ must start with an existing directory inside
-    the project (sub/$f), and use only variables set by `for NAME in` or NAME= to plain
-    names (SAFE_VALUE: no /, no leading - or dot, no doubled dot), never ones a program
-    reads;
+    the project (sub/$f), and use only loop variables of `for NAME in` plain names
+    (SAFE_VALUE: no /, no leading - or dot, no doubled dot) that the command never names
+    elsewhere (printf -v, NAME=, let, unset, ...), never ones a program reads;
   - the working directory and every word, taken as a path (logical and physical), are
     inside the project;
   - shscan raises no flag ($'…', backslash-newline, odd heredocs, open quotes) and there is
@@ -57,7 +57,8 @@ HIDDEN = SHELLS | WRAPPERS | {
     "eval", "source", ".", "exec", "alias", "builtin", "command", "node", "nodejs", "perl",
     "ruby", "php", "deno", "bun", "lua", "awk", "gawk", "mawk", "nawk", "osascript", "pwsh",
     "powershell", "tclsh", "expect", "java", "Rscript", "su", "pkexec", "typeset", "read",
-    "declare", "local", "export", "readonly", "integer", "float", "set", "trap", "function"}
+    "declare", "local", "export", "readonly", "integer", "float", "set", "trap", "function",
+    "mapfile", "readarray", "getopts", "select", "let", "wait", "unset", "vared"}
 SCRIPTS = r"(\./)?scripts/(adr-immutable|check-file-size|fuzz|image-scan|image-smoke" \
           r"|image-smoke-adopt|pre-commit-adr_test|release-meta_test|verify-release-tag_test)\.sh"
 COMMAND = re.compile(rf"[\w.+:-]+|\[\[?|\]\]?|\}}|{SCRIPTS}|(\./)?bin/postelmd")
@@ -83,19 +84,23 @@ def hidden_code(s):
 
 
 def safe_names(segs, toks):
-    """Variables set to SAFE_VALUE literals only (for NAME in …, NAME=…), or None when one
-    is a name a program may read."""
+    """The loop variables of `for NAME in <SAFE_VALUE words>` whose name appears nowhere
+    else as a word (printf -v NAME, NAME=, let, unset, ...), or None when the command
+    assigns a name a program may read."""
+    if not all(harmless(m.group(1)) for t in toks for m in [re.match(r"(\w+)\+?=", t)] if m):
+        return None
     values = {}
-    for t in toks:
-        m = re.match(r"(\w+)=(.*)", t)
-        if m:
-            values.setdefault(m.group(1), []).append(m.group(2))
     for words in segs:
         if words[0] == "for" and len(words) > 1:
             values.setdefault(words[1], []).extend(words[3:] if words[2:3] == ["in"] else ["?"])
-    if not all(harmless(n) for n in values):
-        return None
-    return {n for n, vals in values.items() if all(SAFE_VALUE.fullmatch(v) for v in vals)}
+    names = set()
+    for name, vals in values.items():
+        fors = sum(1 for w in segs if w[0] == "for" and w[1:2] == [name])
+        other = re.compile(rf"{name}|-\w*{name}|{name}(\+?=|\[).*")
+        if harmless(name) and sum(1 for t in toks if other.fullmatch(t)) == fors \
+                and all(SAFE_VALUE.fullmatch(v) for v in vals):
+            names.add(name)
+    return names
 
 
 def expansions_ok(cmd, names):
@@ -126,8 +131,9 @@ def command_ok(words, cwd, roots):
         return True
     name = os.path.basename(w[0])
     if not COMMAND.fullmatch(w[0]) or name in HIDDEN or re.fullmatch(r"python[\d.]*", name) \
-            or any(a in EXEC_FLAGS for a in w):
-        return False
+            or any(a in EXEC_FLAGS for a in w) \
+            or (name in ("printf", "print") and any(a.startswith("-") for a in w[1:])):
+        return False  # printf -v NAME, zsh print -v NAME: assignments
     for i, a in enumerate(w):
         if ("$" in a or "`" in a) and (name in TOOLS and ("--" not in w[:i] or a.startswith("-"))
                                        or not dollar_word_ok(a, cwd, roots)):
