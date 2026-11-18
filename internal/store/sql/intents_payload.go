@@ -90,7 +90,7 @@ type MoveIntent struct {
 
 func (MoveIntent) kind() string { return IntentMove }
 func (p MoveIntent) valid() bool {
-	return p.From.validPath() && p.To.validPath() && p.From != p.To && !under(string(p.To), string(p.From)) &&
+	return p.From.validPath() && p.To.validPath() && p.From != p.To && !under(string(p.To), string(p.From)) && !under(string(p.From), string(p.To)) &&
 		p.Mechanism == MechanismNoReplace && validAffected(p.Files) && allUnder(p.Files, string(p.From))
 }
 

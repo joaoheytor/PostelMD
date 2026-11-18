@@ -79,7 +79,7 @@ func (db *DB) CompleteRestore(ctx context.Context, opID string, files []NewFile,
 		if err := readOpen(ctx, tx, opID, &p); err != nil {
 			return err
 		}
-		if err := freeTree(ctx, tx, string(p.To), nil, now); err != nil {
+		if err := freeTree(ctx, tx, string(p.To), now); err != nil {
 			return err
 		}
 		for _, f := range files {

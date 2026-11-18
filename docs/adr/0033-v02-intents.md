@@ -59,7 +59,7 @@ Supersedes these parts of Accepted ADRs, and nothing else in them:
   implements only ADR-0003's `rename-noreplace` tables; `link-unlink` and `rename-checked`
   come with ADR-0006's fallbacks.
 - **Recovery tables.** Every row recovery relies on is in this ADR (Recovery tables, below),
-  each with one action: **drop**, **roll forward** or **flag**. ADR-0003's tables were the
+  each with one action: **drop**, **drop, keeping the temp**, **roll forward** or **flag**. ADR-0003's tables were the
   design; where they differ, these govern.
 - **Interference** (a state an operation can't produce by itself) keeps both sides in the
   state directory's `recovery/<op-id>/` (`/data/.postelmd/recovery/`, beside `db rebuild`'s
@@ -180,10 +180,19 @@ that isn't a regular file named by its op ID directly under `.postelmd-tmp/`, an
 no row names**, are interference. The actions:
 - **Drop** (not applied): remove the intent's temp, if any, and, for a delete, its stamp
   folder if empty; end the intent as not applied (a `moving` record removed, a `restoring`
-  one back to `trashed`), in one transaction. Nothing is copied. Drop is for states the
+  one back to `trashed`), in one transaction. Nothing is copied (but see the next action). Drop is for states the
   operation or an ordinary race leaves (a `412` or `409` race, an outside change the scan
   records): the operation never answered success, so the client still has its draft, and
   the operation's bytes or item are nowhere but where the user left them.
+- **Drop, keeping the temp**: as drop, except that a temp whose hash equals the intent's new
+  hash is first copied into `recovery/<op-id>/`, durably, and a warning is logged without
+  paths. No audit event and no flag: the intent ends, and the copy is only a second place
+  for the client's edit, in case the client lost its draft too. The 7-day `recovery/` purge
+  removes it. A partial temp (another hash) is removed, as for drop. It applies to the two
+  rows where the target or destination changed outside while a complete temp holds the
+  edit; where the base is intact, or the destination absent, the edit was never at risk
+  and plain drop applies. Recovery that writes intents implements it with each operation:
+  the save's row in the saves PR, the create's in the creates PR, each with its test.
 - **Roll forward** (applied): finish the filesystem side the row names (unlink a power-loss
   duplicate's other name, then `fsync` its folder), then the completion transaction of the
   operation's section. A completion whose rows aren't as the intent recorded
@@ -204,7 +213,8 @@ the state; a state reached only by an outside writer says so.
 | New | Absent | A crash after (5); power loss after (6) | Roll forward |
 | New | Same inode as T | Power loss after the target's folder sync, before `.postelmd-tmp/`'s | Roll forward (unlink P first) |
 | New | Present, another inode | An outside writer put the same bytes on T before the rename | Drop (the scan records the outside change) |
-| Other content, or absent, or not a regular file | Absent, partial or new; another inode than T | A crash in step 4 after the temp's removal; an outside change or delete of T at any point before (7) | Drop: the `412`-type race. The scan records the change; the client's retry gets `412` (or `file-missing`) with its draft |
+| Other content, or absent, or not a regular file | Absent or partial | A crash in step 4 after the temp's removal; an outside change or delete of T at any point before (7) | Drop: the `412`-type race. The scan records the change; the client's retry gets `412` (or `file-missing`) with its draft |
+| Other content, or absent, or not a regular file | New, another inode than T | A crash in step 4 before the temp's removal; an outside change or delete of T after (3) | Drop, keeping the temp. The rest as the row above |
 | Base or other content | Same inode as T | Only an outside writer (a hard link, then a change) | Flag |
 
 **Create** (destination D, temp P):
@@ -215,7 +225,8 @@ the state; a state reached only by an outside writer says so.
 | New | Absent | A crash after the rename; power loss after both syncs | Roll forward |
 | New | Same inode as D | Power loss after D's folder sync, before `.postelmd-tmp/`'s | Roll forward (unlink P first) |
 | New | Present (partial or complete), another inode | An outside writer created D with the same bytes first (the no-clobber rename failed or never ran) | Drop. The scan gives D its own ID |
-| Other content, or not a regular file | Absent, or present with another inode | An outside writer created D first, or replaced the created file before the completion | Drop: the `412` race. The scan gives D its own ID; the client never got `201` and retries with its draft |
+| Other content, or not a regular file | Absent or partial | An outside writer created D first, or replaced the created file before the completion | Drop: the `412` race. The scan gives D its own ID; the client never got `201` and retries with its draft |
+| Other content, or not a regular file | New, another inode than D | An outside writer created D first (the no-clobber rename failed or never ran) | Drop, keeping the temp. The rest as the row above |
 | Other content | Same inode as D | Only an outside writer changing the created file in place before the completion | Flag |
 
 **Move** (`rename-noreplace`, file or folder; source S, destination D):

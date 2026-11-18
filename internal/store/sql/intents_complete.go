@@ -45,7 +45,7 @@ func (db *DB) CompleteCreate(ctx context.Context, opID string, stat FileStat, no
 		if err := readOpen(ctx, tx, opID, &p); err != nil {
 			return err
 		}
-		if err := freeTree(ctx, tx, string(p.Path), nil, now); err != nil {
+		if err := freeTree(ctx, tx, string(p.Path), now); err != nil {
 			return err
 		}
 		return errors.Join(insertRow(ctx, tx, id, string(p.Path), p.NewSHA256, stat), deleteIntent(ctx, tx, opID))
@@ -68,11 +68,8 @@ func (db *DB) CompleteMove(ctx context.Context, opID string, stats map[string]Fi
 		if err := readOpen(ctx, tx, opID, &p); err != nil {
 			return err
 		}
-		moving := map[string]bool{}
-		for _, f := range p.Files {
-			moving[f.ID] = true
-		}
-		if err := freeTree(ctx, tx, string(p.To), moving, now); err != nil {
+		// No moved row is under the destination: the payload refuses a source there.
+		if err := freeTree(ctx, tx, string(p.To), now); err != nil {
 			return err
 		}
 		for _, f := range p.Files {
@@ -112,11 +109,11 @@ func readOpen(ctx context.Context, tx *sql.Tx, opID string, p Payload) error {
 
 // freeTree makes root and every path under it free for the rows an operation puts there
 // (ADR-0033, "Giving a path a row"). The operation's no-clobber rename proved root absent on
-// disk, so every row there, unless its ID is in keep (it moves itself), is a file that went
-// since the last scan: it is vacated, never tombstoned (displace), and every hold there,
-// whose file went too, is released. It runs before any row takes a path there: files.path is
-// unique. Refusing instead would leave recovery unable to finish the intent.
-func freeTree(ctx context.Context, tx *sql.Tx, root string, keep map[string]bool, now time.Time) error {
+// disk, so every row there is a file that went since the last scan: it is vacated, never
+// tombstoned (displace), and every hold there, whose file went too, is released. It runs
+// before any row takes a path there: files.path is unique. Refusing instead would leave
+// recovery unable to finish the intent.
+func freeTree(ctx context.Context, tx *sql.Tx, root string, now time.Time) error {
 	lo, hi := subtree(root)
 	stale, err := queryFilesOn(ctx, tx, "SELECT "+fileColumns+" FROM files WHERE path = ? OR (path >= ? AND path < ?)",
 		[]byte(root), lo, hi)
@@ -124,9 +121,6 @@ func freeTree(ctx context.Context, tx *sql.Tx, root string, keep map[string]bool
 		return err
 	}
 	for _, f := range stale {
-		if keep[f.ID] {
-			continue
-		}
 		if err := displace(ctx, tx, f, now); err != nil {
 			return err
 		}

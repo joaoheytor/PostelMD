@@ -92,9 +92,9 @@ never seen, or whose tombstone has expired, returns `404 {"code": "unknown-file"
 
   **The tables PostelMD implements are [ADR-0033](0033-v02-intents.md)'s "Recovery
   tables"** (v0.2: save, create, `rename-noreplace` move, delete, restore and purge), each
-  row with one action: drop, roll forward or flag. Where the tables below differ, ADR-0033's
-  govern: an ordinary race (a `412` or `409`, an outside change) drops the intent without a
-  recovery copy, and interference keeps the intent, flagged, instead of dropping it. The
+  row with one action: drop, drop keeping the temp, roll forward or flag. Where the tables below differ, ADR-0033's
+  govern: an ordinary race (a `412` or `409`, an outside change) drops the intent, with a
+  recovery copy only of a complete temp, and interference keeps the intent, flagged, instead of dropping it. The
   tables below remain the design for the `link-unlink` and `rename-checked` mechanisms, which
   come with ADR-0006's fallbacks.
 
@@ -278,7 +278,7 @@ partly written temp never counts as the new content) is the save table of
 [ADR-0033](0033-v02-intents.md)'s "Recovery tables". In short: the target at the base hash
 drops the intent; at the new hash, with the temp gone or the temp the same inode as the
 target (a power loss), it rolls forward; another writer's change to the target, or its
-absence, is the `412`-type race and drops the intent (the client never got a `200`, so its
+absence, is the `412`-type race and drops the intent, first copying a complete temp into `recovery/<op-id>/` with a warning (the client never got a `200`, so its
 retry gets `412` or `410` and the conflict view shows its draft); only a state no
 operation or race produces is interference, which keeps the intent, flagged.
 

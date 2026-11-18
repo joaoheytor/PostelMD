@@ -187,16 +187,24 @@ type File struct {
 	Stat         FileStat
 	Suspect      bool
 	SuspectSince time.Time // zero unless Suspect
+	// DisplacedFrom is the path a vacated row had (ADR-0033, "Giving a path a row"), "" for
+	// every other row. While it is set, Path is a placeholder no file has, and the row is
+	// suspect: a caller outside the scan treats the row as missing.
+	DisplacedFrom string
 }
 
-const fileColumns = "id, path, generation, sha256, size, device, inode, mtime_ns, ctime_ns, state, suspect_since_ms"
+// Displaced reports whether f was vacated: its Path is a placeholder (see DisplacedFrom).
+func (f File) Displaced() bool { return f.DisplacedFrom != "" }
+
+const fileColumns = "id, path, generation, sha256, size, device, inode, mtime_ns, ctime_ns, state, suspect_since_ms, displaced_from"
 
 // FileByPath returns the row at path, or ErrNoFile.
 func (db *DB) FileByPath(ctx context.Context, path string) (File, error) {
 	return scanFile(db.r.QueryRowContext(ctx, "SELECT "+fileColumns+" FROM files WHERE path = ?", []byte(path)))
 }
 
-// FileByID returns the row with id, or ErrNoFile (also for a string that isn't an ID).
+// FileByID returns the row with id, or ErrNoFile (also for a string that isn't an ID). A
+// vacated row is returned with Displaced true: outside the scan, it is a missing file.
 func (db *DB) FileByID(ctx context.Context, id string) (File, error) {
 	if !ValidID(id) {
 		return File{}, ErrNoFile
@@ -209,11 +217,11 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanFile(row scanner) (File, error) {
 	var f File
-	var path []byte
+	var path, from []byte
 	var dev, ino int64
 	var state string
 	var since sql.NullInt64
-	err := row.Scan(&f.ID, &path, &f.Generation, &f.SHA256, &f.Stat.Size, &dev, &ino, &f.Stat.MtimeNS, &f.Stat.CtimeNS, &state, &since)
+	err := row.Scan(&f.ID, &path, &f.Generation, &f.SHA256, &f.Stat.Size, &dev, &ino, &f.Stat.MtimeNS, &f.Stat.CtimeNS, &state, &since, &from)
 	if errors.Is(err, sql.ErrNoRows) {
 		return File{}, ErrNoFile
 	}
@@ -221,7 +229,7 @@ func scanFile(row scanner) (File, error) {
 		return File{}, fmt.Errorf("sql: read a file row: %w", err)
 	}
 	f.Path, f.Stat.Device, f.Stat.Inode = string(path), uint64(dev), uint64(ino) //nolint:gosec // G115: the bits are kept
-	f.Suspect = state == "suspect"
+	f.Suspect, f.DisplacedFrom = state == "suspect", string(from)
 	if since.Valid {
 		f.SuspectSince = time.UnixMilli(since.Int64)
 	}

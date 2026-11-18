@@ -54,6 +54,18 @@ func holdOn(t *testing.T, db *DB, b File, path string) {
 	}
 }
 
+// staleRow gives path a row whose file isn't there: a second stale row under a destination,
+// so two rows are vacated in one completion.
+func staleRow(t *testing.T, db *DB, path string) File {
+	t.Helper()
+	ctx := context.Background()
+	_, err := db.ApplyScan(ctx, t0, [][]Change{{InsertFile{Path: path, SHA256: sum(7), Stat: FileStat{Size: 7, Inode: 70}}}})
+	must(t, err)
+	f, err := db.FileByPath(ctx, path)
+	must(t, err)
+	return f
+}
+
 func TestCreateOntoAStaleRowDisplacesIt(t *testing.T) {
 	db, rows := assigned(t)
 	ctx := context.Background()
@@ -95,8 +107,10 @@ func TestRestoreOntoAStaleRowAndAHold(t *testing.T) {
 	_, err := db.ApplyScan(ctx, t0, [][]Change{{UpdateFile{Row: rowOf(a), NewPath: "drafts/a.md", SHA256: a.SHA256, Stat: a.Stat}}})
 	must(t, err)
 	a.Path = "drafts/a.md"
+	y := staleRow(t, db, "drafts/sub/y.md")
 	must(t, db.CompleteRestore(ctx, opA, []NewFile{{Path: "drafts/a.md", SHA256: sum(4)}, {Path: "drafts/held.md", SHA256: sum(6)}}, t0))
 	assertDisplaced(t, db, a)
+	assertDisplaced(t, db, y)
 	if holdCount(t, db) != 0 {
 		t.Fatal("the hold on a restored path is still there")
 	}
@@ -164,9 +178,11 @@ func TestMoveOntoStaleRowsAndHolds(t *testing.T) {
 		x, err := db.FileByPath(ctx, "x.md")
 		must(t, err)
 		holdOn(t, db, x, "archive/held.md")
+		y := staleRow(t, db, "archive/y.md")
 		must(t, db.Begin(ctx, opA, moveFolder(ctx, db), t0))
 		must(t, db.CompleteMove(ctx, opA, nil, t0))
 		assertDisplaced(t, db, a)
+		assertDisplaced(t, db, y)
 		if got, err := db.FileByPath(ctx, "archive/b.md"); err != nil || got.ID != b.ID {
 			t.Fatalf("archive/b.md: %+v, %v; want notes/b.md's row", got, err)
 		}
