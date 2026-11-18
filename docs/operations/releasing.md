@@ -31,6 +31,28 @@ or reused.
   run against existing databases ships the rollback). Check with
   `git ls-tree -r --name-only <commit> -- internal/store/sql/migrations/` and
   `postelmd help`.
+- **No `v*` tag on a commit whose build writes data format 2 or later** unless that commit
+  has all of the pieces below (ADR-0030 follow-up 2, ADR-0042, #190). The format is the
+  larger of `const FormatVersion` in `internal/store/layout/format_linux.go` and
+  `buildFormat` in `cmd/postelmd/instance.go` when that is a number. The gate fails the tag
+  when it can't read either one: one declaration each, `FormatVersion = <n>` with an
+  optional `int` and comment, and `buildFormat = layout.FormatVersion` or `= <n>`, which
+  must be the only assignment to `buildFormat` in a non-test file under `cmd/`.
+  - the rollback section of [Upgrading to data format 2](upgrading-to-format-2.md)
+    (`## Rollback to 0.1`);
+  - the image upgrade smoke test, `make image-smoke-upgrade`, in the `ci:` target and run
+    by `.github/workflows/ci.yaml` in a job the `required` check needs (CI runs the
+    targets one by one, not `make ci`);
+  - `postelmd db rebuild` and `postelmd vault claim` in `postelmd help`, and turned on at
+    that format: either no non-test file under `cmd/` names `errBeforeFormat2`, its
+    definition included (part D deletes that switch), or `identityCommandsReady` in
+    `cmd/postelmd/rebuild_linux.go` turns them on at that format or below;
+  - the damaged-database error naming `db rebuild` (`errRebuildFix` in
+    `internal/store/sql/conn.go`, `NameRebuild` in `cmd/postelmd/appdb_linux.go`). Both are
+    already true on `main` since #193: these checks only guard against a regression.
+
+  The release notes of that release say, first, to copy the data before upgrading, and link
+  the runbook.
 
 ## 1. Release candidate
 

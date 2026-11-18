@@ -395,6 +395,12 @@ newer`, before it changes anything. So a **rollback across a format change** mea
 the backup you took before the upgrade, not only the older image; within the same format,
 the digest swap below is enough. Never edit `format` to get past the check.
 
+**Data format 2** (file IDs, the first release after 0.1) has its own runbook,
+[Upgrading to data format 2](upgrading-to-format-2.md): what to copy before, what the first
+start does, and a rollback to 0.1 that keeps the notes you wrote since. That rollback writes
+`1` into `format`, but only after it moved the database aside and emptied the vault marker,
+which is what makes the data 0.1's again; follow it as written.
+
 **Upgrading from rc.1 to `:main` after PR #175** (and to 0.1.0 and later): the first start
 creates `.postelmd/app.db`, the database, and migrates it; later starts check it. Stop the
 server and take the [backup](#backup) before you pull the new `:main`. The data format stays
@@ -691,6 +697,12 @@ docker start postelmd
 ```
 
 It asks for the new password twice (12 characters or more) and logs out every session.
+
+From data format 2, `.postelmd/pre-format-2/` and any `pre-format-2-<time>/` hold copies of
+the password hash and session secret from before the upgrade. Nothing reads them back, but
+after a reset because the password leaked, remove them, and from your backups
+([Cleanup](upgrading-to-format-2.md#cleanup)). `reset-password` keeps `secret.key`; the same
+section says how to replace it after a key compromise.
 
 ## "A git lock is blocking commits"
 

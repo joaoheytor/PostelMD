@@ -59,7 +59,7 @@ ID + generation ETag flips it.
 | [0027](0027-landed-retries-and-the-adoption-marker.md) | Landed retries and the adoption marker | Accepted (`412` over a file too large to read: see 0029; the marker's content: see 0031) |
 | [0028](0028-dot-git-when-git-folds-case.md) | A nested repository's .git in any letter case when git folds case | Accepted |
 | [0029](0029-a-save-over-a-file-too-large-to-read.md) | A save over a file too large to read | Accepted |
-| [0030](0030-v02-storage-sqlite.md) | v0.2 storage: SQLite in /data, its driver, migrations and data format 2 | Accepted (damaged database at format 1, follow-up 2's parts: see 0034; the fix for a marker that is a symlink, folder or special file: see 0031; `db rebuild`'s step 2 file list and step 3's "left in place": see 0040; the first upgrade's crash rows and step 1's kept copy: see 0041) |
+| [0030](0030-v02-storage-sqlite.md) | v0.2 storage: SQLite in /data, its driver, migrations and data format 2 | Accepted (damaged database at format 1, follow-up 2's parts: see 0034; the fix for a marker that is a symlink, folder or special file: see 0031; `db rebuild`'s step 2 file list and step 3's "left in place": see 0040; the first upgrade's crash rows and step 1's kept copy: see 0041; the rollback's step 1 file list and step 4's write: see 0043) |
 | [0031](0031-v02-file-identity.md) | v0.2 file identity: IDs, generations, renames and tombstones | Accepted |
 | [0032](0032-v02-etag-and-api.md) | v0.2 ETag and API: ID + generation + hash, and saves by file ID | Proposed |
 | [0033](0033-v02-intents.md) | v0.2 intents: saves, creates and structural operations | Proposed |
@@ -72,3 +72,4 @@ ID + generation ETag flips it.
 | [0040](0040-db-rebuild-and-vault-claim.md) | `db rebuild`, `vault claim` and the identity check: their mechanics | Accepted (step 2's file list, with an upgrade it takes over: see 0041) |
 | [0041](0041-the-first-upgrades-intent.md) | The first upgrade's intent and its mechanics | Accepted |
 | [0042](0042-the-format-table-at-start.md) | The format table at start, and offline commands run as the state's owner | Accepted |
+| [0043](0043-the-rollback-to-v01s-files.md) | The rollback to v0.1: the files it moves and how it writes the format | Accepted |
