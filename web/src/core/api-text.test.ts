@@ -62,6 +62,29 @@ describe("reading a file's text", () => {
     }
   });
 
+  it("stops waiting when its signal aborts: no more requests, no timer left (CLAUDE.md rule 8)", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      vi.stubGlobal("fetch", ((_url: string, init?: RequestInit) => {
+        calls++;
+        if (init?.signal?.aborted) return Promise.reject(new DOMException("aborted", "AbortError"));
+        return Promise.resolve(new Response("{}", { status: 503, headers: { "Retry-After": "5" } }));
+      }) as typeof fetch);
+      const reading = new AbortController();
+      const read = readNote("a.md", reading.signal).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(vi.getTimerCount()).toBe(1); // waiting out the first 503
+      reading.abort();
+      expect(await read).toMatchObject({ name: "AbortError" });
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a file the server won't read for its size is too large, like one it sends (#144)", async () => {
     vi.stubGlobal("fetch", answer(413, new TextEncoder().encode('{"error":"too large"}')));
     await expect(readNote("huge.log")).rejects.toThrow(TooLargeError);

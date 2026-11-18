@@ -94,8 +94,7 @@ pieces() { # writes every piece the format-2 gate asks for
   printf 'Commands:\n  db rollback      Undo\n  db rebuild       Rebuild\n  vault claim      Claim\n' >"$r/cmd/postelmd/main.go"
   printf 'package main\n\nvar buildFormat = layout.FormatVersion\n' >"$r/cmd/postelmd/instance.go"
   switch 2
-  printf 'package main\n\nfunc f() { return nil, sqlstore.NameRebuild(err) }\n' >"$r/cmd/postelmd/appdb_linux.go"
-  printf 'package sql\n\nconst errRebuildFix = "run postelmd db rebuild: it moves app.db"\n' >"$r/internal/store/sql/conn.go"
+  printf 'package sql\n\nvar ErrDamaged = errors.New("sql: damaged. With the server stopped, run " +\n\t"postelmd db rebuild: it moves app.db")\n' >"$r/internal/store/sql/conn.go"
   printf '# Upgrading\n\n## Rollback to 0.1\n\nSteps.\n' >"$r/docs/operations/upgrading-to-format-2.md"
   printf 'ci: lint test image-smoke image-smoke-upgrade image-scan\n\nimage-smoke-upgrade: image\n\tscripts/x.sh\n' >"$r/Makefile"
   workflow image "run: make image-smoke-upgrade"
@@ -126,8 +125,7 @@ for case in "docs/operations/upgrading-to-format-2.md|## Rollback to 0.1|rollbac
   "cmd/postelmd/main.go|  db rebuild|db rebuild" \
   "cmd/postelmd/main.go|  vault claim|vault claim" \
   "cmd/postelmd/rebuild_linux.go|buildFormat >= 2|db rebuild and vault claim are off" \
-  "internal/store/sql/conn.go|postelmd db rebuild|ErrDamaged" \
-  "cmd/postelmd/appdb_linux.go|NameRebuild(|ErrDamaged"; do
+  "internal/store/sql/conn.go|postelmd db rebuild|ErrDamaged"; do
   file=${case%%|*} rest=${case#*|}
   drop=${rest%%|*} why=${rest#*|}
   pieces 2
@@ -147,6 +145,13 @@ pieces 2
 commit_main "every format-2 piece"
 sign trusted v0.7.0-rc.21
 expect pass v0.7.0-rc.21 "format 2 with every piece"
+# ErrDamaged's own text is what every caller shows: format 1's manual move would lose the IDs.
+pieces 2
+printf 'package sql\n\n// the old text: run postelmd db rebuild later\nvar ErrDamaged = errors.New("sql: damaged. Move app.db into a new folder; " +\n\t"nothing is lost")\n' \
+  >"$r/internal/store/sql/conn.go"
+commit_main "format 2 with ErrDamaged still giving format 1's fix"
+sign trusted v0.7.0-rc.26
+expect fail v0.7.0-rc.26 "format 2 with ErrDamaged still giving format 1's fix" "ErrDamaged"
 pieces 12
 commit_main "format 12"
 sign trusted v0.7.0-rc.22

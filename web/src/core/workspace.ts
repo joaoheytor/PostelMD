@@ -44,6 +44,8 @@ export class Workspace {
   readonly secrets = new SecretWatch();
   /** Counts open() and close() calls, so a slower, earlier open can tell it was superseded. */
   private opens = 0;
+  /** Stops the read of the open() in progress: a newer open() or a close() aborts it. */
+  private reading: AbortController | undefined;
   /** The note createNote just made, until its editor asks (takeCreated). */
   private created: string | undefined;
 
@@ -69,6 +71,8 @@ export class Workspace {
    */
   close(): () => boolean {
     const seq = ++this.opens;
+    this.reading?.abort(); // a logout closes too: no read keeps waiting out the server's 503s
+    this.reading = undefined;
     // dispose() first, while state.open is still this session: its closing draft reads the
     // editor only while the session is current. Swapping these two lines drops that draft.
     this.state.value.open?.doc.dispose();
@@ -101,8 +105,11 @@ export class Workspace {
     const wasClean = !prev?.doc.dirty; // an unsaved edit already there, the user agreed to leave
     if (prev?.doc.path === path && wasClean && !convert) return; // nothing to reload: kept as it is
     const etag = prev?.doc.etag;
+    this.reading?.abort(); // an earlier open still reading is superseded
+    const reading = (this.reading = new AbortController());
     try {
-      const note = await api.readNote(path);
+      const note = await api.readNote(path, reading.signal);
+      if (this.reading === reading) this.reading = undefined;
       checkOpens(note, convert);
       if (!current()) return;
       if (prev && wasClean && prev.doc.dirty) {

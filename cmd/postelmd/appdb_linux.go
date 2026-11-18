@@ -24,7 +24,7 @@ func openAppDB(ctx context.Context, state, boot string, start dataStart, log *sl
 	}
 	db, err := open(ctx, state, log)
 	if err != nil {
-		return nil, sqlstore.NameRebuild(err)
+		return nil, err
 	}
 	if err := db.SetBootUUID(ctx, boot); err != nil {
 		_ = db.Close()

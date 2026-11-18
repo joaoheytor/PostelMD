@@ -157,6 +157,26 @@ describe("Workspace.open", () => {
     expect(ws.state.value.open?.doc.path).toBe("b.md");
     expect(ws.state.value.error).toBeUndefined();
   });
+
+  // A read may wait out the server's 503s for seconds (api.readNote): a newer open, a close
+  // or a logout (which closes) stops it, so no superseded read keeps polling.
+  it("aborts the read of an open that a newer open or a close supersedes", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const pending = (_path: string, signal?: AbortSignal) =>
+      new Promise<api.Note>((_, reject) => {
+        signals.push(signal);
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
+      });
+    vi.mocked(api.readNote).mockImplementationOnce(pending).mockImplementationOnce(pending);
+    const ws = new Workspace();
+    const a = ws.open("a.md");
+    const b = ws.open("b.md");
+    expect(signals.map((s) => s?.aborted)).toEqual([true, false]);
+    ws.close();
+    expect(signals.map((s) => s?.aborted)).toEqual([true, true]);
+    await Promise.all([a, b]);
+    expect(ws.state.value).toEqual({}); // superseded: no error shown, nothing open
+  });
 });
 
 describe("Workspace.createNote", () => {

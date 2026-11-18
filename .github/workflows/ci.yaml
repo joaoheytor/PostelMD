@@ -225,10 +225,11 @@ jobs:
       - run: make image-scan
 
   image-arm64:
-    # The `image` job only builds arm64; this one runs it: the same smoke test and Trivy gate
-    # on GitHub's hosted arm64 runner (roadmap v0.1: "runs on amd64 and arm64").
+    # The `image` job only builds arm64; this one runs it: the same smoke tests (the upgrade
+    # from 0.1 included) and Trivy gate on GitHub's hosted arm64 runner (roadmap v0.1: "runs
+    # on amd64 and arm64").
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -255,6 +256,7 @@ jobs:
           arch=$(docker image inspect -f '{{.Architecture}}' postelmd:dev)
           [ "$arch" = arm64 ] || { echo "::error::postelmd:dev is $arch, not arm64"; exit 1; }
       - run: make image-smoke
+      - run: make image-smoke-upgrade
       - run: make image-scan
 
   e2e:

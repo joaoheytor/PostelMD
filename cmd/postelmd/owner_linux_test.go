@@ -112,12 +112,20 @@ func TestServeDamagedDatabaseNamesDBRebuildAtFormat2(t *testing.T) {
 // damaged app.db, not format 1's move-aside fix, which would lose the file IDs.
 func TestVaultClaimOnADamagedDatabaseNamesDBRebuild(t *testing.T) {
 	data := rebuiltData(t)
-	must(t, os.WriteFile(filepath.Join(data, ".postelmd", "app.db"), bytes.Repeat([]byte("not a database "), 512), 0o600))
+	junk := bytes.Repeat([]byte("not a database "), 512)
+	must(t, os.WriteFile(filepath.Join(data, ".postelmd", "app.db"), junk, 0o600))
 	for _, n := range []string{"app.db-wal", "app.db-shm"} {
 		must(t, os.RemoveAll(filepath.Join(data, ".postelmd", n)))
 	}
+	must(t, os.WriteFile(markerOf(data), nil, 0o600)) // what a claim would write
 	stderr := runAndCheck(t, []string{"vault", "claim", "--yes", "--data", data}, 1, "", "postelmd db rebuild")
 	if strings.Contains(stderr, "into a new folder") {
 		t.Fatalf("vault claim gives format 1's manual fix: %s", stderr)
+	}
+	if b, err := os.ReadFile(filepath.Join(data, ".postelmd", "app.db")); err != nil || !bytes.Equal(b, junk) { //nolint:gosec // G304: the test's data
+		t.Fatalf("the damaged app.db was changed: %v", err)
+	}
+	if b, err := os.ReadFile(markerOf(data)); err != nil || len(b) != 0 {
+		t.Fatalf("the refused claim wrote the marker: %q, %v", b, err)
 	}
 }

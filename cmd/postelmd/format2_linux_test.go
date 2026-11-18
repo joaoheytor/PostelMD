@@ -19,12 +19,11 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
-// v01Data is a data directory as a 0.1 build leaves it: set up, with a.md and an empty
-// marker, format 1 (or, with noFormat, no format file: v0.1.0 data), and app.db migrated
-// with no file IDs. This build writes format 2, so it starts one, then takes the data back to
-// 0.1's as the runbook's rollback does (ADR-0030, ADR-0043): the database and pre-format-2/
-// go, the marker is emptied, the format is 1; a new app.db is opened with no IDs, as 0.1
-// opens one.
+// v01Data is a data directory as 0.1 (v0.1.0-rc.1, the published one) leaves it: set up
+// (auth.json, secret.key), with a.md and an empty marker, format 1 (or, with noFormat, no
+// format file), and no app.db. This build writes format 2, so it starts one, then takes the
+// data back to 0.1's as the runbook's rollback does (ADR-0030, ADR-0043): the database and
+// pre-format-2/ go, the marker is emptied, the format is 1.
 func v01Data(t *testing.T, noFormat bool) string {
 	t.Helper()
 	data := t.TempDir()
@@ -37,9 +36,6 @@ func v01Data(t *testing.T, noFormat bool) string {
 	}
 	must(t, os.WriteFile(markerOf(data), nil, 0o600))
 	must(t, os.WriteFile(filepath.Join(state, "format"), []byte("1\n"), 0o600))
-	db, err := sqlstore.Open(context.Background(), state, slog.New(slog.DiscardHandler))
-	must(t, err)
-	must(t, db.Close())
 	must(t, os.WriteFile(filepath.Join(vaultOf(data), "a.md"), []byte("A"), 0o600))
 	if noFormat {
 		must(t, os.Remove(filepath.Join(state, "format")))

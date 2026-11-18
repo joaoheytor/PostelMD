@@ -339,3 +339,16 @@ regressions. The maintainer's homelab has self-hosted ARC runners with cluster a
   the migrations bullet above: [ADR-0030](0030-v02-storage-sqlite.md#migrations) gives a new
   database all its migrations in one 0 → N transaction; each migration is still atomic, and
   an existing database still migrates one migration per transaction.
+- **2026-11-18, the upgrade smoke test's images** (`scripts/image-smoke-upgrade.sh`, #196).
+  It runs two images it doesn't build, each pinned by index digest in the script:
+  - `busybox` 1.37 (`sha256:a7dbc319…289ec`, created 2024-09-26), the helper the runbook's
+    rollback to 0.1 runs as the data's owner (`docs/operations/upgrading-to-format-2.md`).
+    The test pulls it from `mirror.gcr.io/library/busybox`, Google's mirror of Docker Hub's
+    official images, at the same digest, so shared runners don't hit Docker Hub's pull rate
+    limit; it runs the runbook's blocks with `busybox:1.37` replaced by that reference.
+    Operators run the runbook's `busybox:1.37` from Docker Hub.
+  - PostelMD's own `ghcr.io/joaoheytor/postelmd:0.1.0-rc.1`
+    (`sha256:7ef281d3…b15fd`), the 0.1 the upgrade starts from and rolls back to.
+
+  Neither runs with access to anything but the test's own data folder. A bump of either
+  changes the digest in the script, to a release at least two weeks old.

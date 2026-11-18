@@ -627,8 +627,10 @@ echo "data=$data notes=$notes port=$port IMAGE=$IMAGE"
 ```
 
 If it stops after `docker rm`, run its `docker run` again by hand with the values it printed.
-**Rollback** is the same sequence with the digest you noted
-(`ghcr.io/joaoheytor/postelmd@sha256:…`) in place of `$IMAGE`, with one exception:
+**Rollback** (within format 1; from format 2 see
+[Rollback to 0.1](upgrading-to-format-2.md#rollback-to-01)) is the same sequence with the
+digest you noted (`ghcr.io/joaoheytor/postelmd@sha256:…`) in place of `$IMAGE`, with one
+exception:
 
 **Rollback to an earlier `:main`, from a `:main` with the file-identity tables** (see above;
 rollback to rc.1 is the plain sequence). This is for a migration that finished; after one
