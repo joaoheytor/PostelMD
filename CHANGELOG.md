@@ -120,11 +120,13 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
 - `postelmd intents list` and `postelmd intents resolve <op-id>`, offline commands for the
   operations a crash interrupted (intents, data format 2). `list` shows each one's op ID,
   kind, state, time and its folder of copies in `.postelmd/recovery/`. `resolve` ends a
-  flagged one (an operation that found another program changing the note meanwhile) once you
-  have kept what you want from the copies: it removes its temp file only after a copy of it
-  is in `recovery/<op-id>/`, keeps the copies, writes an `intent.resolved` audit record, and
-  lets the scan track the note's path again. It refuses an open one, which the next start
-  finishes. See the runbook's "Flagged intents: list and resolve".
+  flagged save (one that found another program changing the note meanwhile) once you have
+  kept what you want from the copies. It runs the vault check a start runs first. It removes
+  the temp file only after a copy of it is in `recovery/<op-id>/`, and keeps the copies. It
+  writes `intent.resolving` and `intent.resolved` audit records, and lets the scan track the
+  note's path again. It refuses an open intent, which the next start finishes, and a
+  create, move, delete or restore, which later releases learn to resolve (ADR-0044). See the
+  runbook's "Flagged intents: list and resolve".
 
 ### Changed
 - `/healthz` and `/readyz` answer `200` instead of `204`. The server answers `/healthz` as

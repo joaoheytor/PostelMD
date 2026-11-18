@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/joaoheytor/PostelMD/internal/audit"
 	"github.com/joaoheytor/PostelMD/internal/config"
+	"github.com/joaoheytor/PostelMD/internal/ids"
 	"github.com/joaoheytor/PostelMD/internal/intents"
 	"github.com/joaoheytor/PostelMD/internal/store/layout"
 	sqlstore "github.com/joaoheytor/PostelMD/internal/store/sql"
@@ -47,11 +51,7 @@ func intentsList(cfg config.Config, stdout io.Writer) error {
 			return err
 		}
 		for _, l := range all {
-			copies := l.Copies
-			if copies == "" {
-				copies = "-"
-			}
-			if _, err := fmt.Fprintf(stdout, "%s  %s  %s  %s  %s\n", l.OpID, l.Kind, l.State, l.At.UTC().Format(time.RFC3339), copies); err != nil {
+			if _, err := fmt.Fprintln(stdout, listLine(l)); err != nil {
 				return err
 			}
 		}
@@ -59,18 +59,49 @@ func intentsList(cfg config.Config, stdout io.Writer) error {
 	})
 }
 
-// intentsResolve ends the flagged intent cfg.OpID (intents.Resolve). Its audit record goes to
-// stdout, the sink serve uses (ADR-0020), as vault claim's.
+// listLine is one intent as intents list prints it.
+func listLine(l intents.Listed) string {
+	copies := l.Copies
+	if copies == "" {
+		copies = "-"
+	}
+	id := l.OpID
+	if !sqlstore.ValidOpID(l.Kind, id) {
+		id = "<invalid op ID>"
+	}
+	return fmt.Sprintf("%s  %s  %s  %s  %s", id, printable(l.Kind), l.State, l.At.UTC().Format(time.RFC3339), printable(copies))
+}
+
+// printable is s, quoted when it holds a control character, which a terminal would act on.
+func printable(s string) string {
+	if strings.ContainsFunc(s, unicode.IsControl) {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
+// intentsResolve ends the flagged intent cfg.OpID (intents.Resolve, ADR-0044), after the
+// vault check a start runs: on a vault the database doesn't name, it would remove a temp that
+// isn't the intent's while the real one is swept at the next correct start. Its audit records
+// go to stdout, the sink serve uses (ADR-0020), as vault claim's.
 func intentsResolve(cfg config.Config, stdout io.Writer) error {
 	return withIntents(cfg, func(ctx context.Context, paths layout.Paths, db *sqlstore.DB) error {
+		log := slog.New(slog.NewJSONHandler(stdout, nil))
+		if err := ids.CheckVault(ctx, db, paths.Vault, buildFormat, log); err != nil {
+			return err
+		}
 		v, err := vault.Open(paths.Vault)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = v.Close() }()
-		log := slog.New(slog.NewJSONHandler(stdout, nil))
 		res, err := intents.Resolve(ctx, intents.Recovery{DB: db, Vault: v, State: paths.State, Log: log, Audit: audit.New(log)}, cfg.OpID)
 		if err != nil {
+			return err
+		}
+		if res.RowOnly {
+			_, err = fmt.Fprintf(stdout, "Resolved the %s intent %s, a kind this build doesn't know: only its row went, and "+
+				"nothing in the vault or recovery/ was touched.\n", printable(res.Kind), cfg.OpID)
 			return err
 		}
 		msg := fmt.Sprintf("Resolved the %s intent %s: the next scan decides its paths again.", res.Kind, cfg.OpID)

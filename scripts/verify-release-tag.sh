@@ -44,7 +44,10 @@ git merge-base --is-ancestor "refs/tags/$tag^{commit}" origin/main ||
 # databases, and a release that ships it must also ship `postelmd db rollback`. That command
 # is recognized by its line in the usage text of cmd/postelmd/main.go ("  db rollback  ...").
 commit=$(git rev-parse "refs/tags/$tag^{commit}")
-if git ls-tree -r --name-only "$commit" -- internal/store/sql/migrations/ | grep -q '/0002_'; then
+# The listing is taken first: piped, a failing ls-tree would read as "no 0002" (no pipefail).
+migrations=$(git ls-tree -r --name-only "$commit" -- internal/store/sql/migrations/) ||
+  fail "git ls-tree failed, so the db rollback blocker can't be checked"
+if printf '%s\n' "$migrations" | grep -q '/0002_'; then
   git show "$commit:cmd/postelmd/main.go" 2>/dev/null | grep -Eq '^ +db rollback +[A-Za-z]' ||
     fail "has migration 0002 but no \`postelmd db rollback\` (#174): no release, RC included, until it is on main"
 fi

@@ -86,12 +86,12 @@ func holdUnderNotes(ctx context.Context, db *DB) error {
 		Hold{Path: "notes/held.md", FileID: a.ID, SHA256: a.SHA256, Stat: FileStat{Size: 2, Inode: 98}}})
 }
 
-// then runs the setups in order, stopping at the first error.
 // flagged is a setup step that flags the open intent opID.
 func flagged(opID string) func(context.Context, *DB) error {
 	return func(ctx context.Context, db *DB) error { return db.Flag(ctx, opID) }
 }
 
+// then runs the setups in order, stopping at the first error.
 func then(steps ...func(context.Context, *DB) error) func(context.Context, *DB) error {
 	return func(ctx context.Context, db *DB) error {
 		for _, s := range steps {
@@ -143,13 +143,7 @@ func intentCases() map[string]intentCase {
 		"restore-drop": {"drop", restore, func(ctx context.Context, db *DB) error { return db.Drop(ctx, opA) }},
 		"flag":         {"flag", save, func(ctx context.Context, db *DB) error { return db.Flag(ctx, opA) }},
 		"save-resolve": {"resolve", then(save, flagged(opA)), func(ctx context.Context, db *DB) error { return db.Resolve(ctx, opA) }},
-		"delete-resolve": {"resolve", then(del, flagged(stamp)), func(ctx context.Context, db *DB) error {
-			return db.Resolve(ctx, stamp)
-		}},
-		"restore-resolve": {"resolve", then(restore, flagged(opA)), func(ctx context.Context, db *DB) error {
-			return db.Resolve(ctx, opA)
-		}},
-		"purge-begin": {"purge-begin", nothing, func(ctx context.Context, db *DB) error { return db.BeginPurge(ctx, purged) }},
+		"purge-begin":  {"purge-begin", nothing, func(ctx context.Context, db *DB) error { return db.BeginPurge(ctx, purged) }},
 		"purge-drop": {"trash-drop", func(ctx context.Context, db *DB) error { return db.BeginPurge(ctx, purged) },
 			func(ctx context.Context, db *DB) error { return db.DropTrashRecord(ctx, purged, "purging") }},
 	}

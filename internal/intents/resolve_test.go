@@ -13,9 +13,16 @@ import (
 	sqlstore "github.com/joaoheytor/PostelMD/internal/store/sql"
 )
 
-func (e *env) resolve() (Resolution, error) {
+func (e *env) resolve() (Resolution, error) { return e.resolveID(opA) }
+
+// resolveID resolves opID through e.wrap, when set.
+func (e *env) resolveID(opID string) (Resolution, error) {
 	log := e.logger()
-	return Resolve(ctx, Recovery{DB: e.db, Vault: e.v, State: e.state, Log: log, Audit: audit.New(log)}, opA)
+	var db Store = e.db
+	if e.wrap != nil {
+		db = e.wrap(e.db)
+	}
+	return Resolve(ctx, Recovery{DB: db, Vault: e.v, State: e.state, Log: log, Audit: audit.New(log)}, opID)
 }
 
 // flaggedWithTemp leaves a flagged save intent with temp as its temp's bytes and copy as

@@ -4,6 +4,7 @@ package intents
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -16,38 +17,55 @@ type Resolution struct {
 	TempRemoved bool   // the intent's temp, copied into Copies first
 	TempLeft    bool   // a temp that isn't a regular file: the next start's sweep removes it
 	Copies      string // the intent's recovery/<op-id>/ folder, "" when it has none
+	RowOnly     bool   // a kind this build doesn't know: only its row went, with no vault I/O
 }
 
-// Resolve ends the flagged intent opID: the operator decided (ADR-0033's "until the operator
-// decides"; postelmd intents resolve, with the server stopped). Its temp is removed only once
+// Resolve ends the flagged intent opID: the operator decided (ADR-0044; postelmd intents
+// resolve, with the server stopped and the vault checked). A save's temp is removed only once
 // a copy of it is durable in recovery/<op-id>/ (a copy with the same bytes is that copy;
-// otherwise the temp is copied first), so no edit is lost; then the intent goes, with what
-// began with it (sqlstore.DB.Resolve), and the next scan decides its paths as any others.
-// The copies stay. An open intent is sqlstore.ErrIntentOpen: the start's recovery owns it.
-// Each step leaves a flagged intent whose temp is there or gone with its copy kept, so a
-// crash anywhere is undone by running it again.
+// otherwise the temp is copied first), so no edit is lost; then the intent's row goes
+// (sqlstore.DB.Resolve), and the next scan decides its paths as any others. A kind this build
+// doesn't know ends by its row alone, with no vault I/O. The copies stay.
+//
+// Refused, changing nothing: an op ID no intent can have (sqlstore.ErrBadIntent), an open
+// intent (sqlstore.ErrIntentOpen: the start's recovery owns it), and a create, move, delete or
+// restore (sqlstore.ErrResolveKind). intent.resolving is audited before the transaction and
+// intent.resolved after it commits. Each step leaves a flagged intent whose temp is there or
+// gone with its copy kept, so a crash anywhere is undone by running it again.
 func Resolve(ctx context.Context, r Recovery, opID string) (Resolution, error) {
 	var res Resolution
+	if !sqlstore.ValidOpID(sqlstore.IntentDelete, opID) { // the loosest format any kind's op ID has
+		return res, fmt.Errorf("%w: no intent has an op ID like that", sqlstore.ErrBadIntent)
+	}
 	err := r.Vault.Locked(ctx, func() error {
 		in, err := find(ctx, r.DB, opID)
-		if err != nil {
+		switch {
+		case err != nil:
 			return err
-		}
-		if !in.Flagged {
+		case !sqlstore.ValidOpID(in.Kind, opID):
+			return fmt.Errorf("%w: a %s op ID", sqlstore.ErrBadIntent, in.Kind)
+		case !sqlstore.Resolvable(in.Kind):
+			return sqlstore.ErrResolveKind
+		case !in.Flagged:
 			return sqlstore.ErrIntentOpen
 		}
 		res.Kind = in.Kind
-		if in.Kind != sqlstore.IntentDelete { // a delete's op ID is a trash stamp: it has no temp
+		if in.Kind == sqlstore.IntentSave {
 			if err := r.removeTempKept(ctx, opID, &res); err != nil {
 				return err
 			}
+		} else {
+			res.RowOnly = true
 		}
+		attrs := []slog.Attr{slog.String("op_id", opID), slog.String("kind", in.Kind), slog.Bool("temp_removed", res.TempRemoved)}
+		r.Audit.Record(ctx, "intent.resolving", attrs...)
 		if err := r.DB.Resolve(ctx, opID); err != nil {
 			return err
 		}
-		res.Copies = copiesOf(r.State, opID)
-		r.Audit.Record(ctx, "intent.resolved", slog.String("op_id", opID), slog.String("kind", in.Kind),
-			slog.Bool("temp_removed", res.TempRemoved))
+		r.Audit.Record(ctx, "intent.resolved", attrs...)
+		if !res.RowOnly {
+			res.Copies = copiesOf(r.State, opID)
+		}
 		return nil
 	})
 	return res, err

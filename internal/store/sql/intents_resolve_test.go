@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// TestResolve: the operator's way out of a flagged intent (postelmd intents resolve). The
-// intent goes with what began with it, as a drop: a delete's moving record is removed, a
-// restore's record goes back to trashed. An open intent is recovery's and is refused, and
-// an op ID with no intent is ErrNoIntent; neither changes anything.
+// TestResolve: the operator's way out of a flagged intent (postelmd intents resolve,
+// ADR-0044). A flagged save's row goes. An open intent is recovery's (ErrIntentOpen), an op ID
+// with no intent is ErrNoIntent, and one that isn't 32 hex digits is ErrBadIntent; none
+// changes anything.
 func TestResolve(t *testing.T) {
 	db, rows := assigned(t)
 	ctx := context.Background()
@@ -23,32 +23,79 @@ func TestResolve(t *testing.T) {
 		t.Fatal("a refused resolve changed the intent")
 	}
 	must(t, db.Flag(ctx, opA))
+	if err := db.Resolve(ctx, "../x\x1b"); !errors.Is(err, ErrBadIntent) {
+		t.Fatalf("resolving a bad op ID = %v, want ErrBadIntent", err)
+	}
 	must(t, db.Resolve(ctx, opA))
 	noIntent(t, db)
 	if err := db.Resolve(ctx, opA); !errors.Is(err, ErrNoIntent) {
 		t.Fatalf("resolving it again = %v, want ErrNoIntent", err)
 	}
+}
 
-	under, err := db.FilesUnder(ctx, "notes")
-	must(t, err)
-	p := DeleteIntent{Path: "notes", Folder: true, Device: 2049, Inode: 40, Mechanism: MechanismNoReplace}
-	for _, f := range under {
-		p.Files = append(p.Files, affected(f))
-	}
-	must(t, db.BeginDelete(ctx, stamp, p, NewTrashItem{Name: "notes", OriginalPath: "notes", Kind: "folder"}, t0))
-	must(t, db.Flag(ctx, stamp))
-	must(t, db.Resolve(ctx, stamp))
-	if s := recordState(t, db, stamp); s != "" {
-		t.Fatalf("after resolving a delete, record state %q, want none", s)
-	}
-
+// TestResolveRefusesTheKindsItCantEnd: create, move, delete and restore began more than a
+// row (a trash record, a file on disk), which ending as a drop would orphan or expose to the
+// purge (ADR-0044); this build refuses them, changing nothing.
+func TestResolveRefusesTheKindsItCantEnd(t *testing.T) {
+	db, rows := assigned(t)
+	ctx := context.Background()
 	folder := anAssignment(t0).Trash[1].OpID
-	must(t, db.BeginRestore(ctx, opB, RestoreIntent{TrashOpID: folder, Entry: BytePath(".postelmd-trash/" + folder),
-		To: "drafts", Folder: true, Device: 2049, Inode: 8, Mechanism: MechanismNoReplace}, t0))
-	must(t, db.Flag(ctx, opB))
-	must(t, db.Resolve(ctx, opB))
-	if s := recordState(t, db, folder); s != "trashed" {
-		t.Fatalf("after resolving a restore, record %q, want trashed", s)
+	begins := map[string]func() error{
+		opA: func() error { return db.Begin(ctx, opA, CreateIntent{Path: "new.md", NewSHA256: sum(5)}, t0) },
+		opB: func() error {
+			return db.Begin(ctx, opB, MoveIntent{From: "a.md", To: "b2.md", Device: 1, Inode: 2,
+				Files: []Affected{affected(rows["a.md"])}, Mechanism: MechanismNoReplace}, t0)
+		},
+		"00000000000000000000000000000001": func() error {
+			return db.BeginRestore(ctx, "00000000000000000000000000000001", RestoreIntent{TrashOpID: folder,
+				Entry: BytePath(".postelmd-trash/" + folder), To: "drafts", Folder: true, Device: 2049, Inode: 8, Mechanism: MechanismNoReplace}, t0)
+		},
 	}
-	noIntent(t, db)
+	for op, begin := range begins {
+		must(t, begin())
+		must(t, db.Flag(ctx, op))
+		if err := db.Resolve(ctx, op); !errors.Is(err, ErrResolveKind) {
+			t.Fatalf("resolving %s = %v, want ErrResolveKind", op, err)
+		}
+	}
+	p := folderPayload(ctx, db)
+	must(t, db.BeginDelete(ctx, stamp, p, folderItem, t0))
+	must(t, db.Flag(ctx, stamp))
+	if err := db.Resolve(ctx, stamp); !errors.Is(err, ErrResolveKind) {
+		t.Fatalf("resolving a delete = %v, want a refusal", err)
+	}
+	ins, err := db.Intents(ctx)
+	must(t, err)
+	if len(ins) != 4 || recordState(t, db, stamp) != "moving" || recordState(t, db, folder) != "restoring" {
+		t.Fatalf("intents %d, records %q %q; want all four flagged intents and their records kept", len(ins),
+			recordState(t, db, stamp), recordState(t, db, folder))
+	}
+}
+
+// TestResolvable: save and a kind this build doesn't know (a later build's; migration 0003's
+// CHECK keeps one out of this build's table, so internal/intents tests it through a fake
+// store) are resolvable; the four kinds that begin more than a row aren't.
+func TestResolvable(t *testing.T) {
+	for kind, want := range map[string]bool{IntentSave: true, "rename-tag": true, IntentCreate: false, IntentMove: false,
+		IntentDelete: false, IntentRestore: false} {
+		if Resolvable(kind) != want {
+			t.Errorf("Resolvable(%q) = %v, want %v", kind, !want, want)
+		}
+	}
+}
+
+// TestValidOpID: a save's (or another kind's) op ID is 32 lower-case hex digits; a delete's is
+// a trash stamp, a name with no slash.
+func TestValidOpID(t *testing.T) {
+	for _, c := range []struct {
+		kind, id string
+		want     bool
+	}{{IntentSave, opA, true}, {IntentSave, "0123456789ABCDEF0123456789ABCDEF", false}, {IntentSave, opA[:31], false},
+		{IntentSave, opA + "\x1b", false}, {IntentSave, stamp, false}, {"rename-tag", "", false},
+		{IntentDelete, stamp, true}, {IntentDelete, "../x", false}, {IntentDelete, "", false},
+		{IntentDelete, stamp + "\x1b[2J", false}, {IntentDelete, "a\u0085b", false}} {
+		if ValidOpID(c.kind, c.id) != c.want {
+			t.Errorf("ValidOpID(%q, %q) = %v, want %v", c.kind, c.id, !c.want, c.want)
+		}
+	}
 }

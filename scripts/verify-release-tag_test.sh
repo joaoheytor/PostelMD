@@ -6,13 +6,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 failures=0
 
-# A git that fails (exit 128) a `git grep` whose arguments name the word in $work/fail-grep,
-# while that file exists (case G6), and runs the real git otherwise.
+# A git that fails (exit 128) the subcommand on $work/fail-git's first line when its arguments
+# name the word on the second, while that file exists (case G6), and runs the real git
+# otherwise.
 realgit=$(command -v git)
 mkdir "$work/bin"
-# shellcheck disable=SC2016 # $1, $* and $(cat …) are the wrapper's own, expanded when it runs
-printf '#!/bin/sh\nif [ "$1" = grep ] && [ -e %s/fail-grep ] && printf "%%s\\n" "$*" | grep -qF -- "$(cat %s/fail-grep)"; then\n  echo "fatal: simulated" >&2; exit 128\nfi\nexec %s "$@"\n' \
-  "$work" "$work" "$realgit" >"$work/bin/git"
+# shellcheck disable=SC2016 # $1, $* and $(…) are the wrapper's own, expanded when it runs
+printf '#!/bin/sh\nf=%s/fail-git\nif [ -e "$f" ] && [ "$1" = "$(head -n 1 "$f")" ] && printf "%%s\\n" "$*" | grep -qF -- "$(tail -n 1 "$f")"; then\n  echo "fatal: simulated" >&2; exit 128\nfi\nexec %s "$@"\n' \
+  "$work" "$realgit" >"$work/bin/git"
 chmod +x "$work/bin/git"
 PATH=$work/bin:$PATH
 export PATH
@@ -275,11 +276,17 @@ for word in errBeforeFormat2 noRecoveryYet buildFormat; do
     errBeforeFormat2) printf 'package main\n\nfunc run() error { return errBeforeFormat2 }\n' >"$r/cmd/postelmd/rebuild_linux.go" ;;
     buildFormat) printf 'package main\n\nfunc init() { buildFormat = 3 }\n' >"$r/cmd/postelmd/format_init.go" ;;
   esac
-  echo "$word" >"$work/fail-grep"
+  printf 'grep\n%s\n' "$word" >"$work/fail-git"
   case_ fail "format 2 with $word, and git grep failing" "git grep"
-  rm -f "$work/fail-grep" "$r/cmd/postelmd/format_init.go"
+  rm -f "$work/fail-git" "$r/cmd/postelmd/format_init.go"
   rm -rf "$r/internal/intents"
 done
+# The same for the git ls-tree that looks for migration 0002: failing, it would skip the
+# db rollback blocker on a sh with no pipefail.
+pieces 1
+printf 'ls-tree\nmigrations\n' >"$work/fail-git"
+case_ fail "git ls-tree failing" "git ls-tree"
+rm -f "$work/fail-git"
 
 # buildFormat is assigned only where it is declared: a later assignment in any non-test file
 # under cmd/ (an init, say) would change the format the gate didn't read.

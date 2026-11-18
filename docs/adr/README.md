@@ -73,3 +73,4 @@ ID + generation ETag flips it.
 | [0041](0041-the-first-upgrades-intent.md) | The first upgrade's intent and its mechanics | Accepted |
 | [0042](0042-the-format-table-at-start.md) | The format table at start, and offline commands run as the state's owner | Accepted |
 | [0043](0043-the-rollback-to-v01s-files.md) | The rollback to v0.1: the files it moves and how it writes the format | Accepted |
+| [0044](0044-resolving-a-flagged-intent-offline.md) | Resolving a flagged intent offline | Accepted |
