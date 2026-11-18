@@ -28,11 +28,13 @@ func (k kindAs) Intents(ctx context.Context) ([]sqlstore.Intent, error) {
 	return all, err
 }
 
-// TestResolveRefusesTheKindsItCantEnd: a create, move, delete or restore began more than a row
-// (ADR-0044), so this build refuses it, before any vault I/O: the temp, the copies and the
-// flagged intent stay as they were, and nothing is audited.
+// TestResolveRefusesTheKindsItCantEnd: this build resolves only a save (ADR-0044). A create,
+// move, delete or restore began more than a row, and a kind it doesn't know began who knows
+// what (ending its row would stop the sweep sparing its temp), so it refuses them before any
+// vault I/O: the temp, the copies and the flagged intent stay as they were, and nothing is
+// audited.
 func TestResolveRefusesTheKindsItCantEnd(t *testing.T) {
-	for _, kind := range []string{sqlstore.IntentCreate, sqlstore.IntentMove, sqlstore.IntentDelete, sqlstore.IntentRestore} {
+	for _, kind := range []string{sqlstore.IntentCreate, sqlstore.IntentMove, sqlstore.IntentDelete, sqlstore.IntentRestore, "rename-tag"} {
 		t.Run(kind, func(t *testing.T) {
 			e := flaggedWithTemp(t, "draft", "")
 			e.wrap = func(s Store) Store { return kindAs{s, kind} }
@@ -44,18 +46,6 @@ func TestResolveRefusesTheKindsItCantEnd(t *testing.T) {
 				t.Fatalf("a refused resolve changed something: intent %v, copies %v, logs %s", there, e.copies(), e.logs.String())
 			}
 		})
-	}
-}
-
-// TestResolveAKindThisBuildDoesntKnow: a later build's kind ends by its row alone, with no
-// vault I/O (this build can't know what that build began), and the resolution says so.
-func TestResolveAKindThisBuildDoesntKnow(t *testing.T) {
-	e := flaggedWithTemp(t, "draft", "")
-	e.wrap = func(s Store) Store { return kindAs{s, "rename-tag"} }
-	res, err := e.resolve()
-	must(t, err)
-	if _, there := e.intent(); there || !res.RowOnly || res.TempRemoved || e.read(e.temp()) != "draft" || len(e.copies()) != 0 {
-		t.Fatalf("resolution %+v, intent %v, copies %v; want only the row gone", res, there, e.copies())
 	}
 }
 

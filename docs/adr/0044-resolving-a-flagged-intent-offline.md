@@ -30,21 +30,22 @@ This ADR adds the offline way out. It extends ADR-0033 and supersedes nothing in
   only `app.db` and `recovery/`, so it skips the vault check, which may write a marker. An op
   ID that fails its format check prints as `<invalid op ID>`, and a kind or path holding a
   control character is quoted, so `app.db` can't send control sequences to the terminal.
-- **What ending does, per kind.**
+- **What ending does, per kind.** This build resolves **only a save**. Every other kind is
+  refused, and each later PR extends resolve for its own kind.
   - **save:** the temp is removed only once a copy of it is durable in `recovery/<op-id>/`.
     A copy with the same bytes counts as that copy; otherwise the temp is copied first, as
     `temp-1`, `temp-2` and so on when a `temp` with other bytes is already there. Then the
     intent row goes. Nothing else began with a save. A temp that isn't a regular file is left
     for the next start's sweep.
-  - **a kind this build doesn't know** (written by a later build, then rolled back): only the
-    row goes, with no vault I/O. The command says so. This build can't know what the later
-    build began, so it touches nothing on disk.
-  - **create, move, delete, restore: refused** ("this kind can't be resolved by this build;
+  - **any other kind: refused** ("this kind can't be resolved by this build;
     see the runbook"), changing nothing. Ending them like a drop is wrong:
     - a delete whose item already reached the trash would leave an entry with no record,
       orphaned for good;
     - a restore set back to `trashed` while its trash entry and its destination share an inode
-      would let the purge delete the restored files.
+      would let the purge delete the restored files;
+    - a kind this build doesn't know can't reach it anyway: migration 0003's `CHECK` allows
+      only the five kinds, and a later kind needs a newer schema, which this build refuses.
+      Dropping its row would stop the sweep sparing its temp, and lose an edit.
 
     Each later slice of ADR-0033 (creates, moves, deletes and restores) extends resolve for its
     kind, with that kind's rule, runbook steps and tests, in the same PR as its recovery.

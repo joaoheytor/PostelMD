@@ -124,8 +124,9 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   kept what you want from the copies. It runs the vault check a start runs first. It removes
   the temp file only after a copy of it is in `recovery/<op-id>/`, and keeps the copies. It
   writes `intent.resolving` and `intent.resolved` audit records, and lets the scan track the
-  note's path again. It refuses an open intent, which the next start finishes, and a
-  create, move, delete or restore, which later releases learn to resolve (ADR-0044). See the
+  note's path again. It refuses an open intent, which the next start finishes, and any kind
+  but a save (create, move, delete, restore), which later releases learn to resolve
+  (ADR-0044). See the
   runbook's "Flagged intents: list and resolve".
 
 ### Changed

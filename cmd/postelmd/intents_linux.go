@@ -99,11 +99,6 @@ func intentsResolve(cfg config.Config, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if res.RowOnly {
-			_, err = fmt.Fprintf(stdout, "Resolved the %s intent %s, a kind this build doesn't know: only its row went, and "+
-				"nothing in the vault or recovery/ was touched.\n", printable(res.Kind), cfg.OpID)
-			return err
-		}
 		msg := fmt.Sprintf("Resolved the %s intent %s: the next scan decides its paths again.", res.Kind, cfg.OpID)
 		switch {
 		case res.TempRemoved:

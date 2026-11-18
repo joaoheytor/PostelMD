@@ -864,15 +864,14 @@ It refuses, changing nothing:
   ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)). Without the check,
   resolve could remove a temp that isn't the intent's, and the next correct start would sweep
   the real one;
-- a `create`, `move`, `delete` or `restore` intent: "this kind of intent can't be resolved by
-  this build". These began more than a row (a file, a trash entry), and ending them as a
-  save is ended could orphan a trash entry or let the purge delete restored files. The
-  releases that write these kinds add their own resolve and steps here. Until then, leave the
-  intent flagged: it blocks nothing but its paths' tracking.
+- any intent but a `save` (`create`, `move`, `delete`, `restore`): "this kind of intent
+  can't be resolved by this build". These began more than a row (a file, a trash entry), and
+  ending them as a save is ended could orphan a trash entry or let the purge delete restored
+  files. The releases that write these kinds add their own resolve and steps here. Until
+  then, leave the intent flagged: it blocks nothing but its paths' tracking.
 
-A kind this build doesn't know (written by a later build you rolled back from) ends by its
-row alone: resolve says so, and touches nothing in the vault or `recovery/`. The web app
-doesn't show flagged intents yet ([#199](https://github.com/joaoheytor/PostelMD/issues/199)).
+The web app doesn't show flagged intents yet
+([#199](https://github.com/joaoheytor/PostelMD/issues/199)).
 
 ## Database lost, or the vault marker doesn't match
 

@@ -72,11 +72,11 @@ func TestResolveRefusesTheKindsItCantEnd(t *testing.T) {
 	}
 }
 
-// TestResolvable: save and a kind this build doesn't know (a later build's; migration 0003's
-// CHECK keeps one out of this build's table, so internal/intents tests it through a fake
-// store) are resolvable; the four kinds that begin more than a row aren't.
+// TestResolvable: this build resolves only a save. The four kinds that begin more than a row
+// aren't, and neither is a kind it doesn't know (migration 0003's CHECK keeps one out of its
+// table, so internal/intents tests that refusal through a wrapped store).
 func TestResolvable(t *testing.T) {
-	for kind, want := range map[string]bool{IntentSave: true, "rename-tag": true, IntentCreate: false, IntentMove: false,
+	for kind, want := range map[string]bool{IntentSave: true, "rename-tag": false, IntentCreate: false, IntentMove: false,
 		IntentDelete: false, IntentRestore: false} {
 		if Resolvable(kind) != want {
 			t.Errorf("Resolvable(%q) = %v, want %v", kind, !want, want)
