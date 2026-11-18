@@ -6,6 +6,17 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 failures=0
 
+# A git that fails (exit 128) a `git grep` whose arguments name the word in $work/fail-grep,
+# while that file exists (case G6), and runs the real git otherwise.
+realgit=$(command -v git)
+mkdir "$work/bin"
+# shellcheck disable=SC2016 # $1, $* and $(cat …) are the wrapper's own, expanded when it runs
+printf '#!/bin/sh\nif [ "$1" = grep ] && [ -e %s/fail-grep ] && printf "%%s\\n" "$*" | grep -qF -- "$(cat %s/fail-grep)"; then\n  echo "fatal: simulated" >&2; exit 128\nfi\nexec %s "$@"\n' \
+  "$work" "$work" "$realgit" >"$work/bin/git"
+chmod +x "$work/bin/git"
+PATH=$work/bin:$PATH
+export PATH
+
 ssh-keygen -q -t ed25519 -N '' -C maintainer -f "$work/trusted"
 ssh-keygen -q -t ed25519 -N '' -C stranger -f "$work/untrusted"
 
@@ -251,6 +262,24 @@ mkdir -p "$r/internal/intents"
 printf 'package intents\n\nfunc noRecoveryYet(kind string) bool { return true }\n' >"$r/internal/intents/recover.go"
 case_ pass "format 1: noRecoveryYet doesn't block it"
 rm -r "$r/internal/intents"
+
+# G6: a git grep that fails (exit 128: a damaged object, a missing commit) is an error, never
+# "nothing found": the gate fails closed. The git on PATH fails only the grep for that word,
+# so each check is shown failing closed on its own.
+for word in errBeforeFormat2 noRecoveryYet buildFormat; do
+  pieces 2
+  case $word in
+    noRecoveryYet)
+      mkdir -p "$r/internal/intents"
+      printf 'package intents\n\nfunc noRecoveryYet(string) bool { return true }\n' >"$r/internal/intents/recover.go" ;;
+    errBeforeFormat2) printf 'package main\n\nfunc run() error { return errBeforeFormat2 }\n' >"$r/cmd/postelmd/rebuild_linux.go" ;;
+    buildFormat) printf 'package main\n\nfunc init() { buildFormat = 3 }\n' >"$r/cmd/postelmd/format_init.go" ;;
+  esac
+  echo "$word" >"$work/fail-grep"
+  case_ fail "format 2 with $word, and git grep failing" "git grep"
+  rm -f "$work/fail-grep" "$r/cmd/postelmd/format_init.go"
+  rm -rf "$r/internal/intents"
+done
 
 # buildFormat is assigned only where it is declared: a later assignment in any non-test file
 # under cmd/ (an init, say) would change the format the gate didn't read.

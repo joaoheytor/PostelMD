@@ -66,8 +66,23 @@ format=$(decl internal/store/layout/format_linux.go FormatVersion)
 isnum "$format" ||
   fail "can't read FormatVersion in internal/store/layout/format_linux.go (one \`const FormatVersion = <n>\`), so the format-2 release blockers can't be checked"
 build=$(decl cmd/postelmd/instance.go buildFormat)
+# found <git grep args>: git grep in the tagged commit. It prints the matches and returns 0,
+# or returns 1 when nothing matches; any other exit (a damaged object, a missing commit)
+# fails the tag, so a blocker git couldn't search for never counts as absent.
+found() {
+  rc=0
+  git grep "$@" || rc=$?
+  case $rc in
+    0 | 1) return "$rc" ;;
+    *) fail "git grep failed (exit $rc), so the release blockers can't be checked" ;;
+  esac
+}
 # Its declaration must be its only assignment outside tests: an init could change it unseen.
-sets=$(git grep -h -E '(^|[^A-Za-z0-9_.])buildFormat[[:space:]]*=([^=]|$)' "$commit" -- 'cmd/*.go' ':!*_test.go' | wc -l)
+# found runs outside $( ): fail's exit must end this script, not a subshell.
+assigns=$(mktemp)
+trap 'rm -f "$signers" "$assigns"' EXIT
+found -h -E '(^|[^A-Za-z0-9_.])buildFormat[[:space:]]*=([^=]|$)' "$commit" -- 'cmd/*.go' ':!*_test.go' >"$assigns" || :
+sets=$(wc -l <"$assigns")
 [ "$sets" -le 1 ] ||
   fail "buildFormat is assigned outside its declaration in cmd/postelmd/instance.go (outside tests), so the format the build writes can't be read"
 case $build in
@@ -101,7 +116,7 @@ if [ "$format" -ge 2 ]; then
   printf '%s\n' "$usage" | grep -Eq '^ +vault claim +[A-Za-z]' || f2 "has no \`postelmd vault claim\`"
   # Part D removes their switch (errBeforeFormat2); while any non-test file still names it,
   # its definition included, the switch must turn them on at this format.
-  if git grep -q -w errBeforeFormat2 "$commit" -- 'cmd/*.go' ':!*_test.go'; then
+  if found -q -w errBeforeFormat2 "$commit" -- 'cmd/*.go' ':!*_test.go'; then
     on=$(at cmd/postelmd/rebuild_linux.go |
       sed -n 's/^func identityCommandsReady() bool { return buildFormat >= \([0-9][0-9]*\) }$/\1/p')
     { isnum "$on" && [ "$on" -le "$format" ]; } ||
@@ -111,7 +126,7 @@ if [ "$format" -ge 2 ]; then
   # noRecoveryYet (ADR-0033); the PR that ships the last kind deletes it. While any non-test
   # file under internal/ names it, an interrupted create, move, delete or restore would stop
   # its paths until an operator steps in, so the release waits.
-  if git grep -q -w noRecoveryYet "$commit" -- 'internal/*.go' ':!*_test.go'; then
+  if found -q -w noRecoveryYet "$commit" -- 'internal/*.go' ':!*_test.go'; then
     f2 "intent recovery is unfinished (noRecoveryYet in internal/intents)"
   fi
   # ErrDamaged's own text (its declaration, to the line that closes it) is what every caller
