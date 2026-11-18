@@ -262,7 +262,7 @@ jobs:
   e2e:
     # Playwright smoke tests against the built binary (role and label locators, axe scan).
     runs-on: ubuntu-24.04
-    # The steps carry their own limits, so a slow browser download can't eat the tests' time (#205).
+    # The steps carry their own limits, so a slow install can't eat the tests' time (#205).
     timeout-minutes: 20
     permissions:
       contents: read
@@ -282,7 +282,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: make web-deps
-      # The tests run headless, so the headless shell is enough; it is a much smaller download.
+      # The tests run headless, so the headless shell is enough. Most of this step's time is the
+      # apt fetch of --with-deps (about 5 min at a slow mirror), which the step's limit bounds.
       - name: Install Chromium for the locked Playwright version
         timeout-minutes: 10
         run: cd web && npx playwright install --with-deps --only-shell chromium
