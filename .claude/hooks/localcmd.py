@@ -16,7 +16,8 @@ those checks read is literal, so they judge what will run:
     literal --; anywhere else a word with $ must start with an existing directory inside
     the project (sub/$f), and use only loop variables of `for NAME in` plain names
     (SAFE_VALUE: no /, no leading - or dot, no doubled dot) that the command never names
-    elsewhere (printf -v, NAME=, let, unset, ...), never ones a program reads;
+    elsewhere (printf -v, NAME=, let, unset, ...), never ones a program reads, written
+    as a plain ${NAME} or as $NAME followed by a delimiter (no zsh :h, :s/a/b/, [1]);
   - the working directory and every word, taken as a path (logical and physical), are
     inside the project;
   - shscan raises no flag ($'…', backslash-newline, odd heredocs, open quotes) and there is
@@ -30,7 +31,7 @@ import re
 from bash_writes import tokens
 from shparse import SHELLS, WRAPPERS, bare, segments
 from shscan import attached_paren, blanked, expandable, scan, stripped
-from shvars import harmless
+from shvars import FOLLOWER, harmless
 from trust import project_roots, under
 
 EDGE_L, EDGE_R = r"(?<![\w./-])", r"(?![\w./-])"  # a word, not part of a path or name
@@ -64,7 +65,7 @@ SCRIPTS = r"(\./)?scripts/(adr-immutable|check-file-size|fuzz|image-scan|image-s
 COMMAND = re.compile(rf"[\w.+:-]+|\[\[?|\]\]?|\}}|{SCRIPTS}|(\./)?bin/postelmd")
 EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
 SAFE_VALUE = re.compile(r"\w[\w-]*(\.[\w-]+)*")  # not an option, not . or ..
-REF = re.compile(r"\$(?:\{(\w+)(?:(?:%%?|##?)[\w.-]*)?\}|(\w+))")
+REF = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 DOTDOT = re.compile(r"(^|/)\.\.(/|$)")
 
 
@@ -104,12 +105,13 @@ def safe_names(segs, toks):
 
 
 def expansions_ok(cmd, names):
-    """True when every $ the shell expands is $NAME or ${NAME}, ${NAME%x}, ${NAME#x} with a
-    plain x, naming only variables in names."""
+    """True when every $ the shell expands is a plain ${NAME}, or $NAME followed by a
+    delimiter (not zsh's :s/a/b/, :h, :a, [1] or (…)), naming only variables in names."""
     text = expandable(scan(cmd))
     for i in (m.start() for m in re.finditer(r"\$", text)):
         m = REF.match(text, i)
-        if not m or (m.group(1) or m.group(2)) not in names:
+        if not m or (m.group(1) or m.group(2)) not in names \
+                or (m.group(2) and not FOLLOWER.match(text, m.end())):
             return False
     return True
 

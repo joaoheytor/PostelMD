@@ -97,8 +97,28 @@ def sed_targets(args):
     if not scripts and files and skip is None and not any(
             a in ("-f", "--file") or a.startswith("--file=") for a in args):
         scripts, files = [files[0]], files[1:]
-    in_place = any(re.match(r"-[a-zA-Z]*i", a) or a.startswith("--in-place") for a in args)
-    return (files if in_place else []) + [f for s in scripts for f in sed_w_files(s)]
+    suffixes = sed_suffixes(args)
+    backups = [backup(f, s) for f in files for s in suffixes if s]
+    return (files if suffixes else []) + backups + [f for s in scripts for f in sed_w_files(s)]
+
+
+def sed_suffixes(args):
+    """The backup suffix of each -i/--in-place in args ("" for none)."""
+    out = []
+    for a in args:
+        m = re.match(r"-[a-zA-Z]*i(.*)", a) if not a.startswith("--") else None
+        if m or a == "--in-place" or a.startswith("--in-place="):
+            out.append(m.group(1) if m else a.partition("=")[2])
+    return out
+
+
+def backup(path, suffix):
+    """Where sed -i<suffix> backs up path: each * in suffix is the file's name, and a suffix
+    with a / names a path of its own."""
+    if "*" not in suffix:
+        return path + suffix
+    name = suffix.replace("*", os.path.basename(path))
+    return name if "/" in name else os.path.join(os.path.dirname(path), name)
 
 
 def sort_targets(args):
@@ -158,11 +178,16 @@ def command_targets(words):
 
 
 def write_targets(cmd):
-    """Every path the command writes with a redirect, tee, sed -i or perl -i, as written."""
+    """Every path the command writes with a redirect (zsh's >! and >>! too: bash reads the
+    `!` as the file name), tee, sed -i (and its backup), sed w, perl -i, sort -o or uniq,
+    as written."""
     targets, words, toks, i = [], [], tokens(cmd), 0
     while i < len(toks):
         tok = toks[i]
         nxt = toks[i + 1] if i + 1 < len(toks) else ""
+        if is_redirect(tok) and nxt == "!" and tok in (">", ">>", "&>", "&>>"):
+            nxt = toks[i + 2] if i + 2 < len(toks) else ""  # zsh's >! and >>!: clobber
+            i += 1
         if is_redirect(tok):
             dup = tok.endswith(">&") and re.fullmatch(r"\d+|-", nxt)  # 2>&1 duplicates
             if nxt and not is_punct(nxt) and not dup:

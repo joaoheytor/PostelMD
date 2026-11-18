@@ -173,7 +173,8 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   The maintainer may opt in per project with a file outside it,
   `${XDG_CONFIG_HOME:-$HOME/.config}/postelmd/guard-trust.json` (`.claude/hooks/trust.py`):
   then shell writes by a few text tools (echo, cat, tee, grep, …; `sed --sandbox -i …`,
-  so write sed edits that way) to literal, unprotected paths inside the project, CAN'T
+  so write sed edits that way, with no backup suffix or a plain one such as `-i.bak`),
+  reading only files inside the project, to literal, unprotected paths inside it, CAN'T
   PARSE on a command whose words are all literal (no `$( )`, no outward tool, no path
   outside the project; it may still run the project's own code) and edits to Accepted ADRs
   stop asking. Every other ask and every deny stay. Any command or edit that names that

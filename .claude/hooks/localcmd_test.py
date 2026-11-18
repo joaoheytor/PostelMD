@@ -12,7 +12,7 @@ LOCAL = [
     "git status && ls *",
     "git status # what changed",
     "for f in a b; do wc -l sub/$f.md; done; make lint",
-    "for f in a.b; do echo sub/${{f%.b}}; done && git status",
+    "for f in a.b; do echo sub/${{f}}.md; done && git status",
 ]
 
 

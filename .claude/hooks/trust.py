@@ -9,10 +9,11 @@ this user, not group- or world-writable, at most 4 KiB, naming this project. Any
 guard asks exactly as without it. The kinds:
   shell-writes    SHELL WRITE (bash_writes.py) passes when every command is one of a few
                   text tools that write only through a redirect or tee (writer_ok: WRITERS,
-                  sed only with --sandbox, no sort -o or uniq output file) and every target
-                  is a literal path (no glob, brace, ~, $ or backslash) inside the project,
-                  with no symlink in it or its parents, absent or a regular file with one
-                  link, and not protected();
+                  sed only with --sandbox and a plain or no backup suffix, no sort -o or
+                  uniq output file), every file they read is inside the project (readops),
+                  no zsh >! is used, and every target is a literal path (no glob, brace, ~,
+                  $, ! or backslash) inside the project, with no symlink in it or its
+                  parents, absent or a regular file with one link, and not protected();
   unparsed-local  CAN'T PARSE passes when localcmd.local_only() finds the command stays
                   local; the later checks (cd, foreign repository, outward) still run;
   accepted-adr    edits to Accepted ADRs pass (scripts/adr-immutable.sh still runs in
@@ -33,7 +34,9 @@ import os
 import re
 import stat
 
-from bash_writes import resolve, sort_targets, tokens, uniq_targets, write_targets
+from bash_writes import (is_redirect, resolve, sed_suffixes, sort_targets, tokens,
+                         uniq_targets, write_targets)
+from readops import SPECIAL, reads_inside
 from shparse import bare, segments
 
 KINDS = frozenset({"shell-writes", "unparsed-local", "accepted-adr"})
@@ -48,7 +51,6 @@ BUILT = re.compile(r"[$`*?\[{]")
 # unpacks or changes directory, so the targets are where they look.
 WRITERS = {"echo", "printf", "cat", "sed", "tee", "sort", "uniq", "head", "tail", "grep",
            "wc", "cut", "tr", "true", "nl", "paste"}
-SPECIAL = re.compile(r"[*?\[\]{}~$`\\]")  # the shell may expand or unquote these
 
 
 def opt_in_path():
@@ -192,10 +194,12 @@ def writer_ok(words):
     name, args = w[0], w[1:]
     if name not in WRITERS:
         return False
-    if name == "sed":
+    if name == "sed":  # a backup suffix with / or * names a path of its own
         return "--sandbox" in args and not any(
-            a in ("-f", "--file", "-s", "--separate") or a.startswith(("--file=", "--follow"))
-            or re.fullmatch(r"-[a-zA-Z]*[fs][a-zA-Z]*", a) for a in args)
+            a in ("-f", "--file", "-s", "--separate") or a.startswith(("--file=", "--follow",
+                                                                       "--in-place="))
+            or re.fullmatch(r"-[a-zA-Z]*[fs][a-zA-Z]*", a) for a in args) \
+            and all(re.fullmatch(r"[A-Za-z0-9._~-]*", s) for s in sed_suffixes(args))
     if name == "sort":
         return not sort_targets(args) and not any(a.startswith("--compress") for a in args)
     return name != "uniq" or not uniq_targets(args)
@@ -226,10 +230,13 @@ def shell_writes_ok(cmd, targets, cwd):
     """True when cmd runs only writer_ok() commands (no subshell or substitution) and every
     target is a literal plain_target() inside the project that isn't protected()
     (docs/adr/ without accepted-adr)."""
-    roots = project_roots()
-    if not roots or not targets or any("(" in t and not t.strip("();<>|&") for t in tokens(cmd)):
+    roots, toks = project_roots(), tokens(cmd)
+    if not roots or not targets or any("(" in t and not t.strip("();<>|&") for t in toks):
         return False
-    if any(SPECIAL.search(t) for t in targets) or not all(writer_ok(w) for w in segments(cmd)):
+    if any(t == "!" and is_redirect(p) for p, t in zip(toks, toks[1:])):
+        return False  # >!: zsh clobbers the next word, bash writes a file named !
+    if any(SPECIAL.search(t) for t in targets) or not all(writer_ok(w) for w in segments(cmd)) \
+            or not reads_inside(cmd, cwd, roots, under):
         return False
     project = os.environ["CLAUDE_PROJECT_DIR"]
     for t in targets:
