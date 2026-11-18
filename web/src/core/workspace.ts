@@ -102,10 +102,11 @@ export class Workspace {
     let current = () => seq === this.opens;
     const prev = this.state.value.open;
     this.fail(undefined); // a refusal again is announced again, and no old one shows meanwhile
+    this.reading?.abort(); // an earlier open still reading is superseded, even by the open note
+    this.reading = undefined;
     const wasClean = !prev?.doc.dirty; // an unsaved edit already there, the user agreed to leave
     if (prev?.doc.path === path && wasClean && !convert) return; // nothing to reload: kept as it is
     const etag = prev?.doc.etag;
-    this.reading?.abort(); // an earlier open still reading is superseded
     const reading = (this.reading = new AbortController());
     try {
       const note = await api.readNote(path, reading.signal);

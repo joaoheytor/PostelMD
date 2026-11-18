@@ -177,6 +177,24 @@ describe("Workspace.open", () => {
     await Promise.all([a, b]);
     expect(ws.state.value).toEqual({}); // superseded: no error shown, nothing open
   });
+
+  it("aborts a pending read when the open, clean note is opened again (no reload)", async () => {
+    const ws = new Workspace();
+    await ws.open("a.md");
+    let signal: AbortSignal | undefined;
+    vi.mocked(api.readNote).mockImplementationOnce(
+      (_path, s) =>
+        new Promise<api.Note>((_, reject) => {
+          signal = s;
+          s?.addEventListener("abort", () => reject(s.reason as Error));
+        }),
+    );
+    const b = ws.open("b.md");
+    await ws.open("a.md"); // a.md is still the open note, clean: kept as it is
+    expect(signal?.aborted).toBe(true);
+    await b;
+    expect(ws.state.value.open?.doc.path).toBe("a.md");
+  });
 });
 
 describe("Workspace.createNote", () => {
