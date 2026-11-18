@@ -21,9 +21,10 @@ Modes (first CLI argument):
            mentions git, go, gh, npm, npx, make or scripts/ asks when it can't be tokenized
            or shscan.py flags it, and when a wrapper (sudo, xargs, nice -n, ...) runs one.
 
-The maintainer's git-ignored .claude/guard-trust.local.json (trust.py) can stop three asks:
-shell writes inside the project, CAN'T PARSE on a command that stays local (localcmd.py) and
-edits to Accepted ADRs. Every other ask, and every deny, stays; writing that file asks.
+The maintainer's opt-in outside the project (trust.py) can stop three asks: shell writes
+inside the project, CAN'T PARSE on a command simple enough to judge (localcmd.py) and edits
+to Accepted ADRs. Every other ask, and every deny, stays; naming the opt-in asks, and so do
+shell writes to git, GitHub and guard files, git-ignored or not.
 
 These are guardrails for an agent, not a security boundary: CI and branch protection are the
 hard gates.
@@ -94,9 +95,13 @@ def check_secrets(tool_input):
 
 def check_public(tool_input):
     path = rel_path(tool_input)
-    if os.path.basename(path) == trust.NAME:
-        respond("ask", f"{path} is the maintainer's opt-in that stops some guard prompts "
-                       "(trust.py). Only the maintainer turns it on.")
+    try:
+        named = trust.names_opt_in(tool_input.get("file_path") or "", written_text(tool_input))
+    except Exception:  # pylint: disable=broad-except  # fail closed
+        named = True
+    if named:
+        respond("ask", f"{path or 'This file'} names {trust.OPT_IN}. Only the maintainer "
+                       "changes it.")
     if path.endswith("public-guard.local.txt") or path.startswith(".claude/hooks/"):
         return
     reasons = public_reasons(written_text(tool_input), path)
@@ -261,17 +266,13 @@ def stays_local(cmd, cwd):
 
 
 def check_bash_writes(tool_input, cwd):
-    cmd = normalize(tool_input.get("command") or "")
-    found = trust.writes_opt_in(cmd, cwd)
-    if found:
-        respond("ask", f"SHELL WRITE to {found}, the maintainer's opt-in that stops some guard "
-                       "prompts (trust.py). Only the maintainer turns it on.")
+    raw = tool_input.get("command") or ""
+    cmd = normalize(raw)
+    why = trust.bash_asks(raw, cmd, cwd)
+    if why:
+        respond("ask", why)
     targets = repo_write_targets(cmd, cwd)
-    try:
-        allowed = trust.trusted("shell-writes") and trust.shell_writes_ok(targets, cwd)
-    except Exception:  # pylint: disable=broad-except  # fail closed: ask as without the opt-in
-        allowed = False
-    if targets and not allowed:
+    if targets and not trust.writes_trusted(cmd, targets, cwd):
         respond("ask", "SHELL WRITE to repository file(s) " + ", ".join(targets[:5]) + ". Use "
                        "Write/Edit so the guard hook sees the change (secrets, public-repo and ADR "
                        "checks); approve only for generated output that Write/Edit can't produce.")

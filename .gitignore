@@ -4,7 +4,6 @@
 /CLAUDE.local.md
 /.claude/settings.local.json
 /.claude/public-guard.local.txt
-/.claude/guard-trust.local.json
 /.claude/worktrees/
 /.claude/hooks/__pycache__/
 

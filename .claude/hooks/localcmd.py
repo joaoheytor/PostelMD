@@ -1,29 +1,35 @@
-"""Whether a command the guard can't parse still stays local (trust.py, unparsed-local).
+"""Whether a command the guard can't parse is simple enough to judge anyway (trust.py,
+unparsed-local).
 
 The guard asks (CAN'T PARSE) when a command that mentions git, go, gh, npm, npx, make or
-scripts/ uses shell syntax its checks don't model: $VAR, $(…), globs, braces, loops. With
-the opt-in, local_only() lets such a command on to the guard's remaining checks (cd,
-foreign repository, outward, shell writes) only when, on the raw text and on shlex's words:
-  - no outward tool or address appears anywhere, even quoted (OUTWARD, GIT_OUTWARD, ://,
-    user@host:), and git, npm and go run only local subcommands with literal names
-    (GIT_LOCAL, NPM_LOCAL; git takes no global option but -C and --no-pager);
-  - no command runs text the guard can't see: no shell, interpreter, eval or source, no
-    wrapper, find -exec, xargs or awk, no command name built from $ or `, no path command
-    except the allowlisted scripts (HIDDEN, COMMAND);
-  - every $ is a variable the command sets itself (NAME=, for NAME, read NAME; not one a
-    program reads, shvars.harmless) or $? $# $$ $! $- $0, plain or ${NAME%…}/${NAME#…};
-  - the working directory and every path (absolute, ~ or with ..) are inside the project,
-    at their logical and physical paths;
+scripts/ uses shell syntax its checks don't model: globs, braces, # comments, loops, $VAR.
+With the opt-in, local_only() lets such a command on to the guard's remaining checks (cd,
+foreign repository, outward and code-running options, shell writes) only when every word
+those checks read is literal, so they judge what will run:
+  - nothing runs that the text doesn't show: no $( ), backticks, <( ) or >( ) anywhere,
+    no unquoted heredoc body with $ or `, no read, no shell, interpreter, eval, source,
+    wrapper, xargs, awk or find -exec, no command name built from $ (HIDDEN, COMMAND);
+  - no outward tool, git network or config word, URL or user@host: anywhere, even quoted
+    (OUTWARD, GIT_OUTWARD, ADDRESS); git runs only GIT_LOCAL subcommands with -C or
+    --no-pager, go only GO_LOCAL (env without -w), npm only NPM_LOCAL (no ci or install);
+  - in a git, go, npm or make command no word holds $ or `, except an operand after a
+    literal --; anywhere else a word with $ must start with an existing directory inside
+    the project (sub/$f), and use only variables set by `for NAME in` or NAME= to plain
+    names (SAFE_VALUE: no /, no leading - or dot, no doubled dot), never ones a program
+    reads;
+  - the working directory and every word, taken as a path (logical and physical), are
+    inside the project;
   - shscan raises no flag ($'…', backslash-newline, odd heredocs, open quotes) and there is
     no glob qualifier x(…) or zsh =cmd.
-Anything it can't decide is not local. A guardrail like the rest of the guard, not a boundary.
+Downloads and code the project itself runs (make targets, npm run scripts, go test) are
+local by this definition. Anything it can't decide is not local. A guardrail, not a boundary.
 """
 import os
 import re
 
 from bash_writes import tokens
 from shparse import SHELLS, WRAPPERS, bare, segments
-from shscan import attached_paren, blanked, expandable, scan
+from shscan import attached_paren, blanked, expandable, scan, stripped
 from shvars import harmless
 from trust import project_roots, under
 
@@ -44,83 +50,106 @@ GIT_LOCAL = {"status", "log", "diff", "show", "branch", "rev-parse", "rev-list",
              "name-rev", "worktree", "diff-tree", "diff-files", "diff-index", "check-ignore",
              "check-attr", "range-diff", "cherry", "reflog", "whatchanged", "count-objects",
              "verify-commit", "format-patch", "apply", "clean"}
-NPM_LOCAL = {"test", "t", "run", "run-script", "ci", "ls", "explain", "why"}
+GO_LOCAL = {"build", "test", "vet", "list", "env"}
+NPM_LOCAL = {"test", "t", "run", "run-script", "ls", "explain", "why"}
+TOOLS = {"git", "go", "npm", "make"}
 HIDDEN = SHELLS | WRAPPERS | {
     "eval", "source", ".", "exec", "alias", "builtin", "command", "node", "nodejs", "perl",
     "ruby", "php", "deno", "bun", "lua", "awk", "gawk", "mawk", "nawk", "osascript", "pwsh",
-    "powershell", "tclsh", "expect", "java", "Rscript", "su", "pkexec", "typeset",
+    "powershell", "tclsh", "expect", "java", "Rscript", "su", "pkexec", "typeset", "read",
     "declare", "local", "export", "readonly", "integer", "float", "set", "trap", "function"}
 SCRIPTS = r"(\./)?scripts/(adr-immutable|check-file-size|fuzz|image-scan|image-smoke" \
           r"|image-smoke-adopt|pre-commit-adr_test|release-meta_test|verify-release-tag_test)\.sh"
 COMMAND = re.compile(rf"[\w.+:-]+|\[\[?|\]\]?|\}}|{SCRIPTS}|(\./)?bin/postelmd")
 EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
-REF = re.compile(r"\$(?:\{(\w+)(?:(?:%%?|##?)[^}$`]*)?\}|(\w+)|([?#$!0-]|(?=[\s\"(])|$))")
+SAFE_VALUE = re.compile(r"\w[\w-]*(\.[\w-]+)*")  # not an option, not . or ..
+REF = re.compile(r"\$(?:\{(\w+)(?:(?:%%?|##?)[\w.-]*)?\}|(\w+))")
+DOTDOT = re.compile(r"(^|/)\.\.(/|$)")
 
 
 def outward(cmd):
-    words = " ".join(tokens(cmd))
-    texts = [cmd, re.sub(r"\\\n|[\\'\"]", "", cmd), words]
+    texts = [cmd, re.sub(r"\\\n|[\\'\"]", "", cmd), " ".join(tokens(cmd))]
     if any(OUTWARD.search(t) or ADDRESS.search(t) for t in texts):
         return True
     return any(re.search(EDGE_L + "git" + EDGE_R, t) and GIT_OUTWARD.search(t) for t in texts)
 
 
-def assigned(segs, toks):
-    """The variables cmd sets, or None when one of them is a name a program may read."""
-    names = [m.group(1) for t in toks for m in [re.match(r"(\w+)=", t)] if m]
+def hidden_code(s):
+    """True when the shell may run a command the text doesn't show as words."""
+    text = stripped(s)
+    if "`" in text or re.search(r"[$<>]\(", text):
+        return True
+    return any(not quoted and ("$" in body or "`" in body) for quoted, body in s.bodies)
+
+
+def safe_names(segs, toks):
+    """Variables set to SAFE_VALUE literals only (for NAME in …, NAME=…), or None when one
+    is a name a program may read."""
+    values = {}
+    for t in toks:
+        m = re.match(r"(\w+)=(.*)", t)
+        if m:
+            values.setdefault(m.group(1), []).append(m.group(2))
     for words in segs:
         if words[0] == "for" and len(words) > 1:
-            names.append(words[1])
-        w = bare(words)
-        if w and w[0] == "read":
-            names += [a for a in w[1:] if re.fullmatch(r"\w+", a)]
-    return set(names) if all(harmless(n) for n in names) else None
+            values.setdefault(words[1], []).extend(words[3:] if words[2:3] == ["in"] else ["?"])
+    if not all(harmless(n) for n in values):
+        return None
+    return {n for n, vals in values.items() if all(SAFE_VALUE.fullmatch(v) for v in vals)}
 
 
 def expansions_ok(cmd, names):
-    """True when every $ the shell expands is a REF form, naming only variables in names."""
+    """True when every $ the shell expands is $NAME or ${NAME}, ${NAME%x}, ${NAME#x} with a
+    plain x, naming only variables in names."""
     text = expandable(scan(cmd))
     for i in (m.start() for m in re.finditer(r"\$", text)):
         m = REF.match(text, i)
-        if not m or ((m.group(1) or m.group(2)) and (m.group(1) or m.group(2)) not in names):
+        if not m or (m.group(1) or m.group(2)) not in names:
             return False
     return True
 
 
-def command_ok(words):
+def dollar_word_ok(word, cwd, roots):
+    """A word with $ outside tool options: an existing directory inside the project, then
+    `/` and the rest, with no literal .. in it."""
+    m = re.match(r"([\w.-]+(?:/[\w.-]+)*)/", word)
+    if not m or DOTDOT.search(word):
+        return False
+    d = os.path.join(cwd, m.group(1))
+    return os.path.isdir(d) and under(os.path.normpath(d), roots) \
+        and under(os.path.realpath(d), roots)
+
+
+def command_ok(words, cwd, roots):
     w = bare(words)
     if not w:
         return True
     name = os.path.basename(w[0])
-    if not COMMAND.fullmatch(w[0]) or name in HIDDEN or re.fullmatch(r"python[\d.]*", name):
+    if not COMMAND.fullmatch(w[0]) or name in HIDDEN or re.fullmatch(r"python[\d.]*", name) \
+            or any(a in EXEC_FLAGS for a in w):
         return False
-    if any(a in EXEC_FLAGS for a in w):
-        return False
+    for i, a in enumerate(w):
+        if ("$" in a or "`" in a) and (name in TOOLS and ("--" not in w[:i] or a.startswith("-"))
+                                       or not dollar_word_ok(a, cwd, roots)):
+            return False
     if name == "git":
         i = 1
-        while i < len(w) and w[i].startswith("-"):
-            if w[i] == "-C" and i + 1 < len(w) and "$" not in w[i + 1]:
-                i += 2
-            elif w[i] == "--no-pager":
-                i += 1
-            else:
-                return False
+        while i < len(w) and w[i] in ("-C", "--no-pager"):
+            i += 2 if w[i] == "-C" else 1
         return i < len(w) and w[i] in GIT_LOCAL
     if name == "npm":
         return len(w) > 1 and w[1] in NPM_LOCAL
     if name == "go":
-        return len(w) > 1 and w[1] not in ("get", "install") and not any("@" in a for a in w)
+        return len(w) > 1 and w[1] in GO_LOCAL and not (w[1] == "env" and "-w" in w)
     return True
 
 
 def leaves(piece, cwd, roots):
-    """True when piece may name a path outside the project."""
-    if piece in ("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin"):
-        return False
+    """True when piece, taken as a path from cwd, may lead outside the project."""
+    if "$" in piece or piece in ("", "/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin"):
+        return False  # $ words: dollar_word_ok
     if piece.startswith("~") and not re.match(r"~(/|$)", piece):
         return True  # ~user, ~+, ~-: other users' homes, $PWD, $OLDPWD
-    if not (piece.startswith(("/", "~")) or re.search(r"(^|/)\.\.(/|$)", piece)):
-        return False
     path = os.path.join(cwd, os.path.expanduser(piece))
     return not (under(os.path.normpath(path), roots) and under(os.path.realpath(path), roots))
 
@@ -134,7 +163,7 @@ def paths_ok(toks, cwd, roots):
 
 
 def local_only(cmd, cwd):
-    """True when cmd, which the guard can't parse, provably stays local (module doc)."""
+    """True when cmd, which the guard can't parse, is simple enough to judge (module doc)."""
     roots = project_roots()
     toks = tokens(cmd)
     s = scan(cmd)
@@ -142,12 +171,11 @@ def local_only(cmd, cwd):
         return False
     if not under(os.path.normpath(cwd), roots) or not under(os.path.realpath(cwd), roots):
         return False
-    if attached_paren(blanked(s)) or re.search(r"(?:^|[\s;&|()<>])=[\w./~-]", blanked(s)):
-        return False
-    if outward(cmd):
+    if hidden_code(s) or attached_paren(blanked(s)) \
+            or re.search(r"(?:^|[\s;&|()<>])=[\w./~-]", blanked(s)) or outward(cmd):
         return False
     segs = segments(cmd)
-    names = assigned(segs, toks)
+    names = safe_names(segs, toks)
     if names is None or not expansions_ok(cmd, names):
         return False
-    return all(command_ok(w) for w in segs) and paths_ok(toks, cwd, roots)
+    return all(command_ok(w, cwd, roots) for w in segs) and paths_ok(toks, cwd, roots)
