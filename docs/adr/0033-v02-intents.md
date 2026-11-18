@@ -316,3 +316,7 @@ adds the crash test for its rows, under the process-kill and power-loss models.
   v0.1 kept deleted items until the trash was emptied by hand. The CHANGELOG says so, and
   that items deleted under v0.1 get 7 days from the upgrade (ADR-0031's import clock).
 
+## Clarifications
+- **2026-11-18, how the operator decides.** See
+  [ADR-0044](0044-resolving-a-flagged-intent-offline.md) (`postelmd intents resolve`).
+

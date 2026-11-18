@@ -6,6 +6,18 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 failures=0
 
+# A git that fails (exit 128) the subcommand on $work/fail-git's first line when its arguments
+# name the word on the second, while that file exists (case G6), and runs the real git
+# otherwise.
+realgit=$(command -v git)
+mkdir "$work/bin"
+# shellcheck disable=SC2016 # $1, $* and $(…) are the wrapper's own, expanded when it runs
+printf '#!/bin/sh\nf=%s/fail-git\nif [ -e "$f" ] && [ "$1" = "$(head -n 1 "$f")" ] && printf "%%s\\n" "$*" | grep -qF -- "$(tail -n 1 "$f")"; then\n  echo "fatal: simulated" >&2; exit 128\nfi\nexec %s "$@"\n' \
+  "$work" "$realgit" >"$work/bin/git"
+chmod +x "$work/bin/git"
+PATH=$work/bin:$PATH
+export PATH
+
 ssh-keygen -q -t ed25519 -N '' -C maintainer -f "$work/trusted"
 ssh-keygen -q -t ed25519 -N '' -C stranger -f "$work/untrusted"
 
@@ -251,6 +263,30 @@ mkdir -p "$r/internal/intents"
 printf 'package intents\n\nfunc noRecoveryYet(kind string) bool { return true }\n' >"$r/internal/intents/recover.go"
 case_ pass "format 1: noRecoveryYet doesn't block it"
 rm -r "$r/internal/intents"
+
+# G6: a git grep that fails (exit 128: a damaged object, a missing commit) is an error, never
+# "nothing found": the gate fails closed. The git on PATH fails only the grep for that word,
+# so each check is shown failing closed on its own.
+for word in errBeforeFormat2 noRecoveryYet buildFormat; do
+  pieces 2
+  case $word in
+    noRecoveryYet)
+      mkdir -p "$r/internal/intents"
+      printf 'package intents\n\nfunc noRecoveryYet(string) bool { return true }\n' >"$r/internal/intents/recover.go" ;;
+    errBeforeFormat2) printf 'package main\n\nfunc run() error { return errBeforeFormat2 }\n' >"$r/cmd/postelmd/rebuild_linux.go" ;;
+    buildFormat) printf 'package main\n\nfunc init() { buildFormat = 3 }\n' >"$r/cmd/postelmd/format_init.go" ;;
+  esac
+  printf 'grep\n%s\n' "$word" >"$work/fail-git"
+  case_ fail "format 2 with $word, and git grep failing" "git grep"
+  rm -f "$work/fail-git" "$r/cmd/postelmd/format_init.go"
+  rm -rf "$r/internal/intents"
+done
+# The same for the git ls-tree that looks for migration 0002: failing, it would skip the
+# db rollback blocker on a sh with no pipefail.
+pieces 1
+printf 'ls-tree\nmigrations\n' >"$work/fail-git"
+case_ fail "git ls-tree failing" "git ls-tree"
+rm -f "$work/fail-git"
 
 # buildFormat is assigned only where it is declared: a later assignment in any non-test file
 # under cmd/ (an init, say) would change the format the gate didn't read.

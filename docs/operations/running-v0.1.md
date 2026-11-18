@@ -64,7 +64,7 @@ Nothing important lives anywhere else:
 | `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-<from>-<to>.db` (the database as it was before an upgrade from version `<from>` to `<to>`, such as `pre-migrate-1-2.db`) and `post-migration-started-<from>-<to>` (a record that the upgrade finished): keep both with `app.db` |
 | `.postelmd/rollback-<time>/` | Written by `db rollback` (any data format): the database it replaced, with its `-wal` and `-shm`, and the pre-migration copy it restored from |
 | `.postelmd/damaged-<time>/` | From data format 2: the database files `db rebuild` moved aside (and any `attempt-<n>/` it made); the only copy of the old file IDs |
-| `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept; `<op-id>/` (32 hex digits) holds what the start kept of a save that didn't finish: `temp`, the edit, when the note had changed outside PostelMD meanwhile (a warning in the log names the op ID), or `temp` and `target` for an operation flagged as interference (an error and an `intent.flagged` audit event name it; the note stays as it is until you decide). Copy back what you want to keep. ADR-0033 removes them after 7 days; until the purge job ships, they stay until you remove them |
+| `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept; `<op-id>/` (32 hex digits) holds what the start kept of a save that didn't finish: `temp`, the edit, when the note had changed outside PostelMD meanwhile (a warning in the log names the op ID), or `temp` and `target` for an operation flagged as interference (an error and an `intent.flagged` audit event name it; the note stays as it is until you decide, then `postelmd intents resolve`: see [Flagged intents](#flagged-intents-list-and-resolve)). Copy back what you want to keep. ADR-0033 removes them after 7 days; until the purge job ships, they stay until you remove them |
 | `.postelmd/rebuild.intent` | Only while a `db rebuild` is unfinished: back it up with the rest, and restore it with them, so the restored instance finishes that rebuild |
 
 If you adopted a folder with `-v ~/notes:/data/vaults/notes`, back up `~/notes` too: it
@@ -808,10 +808,70 @@ until the cause is gone: serving with the operation half done could lose an edit
    it is the disk (`ENOSPC`, `EIO`: free space with `df -h "$data"`, check `dmesg`) or a
    permission on `.postelmd/recovery/` or the vault's `.postelmd-tmp/` (they must belong to
    the user PostelMD runs as, mode `0700`). Fix it and restart.
-2. If the cause can't be fixed, a later build adds `postelmd intents resolve <op-id>` to end
-   one intent by hand (#199). Until then, the way out is `postelmd db rebuild`
-   ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)): it starts a new
+2. `postelmd intents list` (with the server stopped, as the block in
+   [Database lost](#database-lost-or-the-vault-marker-doesnt-match) runs it: `set -- intents
+   list`) shows the intent as `open`. `postelmd intents resolve` refuses an open intent: the
+   start's recovery owns it, and ending it by hand could lose the edit it holds. Only a
+   `flagged` one is yours to resolve ([Flagged intents](#flagged-intents-list-and-resolve)).
+   A command to flag it by hand is [#204](https://github.com/joaoheytor/PostelMD/issues/204).
+3. If the error names a file that can't be read (the intent's temp,
+   `<vault>/.postelmd-tmp/<op-id>`, or the note), move that one file out of the vault, to a
+   folder outside the volume, with the server stopped, and start again. Recovery then judges
+   that side as absent, and finishes or undoes the operation as it would after any crash. The
+   file you moved is your copy: check it, and copy it back over the note if it holds the edit
+   you want.
+4. If the cause can't be fixed, the last resort is `postelmd db rebuild`
+   ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)). **It replaces every
+   file ID**: links and history that name a note by its ID stop matching. It starts a new
    database with no intents, and keeps the vault's temps in `.postelmd/recovery/`.
+
+## Flagged intents: list and resolve
+
+Builds with intents only (data format 2). Symptom: the log has an `ERROR` record "an intent
+met a state no PostelMD operation leaves (interference)" and an `intent.flagged` audit event,
+each with an `op_id`. Something other than PostelMD changed a note while PostelMD was
+writing it (another program, a sync tool, a restore over a running server). PostelMD kept
+what was there in `.postelmd/recovery/<op-id>/` (`temp`, PostelMD's edit; `target`, the note
+as the other writer left it), and leaves the note alone: the scan doesn't track its path
+until you decide. It keeps serving everything else.
+
+With the server stopped (the block in
+[Database lost](#database-lost-or-the-vault-marker-doesnt-match), with `set -- intents list`,
+then `set -- intents resolve <op-id>`):
+
+1. `postelmd intents list` prints each intent: op ID, kind (`save`, …), state (`open`: the
+   next start finishes it; `flagged`: yours), time (UTC), and its copies' folder (`-` for
+   none). An op ID that isn't one PostelMD writes prints as `<invalid op ID>`: the database
+   was edited by hand, and resolve can't take it (see
+   [Database lost](#database-lost-or-the-vault-marker-doesnt-match)).
+2. Compare the note in the vault with the copies, and keep what you want: copy `temp` over
+   the note to keep PostelMD's edit, or leave the note as it is. `target` is the note as it
+   was when PostelMD found the interference.
+3. `postelmd intents resolve <op-id>` ends a flagged `save` intent (ADR-0044). It first
+   runs the vault check a start runs, then makes sure `recovery/<op-id>/temp` holds the
+   intent's temp (it copies it if not, as `temp-1` if a different `temp` is there already),
+   then removes the temp, then the intent. It prints an `intent.resolving` audit record before
+   it ends the intent and `intent.resolved` after. The copies stay. The next scan tracks the
+   note's path again, as if you had edited it outside PostelMD. If it is interrupted, run
+   `intents list`: if the intent is still there, run resolve again.
+
+It refuses, changing nothing:
+
+- an `open` intent (see [Start refuses](#start-refuses-intent-recovery)), and an op ID with
+  no intent;
+- a vault the check doesn't accept: no vault marker, a marker naming another vault, or
+  another folder mounted in its place. The error names the fix, as at a start
+  ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)). Without the check,
+  resolve could remove a temp that isn't the intent's, and the next correct start would sweep
+  the real one;
+- any intent but a `save` (`create`, `move`, `delete`, `restore`): "this kind of intent
+  can't be resolved by this build". These began more than a row (a file, a trash entry), and
+  ending them as a save is ended could orphan a trash entry or let the purge delete restored
+  files. The releases that write these kinds add their own resolve and steps here. Until
+  then, leave the intent flagged: it blocks nothing but its paths' tracking.
+
+The web app doesn't show flagged intents yet
+([#199](https://github.com/joaoheytor/PostelMD/issues/199)).
 
 ## Database lost, or the vault marker doesn't match
 

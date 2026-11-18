@@ -110,8 +110,12 @@ test("Delete folder asks again when the open note inside it can't be saved", asy
   const folder = treeFolder(page, "clashing");
   await folder.click();
   await page.getByRole("button", { name: "note.md", exact: true }).click();
+  const text = page.getByRole("textbox", { name: "Text of clashing/note.md" });
+  // The open's read has the old bytes before the outside write: written sooner, the read
+  // could get the new ones, and the edit would save with no conflict.
+  await expect(text).toContainText("# Note");
   writeFileSync(vault("clashing", "note.md"), "# Changed on disk\n");
-  await page.getByRole("textbox", { name: "Text of clashing/note.md" }).pressSequentially("x");
+  await text.pressSequentially("x");
   await expect(page.getByRole("heading", { name: "This note changed in another tab or outside this editor" })).toBeVisible();
 
   await folder.click();
