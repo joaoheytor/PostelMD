@@ -66,6 +66,10 @@ format=$(decl internal/store/layout/format_linux.go FormatVersion)
 isnum "$format" ||
   fail "can't read FormatVersion in internal/store/layout/format_linux.go (one \`const FormatVersion = <n>\`), so the format-2 release blockers can't be checked"
 build=$(decl cmd/postelmd/instance.go buildFormat)
+# Its declaration must be its only assignment outside tests: an init could change it unseen.
+sets=$(git grep -h -E '(^|[^A-Za-z0-9_.])buildFormat[[:space:]]*=([^=]|$)' "$commit" -- 'cmd/*.go' ':!*_test.go' | wc -l)
+[ "$sets" -le 1 ] ||
+  fail "buildFormat is assigned outside its declaration in cmd/postelmd/instance.go (outside tests), so the format the build writes can't be read"
 case $build in
   layout.FormatVersion) ;;
   *) isnum "$build" ||
@@ -95,9 +99,9 @@ if [ "$format" -ge 2 ]; then
   usage=$(at cmd/postelmd/main.go)
   printf '%s\n' "$usage" | grep -Eq '^ +db rebuild +[A-Za-z]' || f2 "has no \`postelmd db rebuild\`"
   printf '%s\n' "$usage" | grep -Eq '^ +vault claim +[A-Za-z]' || f2 "has no \`postelmd vault claim\`"
-  # Part D removes their switch (errBeforeFormat2); while some non-test file still returns it,
-  # the switch must turn them on at this format.
-  if git grep -q 'return errBeforeFormat2' "$commit" -- 'cmd/postelmd/*.go' ':!*_test.go'; then
+  # Part D removes their switch (errBeforeFormat2); while any non-test file still names it,
+  # its definition included, the switch must turn them on at this format.
+  if git grep -q -w errBeforeFormat2 "$commit" -- 'cmd/*.go' ':!*_test.go'; then
     on=$(at cmd/postelmd/rebuild_linux.go |
       sed -n 's/^func identityCommandsReady() bool { return buildFormat >= \([0-9][0-9]*\) }$/\1/p')
     { isnum "$on" && [ "$on" -le "$format" ]; } ||

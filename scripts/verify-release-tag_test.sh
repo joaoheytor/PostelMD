@@ -212,6 +212,35 @@ pieces 2
 printf 'package main\n\nfunc run() error { return rebuild() }\n' >"$r/cmd/postelmd/rebuild_linux.go"
 case_ pass "format 2: a test file mentioning errBeforeFormat2 doesn't count"
 rm "$r/cmd/postelmd/claim_linux_test.go"
+# Any use of the identifier counts, not only `return errBeforeFormat2`: D deletes it, or keeps
+# the switch line the threshold check reads.
+for use in 'return nil, errBeforeFormat2' 'return fmt.Errorf("claim: %w", errBeforeFormat2)' \
+  'var errBeforeFormat2 = errors.New("later")'; do
+  pieces 2
+  printf 'package main\n\nfunc run() error { return rebuild() }\n\nfunc claim() (any, error) {\n\t%s\n}\n' "$use" \
+    >"$r/cmd/postelmd/rebuild_linux.go"
+  case_ fail "format 2 with no switch, and '$use'" "are off"
+done
+pieces 2
+printf 'package main\n\nfunc run() error { return rebuild() }\n\nfunc g() error { return errBeforeFormat2x }\n' \
+  >"$r/cmd/postelmd/rebuild_linux.go"
+case_ pass "format 2: a longer identifier isn't errBeforeFormat2"
+
+# buildFormat is assigned only where it is declared: a later assignment in any non-test file
+# under cmd/ (an init, say) would change the format the gate didn't read.
+pieces 1
+printf 'package main\n\nfunc init() { buildFormat = layout.MaxFormat }\n' >"$r/cmd/postelmd/format_init.go"
+case_ fail "buildFormat assigned again in another file" "buildFormat"
+pieces 1
+printf 'package main\n\nvar buildFormat = layout.FormatVersion\n\nfunc init() {\n\tbuildFormat = 2\n}\n' \
+  >"$r/cmd/postelmd/instance.go"
+rm "$r/cmd/postelmd/format_init.go"
+case_ fail "buildFormat assigned again in instance.go" "buildFormat"
+pieces 1
+printf 'package main\n\nfunc TestX() { buildFormat = 2 }\n' >"$r/cmd/postelmd/format_test.go"
+printf 'package main\n\nfunc f() bool { return buildFormat == 2 || buildFormat >= 3 }\n' >"$r/cmd/postelmd/use.go"
+case_ pass "buildFormat set in a test, or compared, doesn't count"
+rm "$r/cmd/postelmd/format_test.go" "$r/cmd/postelmd/use.go"
 
 # G4: CI must run the target in a job the required check needs.
 for step in "run: make image-multiarch image-smoke-upgrade" "run: make image-smoke-upgrade image-scan"; do

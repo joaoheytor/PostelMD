@@ -163,7 +163,8 @@ If it printed an empty `PREV`, set it to the digest you noted before the upgrade
 `.postelmd`, so it works the same for a host folder and a named volume, and keeps every
 file's owner and mode. It runs only when the container of step 1 no longer exists. It
 refuses, changing nothing, unless the data is at format 2 with no operation open, and this
-user can write the vault marker and `.postelmd`. Then it:
+user can reach and write the vault marker and write `.postelmd` (an adopted notes folder
+that belongs to another user fails here, before anything moves). Then it:
 
 1. moves `app.db` and the files beside it (`-wal`, `-shm`, `-journal`, the `pre-migrate-*`
    copies and `post-migration-started-*` records; ADR-0043) into
@@ -199,6 +200,7 @@ for f in upgrade.intent rebuild.intent migrate.intent rollback.intent; do
     stop "$f is in .postelmd: an operation didn't finish (see the runbook); nothing was changed"
   fi
 done
+[ -x "$2/.postelmd-tmp" ] || stop "user $(id -u) can't open the vault's .postelmd-tmp (is the notes folder another user's?); nothing was changed"
 [ -f "$m" ] && [ ! -L "$m" ] || stop "the vault marker isn't a regular file; nothing was changed"
 [ -w "$m" ] || stop "user $(id -u) can't write the vault marker (is the notes folder another user's?); nothing was changed"
 [ -w "$st" ] && [ -w "$st/format" ] || stop "user $(id -u) can't write .postelmd; nothing was changed"
@@ -229,13 +231,14 @@ done by hand that wrote it in place), look at `.postelmd` before anything else:
   its last step. Write `1` (below), then step 3.
 - Anything else: restore the backup you took before the upgrade.
 
-Set `n` to the number, with `src`, `owner` and `c` from step 2 and the server stopped:
+Set `n` to the number, with `src`, `owner` and `c` from step 2 and the server stopped. The
+block writes it owner-only (mode 600), as the format file is:
 
 ```sh
 n=1
 [ -n "$src" ] && [ -n "$owner" ] && [ -z "$(docker ps -aq --filter "name=^$c\$")" ] \
   && docker run --rm --user "$owner" -v "$src":/data busybox:1.37 \
-    sh -c 'printf "%s\n" "$1" > /data/.postelmd/format.new && sync && mv -f /data/.postelmd/format.new /data/.postelmd/format && sync' sh "$n" \
+    sh -c 'umask 077 && rm -f /data/.postelmd/format.new && printf "%s\n" "$1" > /data/.postelmd/format.new && sync && mv -f /data/.postelmd/format.new /data/.postelmd/format && sync' sh "$n" \
   || echo "FORMAT NOT WRITTEN: src or owner is empty, the container exists, or the write failed" >&2
 ```
 
