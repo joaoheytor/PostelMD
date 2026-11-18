@@ -28,7 +28,7 @@ func KeepIntentCopy(stateDir, opID, name string, open func() (io.ReadCloser, err
 	rec := filepath.Join(stateDir, "recovery")
 	dir := filepath.Join(rec, opID)
 	for _, p := range []string{rec, dir} {
-		if err := mkdirDurable(p); err != nil {
+		if err := mkdirCopies(p); err != nil {
 			return err
 		}
 	}
@@ -81,7 +81,7 @@ func copyInto(rec, dst string, open func() (io.ReadCloser, error)) error {
 	}
 	_, err = io.Copy(f, src)
 	if err == nil {
-		err = f.Sync()
+		err = syncFile(f)
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -94,6 +94,25 @@ func copyInto(rec, dst string, open func() (io.ReadCloser, error)) error {
 		return fmt.Errorf("sql: keep a recovery copy: %w", err)
 	}
 	return syncBoth(tmp, dst)
+}
+
+// mkdirCopies creates a recovery copies' folder (0700) and fsyncs its parent, unless it is a
+// folder already; something else there is refused by its name, never replaced. It is
+// mkdirDurable without db rebuild's interference error, which names that command's runbook.
+func mkdirCopies(path string) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case err == nil && fi.IsDir():
+		return nil
+	case err == nil:
+		return fmt.Errorf("sql: the state directory's %s isn't a folder: move it aside", filepath.Base(path))
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		return fmt.Errorf("sql: create %s: %w", filepath.Base(path), err)
+	}
+	return syncDir(path)
 }
 
 func plainName(s string) bool {

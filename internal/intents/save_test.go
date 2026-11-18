@@ -26,7 +26,7 @@ func TestRecoverASave(t *testing.T) {
 	cases := []struct {
 		name   string
 		target string // "" absent, "/" a folder
-		temp   string // "" absent, "/" a folder, "=" the same inode as the target
+		temp   string // "" absent, "/" a folder, "~" a symlink, "=" the same inode as the target
 		want   outcome
 	}{
 		{"base, no temp", "base", "", drop},
@@ -46,6 +46,8 @@ func TestRecoverASave(t *testing.T) {
 		{"other, the temp the same inode", "other", "=", flag},
 		{"base, the temp the same inode", "base", "=", flag},
 		{"a temp that is a folder", "base", "/", flag},
+		{"a temp that is a symlink", "base", "~", flag},
+		{"a folder, no temp", "/", "", drop},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -65,6 +67,8 @@ func TestRecoverASave(t *testing.T) {
 			case "":
 			case "/":
 				must(t, os.Mkdir(temp, 0o700))
+			case "~":
+				must(t, os.Symlink("../notes/a.md", temp))
 			case "=":
 				must(t, os.Link(target, temp))
 			default:
@@ -105,7 +109,8 @@ func TestRecoverASave(t *testing.T) {
 					t.Fatalf("recovery copies %v; want the complete temp", copies)
 				}
 			case flag:
-				if c.temp != "/" && copies["temp"] == "" || (c.target != "" && c.target != "/" && copies["target"] != c.target) {
+				regular := c.temp != "/" && c.temp != "~"
+				if regular != (copies["temp"] != "") || (c.target != "" && c.target != "/" && copies["target"] != c.target) {
 					t.Fatalf("recovery copies %v; want both sides that are files", copies)
 				}
 			default:

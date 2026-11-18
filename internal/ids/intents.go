@@ -36,19 +36,24 @@ func (s *Scanner) intentPaths(ctx context.Context) (func(string) bool, error) {
 	}, nil
 }
 
-// leaveAlone drops from a pass's rows, holds and paths those an intent names.
+// leaveAlone drops from a pass's rows, holds and paths those an intent names. A row holding a
+// path an intent names goes too, wherever it is: deciding it (a tombstone, say) would
+// release that hold with it.
 func leaveAlone(named func(string) bool, rows []sqlstore.File, holds []sqlstore.Pending, paths []string) (
 	[]sqlstore.File, []sqlstore.Pending, []string) {
-	keptRows := rows[:0:0]
-	for _, r := range rows {
-		if !named(r.Path) {
-			keptRows = append(keptRows, r)
+	keptHolds := holds[:0:0]
+	holding := map[string]bool{}
+	for _, h := range holds {
+		if named(h.Path) {
+			holding[h.FileID] = true
+		} else {
+			keptHolds = append(keptHolds, h)
 		}
 	}
-	keptHolds := holds[:0:0]
-	for _, h := range holds {
-		if !named(h.Path) {
-			keptHolds = append(keptHolds, h)
+	keptRows := rows[:0:0]
+	for _, r := range rows {
+		if !named(r.Path) && !holding[r.ID] {
+			keptRows = append(keptRows, r)
 		}
 	}
 	keptPaths := paths[:0:0]

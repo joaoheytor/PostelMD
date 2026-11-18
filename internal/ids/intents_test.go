@@ -46,16 +46,18 @@ func TestTheScanGivesNoIDUnderAnIntentsPath(t *testing.T) {
 		Mechanism: sqlstore.MechanismNoReplace}, e.clock))
 	e.write("dest/new.md", "new")
 	e.write("other.md", "other")
+	e.write("destination/x.md", "beside the root, not under it")
 	e.pass()
 	e.noRow("dest/new.md")
-	e.row("other.md") // the rest of the vault is scanned as ever
+	e.row("other.md")         // the rest of the vault is scanned as ever
+	e.row("destination/x.md") // a path that only starts with the root's name isn't under it
 	if wait, err := e.s.Seen(ctx, "dest/new.md"); err != nil || wait != 0 {
 		t.Fatalf("Seen under an intent's path = %v, %v", wait, err)
 	}
 	e.noRow("dest/new.md")
 }
 
-// TestTheScanEndsAtTheIntentsEnd: once the intent is gone, the next pass decides as ever.
+// TestTheScanDecidesOnceTheIntentEnds: once the intent is gone, the next pass decides as ever.
 func TestTheScanDecidesOnceTheIntentEnds(t *testing.T) {
 	e := newEnv(t, map[string]string{"a.md": "alpha"})
 	a := e.row("a.md")

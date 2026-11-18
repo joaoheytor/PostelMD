@@ -54,6 +54,12 @@ func TestServeRecoversIntentsBeforeTheSweepAndTheScan(t *testing.T) {
 			t.Fatalf("the logs lack %s:\n%s", want, logs)
 		}
 	}
+	// The order itself: the scan's first pass ran after recovery, so it found opA ended and
+	// a.md's row current. (Run first, it would leave a.md alone under the open intent, and
+	// the end state would be the same: the rule protects a.md, the order is this line's.)
+	if r, s := strings.Index(logs, `"msg":"intent recovery"`), strings.Index(logs, `"msg":"startup scan"`); s < 0 || r > s {
+		t.Fatalf("intent recovery at %d, the startup scan at %d in the logs; want recovery first:\n%s", r, s, logs)
+	}
 	if _, err := os.Stat(filepath.Join(tmp, opB)); err != nil {
 		t.Fatalf("the flagged intent's temp was swept: %v", err)
 	}
@@ -65,5 +71,8 @@ func TestServeRecoversIntentsBeforeTheSweepAndTheScan(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	if in, err := db.Intents(ctx); err != nil || len(in) != 1 || in[0].OpID != opB || !in[0].Flagged {
 		t.Fatalf("intents after the start: %+v, %v; want only the flagged one", in, err)
+	}
+	if a, err := db.FileByPath(ctx, "a.md"); err != nil || a.Suspect || string(a.SHA256) != string(sum[:]) {
+		t.Fatalf("a.md's row %+v, %v; want it current, at the new hash", a, err)
 	}
 }

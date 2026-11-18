@@ -31,6 +31,8 @@ type env struct {
 	v          *vault.Vault
 	db         *sqlstore.DB
 	logs       bytes.Buffer
+	wrap       func(Store) Store // recovery's database, watched; nil for e.db itself
+	base       sqlstore.File     // a.md's row as the intent began, for the crash tests
 }
 
 func newEnv(t *testing.T) *env {
@@ -63,10 +65,18 @@ func (e *env) open() {
 
 func (e *env) recover() Totals {
 	e.t.Helper()
-	log := e.logger()
-	tot, err := Recover(ctx, Recovery{DB: e.db, Vault: e.v, State: e.state, Log: log, Audit: audit.New(log)})
+	tot, err := e.tryRecover()
 	must(e.t, err)
 	return tot
+}
+
+func (e *env) tryRecover() (Totals, error) {
+	log := e.logger()
+	var db Store = e.db
+	if e.wrap != nil {
+		db = e.wrap(e.db)
+	}
+	return Recover(ctx, Recovery{DB: db, Vault: e.v, State: e.state, Log: log, Audit: audit.New(log)})
 }
 
 func (e *env) logger() *slog.Logger { return slog.New(slog.NewJSONHandler(&e.logs, nil)) }

@@ -10,6 +10,7 @@ package intents
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 
@@ -22,11 +23,19 @@ import (
 // Recovery is what Recover works on. The caller holds the instance lock and serves nothing
 // yet (CLAUDE.md rule 12).
 type Recovery struct {
-	DB    *sqlstore.DB
+	DB    Store
 	Vault *vault.Vault
 	State string // the state directory: its recovery/ holds the copies
 	Log   *slog.Logger
 	Audit *audit.Log
+}
+
+// Store is the database recovery works on: a *sqlstore.DB (tests watch its calls).
+type Store interface {
+	Intents(ctx context.Context) ([]sqlstore.Intent, error)
+	Drop(ctx context.Context, opID string) error
+	Flag(ctx context.Context, opID string) error
+	CompleteSave(ctx context.Context, opID string, stat sqlstore.FileStat) error
 }
 
 // Totals counts Recover's actions, for its log record.
@@ -35,7 +44,9 @@ type Totals struct {
 }
 
 // Recover judges every open intent, oldest first, and leaves only the flagged ones. A
-// flagged intent is left as it is: the operator decides (#199).
+// flagged intent is left as it is: the operator decides (#199). An intent it can't end
+// stops it with an error naming that intent's kind and op ID, never a path, and the start
+// refuses (the runbook's "Start refuses: intent recovery").
 func Recover(ctx context.Context, r Recovery) (Totals, error) {
 	var t Totals
 	err := r.Vault.Locked(ctx, func() error {
@@ -48,7 +59,7 @@ func Recover(ctx context.Context, r Recovery) (Totals, error) {
 				continue
 			}
 			if err := r.recoverOne(ctx, i, &t); err != nil {
-				return err
+				return fmt.Errorf("intent recovery: the %s intent %s: %w", i.Kind, i.OpID, err)
 			}
 		}
 		return nil
@@ -57,16 +68,29 @@ func Recover(ctx context.Context, r Recovery) (Totals, error) {
 }
 
 func (r Recovery) recoverOne(ctx context.Context, in sqlstore.Intent, t *Totals) error {
-	if in.Kind != sqlstore.IntentSave {
-		// The other kinds' recovery comes with the operations that write them (ADR-0033);
-		// until then such an intent is one this build can't judge.
+	if noRecoveryYet(in.Kind) {
 		return r.flag(ctx, in, "no recovery for this kind of intent in this build", t, "", true)
+	}
+	if in.Kind != sqlstore.IntentSave {
+		return r.flag(ctx, in, "an unknown kind of intent", t, "", false)
 	}
 	var p sqlstore.SaveIntent
 	if err := in.Decode(&p); err != nil {
 		return r.flag(ctx, in, "the payload doesn't decode", t, "", false)
 	}
 	return r.recoverSave(ctx, in, p, t)
+}
+
+// noRecoveryYet is the one place for the kinds whose recovery hasn't shipped (ADR-0033): their
+// intents are flagged, never guessed at. Each later PR deletes its kind here as its recovery
+// lands, and the last one deletes this function; scripts/verify-release-tag.sh refuses a
+// format-2 release while it exists.
+func noRecoveryYet(kind string) bool {
+	switch kind {
+	case sqlstore.IntentCreate, sqlstore.IntentMove, sqlstore.IntentDelete, sqlstore.IntentRestore:
+		return true
+	}
+	return false
 }
 
 // drop ends the intent as not applied: its temp removed, then the transaction (ADR-0033's
@@ -144,7 +168,7 @@ func (r Recovery) openTemp(opID string) func() (io.ReadCloser, error) {
 
 // Remaining reports whether a temp's name is an intent's op ID: after recovery, the
 // flagged intents' temps, which the sweep spares (ADR-0033).
-func Remaining(ctx context.Context, db *sqlstore.DB) (func(name string) bool, error) {
+func Remaining(ctx context.Context, db Store) (func(name string) bool, error) {
 	in, err := db.Intents(ctx)
 	if err != nil {
 		return nil, err

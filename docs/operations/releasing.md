@@ -50,7 +50,10 @@ or reused.
   - the damaged-database error naming `db rebuild`: `ErrDamaged`'s own declaration in
     `internal/store/sql/conn.go` says `postelmd db rebuild`, and not format 1's manual move
     (`into a new folder`, `nothing is lost`), since every caller shows that text. True on
-    `main` since #196: the check only guards against a regression.
+    `main` since #196: the check only guards against a regression;
+  - intent recovery for every kind of intent (ADR-0033): no non-test file under `internal/`
+    names `noRecoveryYet`, the one function that flags the kinds whose recovery hasn't
+    shipped. The PR that ships the last kind deletes it.
 
   The release notes of that release say, first, to copy the data before upgrading, and link
   the runbook.

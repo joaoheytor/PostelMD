@@ -83,8 +83,9 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 		in.close(log, true)
 		return nil, err
 	}
-	// After the upgrade (which ends with no intent open) and before the scan, which would
-	// otherwise take a rolled-forward save for an outside edit (ADR-0033).
+	// After the upgrade (which ends with no intent open), before the sweep (which must spare
+	// the temps recovery judges) and before the scan: the scan leaves an intent's paths alone,
+	// so with the intents ended first its first pass decides those paths too (ADR-0033).
 	if err := recoverIntents(ctx, db, in.vault, paths.State, log); err != nil {
 		in.close(log, true)
 		return nil, err

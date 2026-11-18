@@ -73,6 +73,27 @@ func TestARollForwardOnAChangedRowIsFlagged(t *testing.T) {
 	}
 }
 
+// TestARecoveryErrorNamesTheIntent: an intent recovery can't end (here, its copy can't be
+// made) stops the start with an error that names the intent's kind and op ID, so the
+// operator can find it, and no path.
+func TestARecoveryErrorNamesTheIntent(t *testing.T) {
+	e := newEnv(t)
+	e.saveIntent()
+	e.write("notes/a.md", "other")
+	e.write(e.temp(), "new")
+	must(t, os.WriteFile(filepath.Join(e.state, "recovery"), nil, 0o600)) // not a folder
+	_, err := e.tryRecover()
+	if err == nil || !strings.Contains(err.Error(), "intent recovery: the save intent "+opA+":") {
+		t.Fatalf("Recover = %v; want an error naming the save intent %s", err, opA)
+	}
+	if strings.Contains(err.Error(), "rebuild") {
+		t.Fatalf("Recover = %v; want no word of db rebuild's own interference", err)
+	}
+	if in, open := e.intent(); !open || in.Flagged {
+		t.Fatalf("intent %+v, %v; want it still open, for the next start", in, open)
+	}
+}
+
 // TestRemainingNamesWhatTheSweepSpares: after recovery, the temps of the intents left (the
 // flagged ones) are spared; nothing else is.
 func TestRemainingNamesWhatTheSweepSpares(t *testing.T) {

@@ -3,11 +3,13 @@
 package intents
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/joaoheytor/PostelMD/internal/store/fs"
 	"github.com/joaoheytor/PostelMD/internal/store/fs/faultfs"
+	sqlstore "github.com/joaoheytor/PostelMD/internal/store/sql"
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
@@ -43,10 +45,47 @@ func TestARollForwardIsDurable(t *testing.T) {
 		t.Fatalf("the save's syncs: %v, want them refused", err)
 	}
 	h.on = false
+	atCommit := "not committed"
+	e.wrap = func(s Store) Store {
+		return completing{s, func() { atCommit = string(disk.AfterPowerLoss()["notes/a.md"]) }}
+	}
 	if tot := e.recover(); tot.RolledForward != 1 {
 		t.Fatalf("totals %+v, want one rolled forward", tot)
 	}
-	if got := string(disk.AfterPowerLoss()["notes/a.md"]); got != "new" {
-		t.Fatalf("after a power loss, a.md holds %q under a row at the new hash", got)
+	// Synced before the completion commits, not only by the time recovery returns.
+	if atCommit != "new" {
+		t.Fatalf("a power loss as the completion committed would leave a.md %q under a row at the new hash", atCommit)
+	}
+}
+
+// completing runs at when a CompleteSave has committed.
+type completing struct {
+	Store
+	at func()
+}
+
+func (c completing) CompleteSave(ctx context.Context, opID string, st sqlstore.FileStat) error {
+	err := c.Store.CompleteSave(ctx, opID, st)
+	if err == nil {
+		c.at()
+	}
+	return err
+}
+
+// TestSameFileNeedsTheDevice: the same inode number on another device is another file.
+func TestSameFileNeedsTheDevice(t *testing.T) {
+	a := vault.Judged{Present: true, Regular: true, Stat: fs.Stat{Device: 1, Inode: 7}}
+	b := a
+	if !sameFile(a, b) {
+		t.Fatal("one device and inode: not the same file")
+	}
+	b.Stat.Device = 2
+	if sameFile(a, b) {
+		t.Fatal("the same inode on another device counted as the same file")
+	}
+	b = a
+	b.Regular = false
+	if sameFile(a, b) {
+		t.Fatal("a side that isn't a regular file counted as the same file")
 	}
 }

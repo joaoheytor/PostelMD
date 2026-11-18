@@ -30,7 +30,7 @@ func (r Recovery) recoverSave(ctx context.Context, in sqlstore.Intent, p sqlstor
 		return err
 	}
 	is := func(j vault.Judged, sum []byte) bool { return j.Regular && bytes.Equal(j.SHA256[:], sum) }
-	sameInode := T.Regular && P.Regular && T.Stat.Device == P.Stat.Device && T.Stat.Inode == P.Stat.Inode
+	sameInode := sameFile(T, P)
 	switch {
 	case P.Present && !P.Regular:
 		return r.flag(ctx, in, "the temp isn't a regular file", t, path, false)
@@ -53,6 +53,11 @@ func (r Recovery) recoverSave(ctx context.Context, in sqlstore.Intent, p sqlstor
 	default:
 		return r.drop(ctx, in.OpID, t) // the 412-type race; the client still has its draft
 	}
+}
+
+// sameFile reports whether two regular files are one: the same device and inode.
+func sameFile(a, b vault.Judged) bool {
+	return a.Regular && b.Regular && a.Stat.Device == b.Stat.Device && a.Stat.Inode == b.Stat.Inode
 }
 
 // forward rolls a save forward: the rename made durable (the target's folder, then the temp

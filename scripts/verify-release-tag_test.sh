@@ -231,6 +231,27 @@ printf 'package main\n\nfunc run() error { return rebuild() }\n\nfunc g() error 
   >"$r/cmd/postelmd/rebuild_linux.go"
 case_ pass "format 2: a longer identifier isn't errBeforeFormat2"
 
+# G5: intent recovery's placeholder for the kinds without recovery yet (noRecoveryYet) blocks a
+# format-2 release while any non-test file names it; a test file or a longer name doesn't.
+mkdir -p "$r/internal/intents"
+pieces 2
+printf 'package intents\n\nfunc noRecoveryYet(kind string) bool { return kind != "save" }\n' >"$r/internal/intents/recover.go"
+case_ fail "format 2 with noRecoveryYet" "intent recovery is unfinished"
+pieces 2
+printf 'package intents\n\nfunc f() bool { return noRecoveryYet("move") }\n' >"$r/internal/intents/recover.go"
+case_ fail "format 2 with a call to noRecoveryYet" "intent recovery is unfinished"
+pieces 2
+printf 'package intents\n\nfunc recoverAll() {}\n' >"$r/internal/intents/recover.go"
+printf 'package intents\n\n// noRecoveryYet is gone\n' >"$r/internal/intents/recover_test.go"
+printf 'package intents\n\nfunc noRecoveryYetx() {}\n' >"$r/internal/intents/other.go"
+case_ pass "format 2: noRecoveryYet gone, named only in a test file or as a longer name"
+rm -r "$r/internal/intents"
+pieces 1
+mkdir -p "$r/internal/intents"
+printf 'package intents\n\nfunc noRecoveryYet(kind string) bool { return true }\n' >"$r/internal/intents/recover.go"
+case_ pass "format 1: noRecoveryYet doesn't block it"
+rm -r "$r/internal/intents"
+
 # buildFormat is assigned only where it is declared: a later assignment in any non-test file
 # under cmd/ (an init, say) would change the format the gate didn't read.
 pieces 1
