@@ -5,7 +5,9 @@ from files inside the project: reads_inside() requires every file operand, file-
 option (grep -f, --file=) and `<` source to be inside the project at its logical and its
 physical path, written literally (no glob, brace, ~ to elsewhere, $ or backslash). grep
 -R and --dereference-recursive (they follow every symlink) are refused, and grep -r with a
-symlinked operand. echo, printf, true and tr read no files. Unknown commands are refused.
+symlinked operand. sort and wc --files0-from (or any abbreviation getopt accepts) are
+refused: they read the files named inside the list. echo, printf, true and tr read no
+files. Unknown commands are refused.
 """
 import os
 import re
@@ -21,7 +23,8 @@ VALUED = {"grep": "efmABCdD", "sed": "el", "sort": "ktST", "uniq": "fsw", "head"
           "tail": "ncs", "cut": "dfcb", "nl": "bdfhilnpsvw", "paste": "d", "wc": "",
           "cat": "", "tee": ""}
 FILE_VALUES = {"grep": "f"}
-FILE_LONG = {"file", "exclude-from", "files0-from"}
+FILE_LONG = {"file", "exclude-from"}
+FILES0 = {"sort", "wc"}  # --files0-from reads the files its list names
 
 
 def operands(words):
@@ -42,7 +45,9 @@ def operands(words):
             key, _, val = a[2:].partition("=")
             if key in ("dereference-recursive",) or (key == "directories" and val == "recurse"):
                 return [], False, False
-            recursive = recursive or ("r" if key == "recursive" else "")
+            if name in FILES0 and key and "files0-from".startswith(key):
+                return [], False, False
+            recursive =recursive or ("r" if key == "recursive" else "")
             pattern_given |= key in ("regexp", "expression", "file")
             files += [val] if key in FILE_LONG and val else []
         elif a.startswith("-") and a != "-":

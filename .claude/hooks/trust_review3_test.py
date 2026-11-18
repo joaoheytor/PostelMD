@@ -61,6 +61,16 @@ class ThirdReview(TrustFixture):
             "head -n 3 {f}/clean.md > notes.md",
         ])
 
+    def test_5_files0_from_reads_the_files_listed_inside(self):
+        self.assert_asks([
+            "sort --files0-from=list.txt > notes.md",
+            "sort --files0-from list.txt > notes.md",
+            "wc --files0-from=list.txt > notes.md",
+            "wc --files0-from list.txt > notes.md",
+            "wc --f list.txt > notes.md",  # getopt takes any unambiguous prefix
+            "sort --fil=list.txt > notes.md",
+        ])
+
     def test_reading_inside_the_project_still_passes(self):
         self.trust()
         self.assert_cases([
