@@ -627,8 +627,10 @@ echo "data=$data notes=$notes port=$port IMAGE=$IMAGE"
 ```
 
 If it stops after `docker rm`, run its `docker run` again by hand with the values it printed.
-**Rollback** is the same sequence with the digest you noted
-(`ghcr.io/joaoheytor/postelmd@sha256:…`) in place of `$IMAGE`, with one exception:
+**Rollback** (within format 1; from format 2 see
+[Rollback to 0.1](upgrading-to-format-2.md#rollback-to-01)) is the same sequence with the
+digest you noted (`ghcr.io/joaoheytor/postelmd@sha256:…`) in place of `$IMAGE`, with one
+exception:
 
 **Rollback to an earlier `:main`, from a `:main` with the file-identity tables** (see above;
 rollback to rc.1 is the plain sequence). This is for a migration that finished; after one
@@ -789,10 +791,10 @@ was full or reported an I/O error, or the database is damaged. Only a restart en
 
 ## Database lost, or the vault marker doesn't match
 
-From data format 2 only (the release that assigns file IDs; ADR-0040). Builds before it
-have both commands but refuse them with `this command arrives with data format 2`, changing
-nothing; at format 1, a damaged database is the manual move in
-[Upgrade and rollback](#upgrade-and-rollback). Both run with the server stopped, with the
+From data format 2 only (the release that assigns file IDs, and `:main` since the commit
+that raised the format; ADR-0040). Earlier `:main` builds have both commands but refuse them
+with `this command arrives with data format 2`, changing nothing; on those, at format 1, a
+damaged database is the manual move in [Upgrade and rollback](#upgrade-and-rollback). Both run with the server stopped, with the
 same image, volumes and user as the server.
 
 **First, free disk space** (see [Disk full](#disk-full-or-permission-errors)): `db rebuild`

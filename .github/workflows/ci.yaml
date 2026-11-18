@@ -195,9 +195,10 @@ jobs:
 
   image:
     # Builds every release platform (not pushed), then the `docker run` smoke test of
-    # ADR-0009 and the Trivy gate of ADR-0015 on this runner's platform.
+    # ADR-0009, the upgrade from 0.1 and its rollback (ADR-0030, ADR-0043; the release gate
+    # needs it here), and the Trivy gate of ADR-0015 on this runner's platform.
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -220,13 +221,15 @@ jobs:
           driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
       - run: make image-multiarch
       - run: make image-smoke
+      - run: make image-smoke-upgrade
       - run: make image-scan
 
   image-arm64:
-    # The `image` job only builds arm64; this one runs it: the same smoke test and Trivy gate
-    # on GitHub's hosted arm64 runner (roadmap v0.1: "runs on amd64 and arm64").
+    # The `image` job only builds arm64; this one runs it: the same smoke tests (the upgrade
+    # from 0.1 included) and Trivy gate on GitHub's hosted arm64 runner (roadmap v0.1: "runs
+    # on amd64 and arm64").
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -253,6 +256,7 @@ jobs:
           arch=$(docker image inspect -f '{{.Architecture}}' postelmd:dev)
           [ "$arch" = arm64 ] || { echo "::error::postelmd:dev is $arch, not arm64"; exit 1; }
       - run: make image-smoke
+      - run: make image-smoke-upgrade
       - run: make image-scan
 
   e2e:

@@ -7,10 +7,11 @@ image you run, and `$data`, `$notes` and `$vault` from
 [Where your data is](running-v0.1.md#where-your-data-is). The blocks have no trailing
 comments, and run the same in `sh`, `bash` and `zsh`.
 
-**Until that release, nothing here applies.** A build that writes format 1 (0.1.x, and
-`:main` until format 2 lands) leaves `.postelmd/format` at `1`, and refuses `db rebuild`
-and `vault claim` with `this command arrives with data format 2`, changing nothing. To check
-what the running build writes, start it and read `"$data"/.postelmd/format`: `1` or `2`.
+**Which builds this applies to:** `:main` from the commit that raised the format, and every
+release after 0.1.x, write format 2; 0.1.x writes format 1 and refuses data at format 2. To
+check what your data is at, read `"$data"/.postelmd/format`: `1` or `2` (no file is 0.1's
+data, before its first start of a format-2 build). CI runs this runbook's rollback blocks,
+as written, on every change (`make image-smoke-upgrade`).
 
 ## Before you upgrade
 

@@ -103,11 +103,10 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   is written to the database again, `/readyz` stays `200` with the body `read-only`, and the
   log has one error record with `"event":"read_only"`. `docker ps` still shows the container
   healthy. Keep the tab open, fix the disk, then restart (the runbook's "Read-only after a
-  storage error"). Until data format 2 assigns file IDs, nothing writes the database at run
-  time.
+  storage error").
 - `postelmd db rebuild` and `postelmd vault claim`, offline commands for a lost or damaged
-  database and for a vault marker that doesn't name the database's vault. They arrive with
-  data format 2: until then they refuse and change nothing. `db rebuild` never deletes: the
+  database and for a vault marker that doesn't name the database's vault, at data format 2
+  (see the **Breaking** entry under Changed). `db rebuild` never deletes: the
   old database goes to `.postelmd/damaged-<time>/`, unfinished saves' temp files to
   `.postelmd/recovery/rebuild-<time>/`, and a rebuild interrupted by a crash is finished by
   running it again (a start refuses until then). `vault claim` shows how many file IDs match
@@ -127,9 +126,33 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   an absolute path. An empty `--data` is refused, and every configuration error (an empty
   `--data`, a setting that isn't a boolean, an unreadable `config.yaml`) now says what is
   wrong instead of exiting silently.
-- A damaged database stops the start, changing nothing, and says how to fix it: with the
-  server stopped, move `app.db`, `app.db-wal` and `app.db-shm` together into a new folder
-  such as `.postelmd/damaged-<date>/` (never delete them).
+- **Breaking:** this version writes **data format 2**: every file in the vault gets a file
+  ID, kept across renames, moves and edits made outside PostelMD, in `.postelmd/app.db`.
+  0.1 can't open format-2 data: it refuses with `this data was written by a newer PostelMD
+  (format 2)`. What changes for an operator:
+  - **Back up first**, with the server stopped, and note the digest of the image you run:
+    [Upgrading to data format 2](docs/operations/upgrading-to-format-2.md) has the steps.
+  - **The first start runs the first upgrade**: it copies `.postelmd`'s files into
+    `.postelmd/pre-format-2/`, gives every file an ID (one log record, `first upgrade`,
+    with the count and the time it took), writes the vault UUID into the vault marker
+    (`.postelmd-tmp/.created-by-postelmd`) and writes `2` into `.postelmd/format`. A crash
+    or stop part way is finished by the next start (`.postelmd/upgrade.intent`). Each later
+    start checks that the mounted vault is the one the database describes, and scans it for
+    changes made outside PostelMD before it is ready.
+  - Opening a note whose bytes match a note just removed outside PostelMD can wait up to
+    10 s while the server decides whether it was moved (it answers 503 with `Retry-After`);
+    the web app waits, up to 20 s, instead of showing "the server is busy".
+  - **A start refuses, changing nothing,** when the vault marker names another vault or the
+    database is lost or damaged; each refusal names its fix (`db rebuild` or `vault claim`).
+  - **Offline commands run as the data's owner**: `db rebuild`, `vault claim`,
+    `reset-password`, `db rollback` refuse another user's `.postelmd`. In Docker, run them
+    in a container of the same image, with the server's volumes and `--user`.
+  - **Going back to 0.1** is the runbook's [Rollback to 0.1](docs/operations/upgrading-to-format-2.md#rollback-to-01),
+    not an image swap: it moves the database aside, empties the vault marker and writes
+    format 1. Notes, the trash, the git history and the credentials are kept; the file IDs
+    are not. CI runs those steps, as written, on every change (`make image-smoke-upgrade`).
+  - A damaged database is fixed with `postelmd db rebuild`, which the refusal names; moving
+    the files aside by hand would lose the file IDs.
 - The first start of this version adds the file-identity tables to `.postelmd/app.db`
   (database version 2), empty until file IDs arrive with data format 2. It copies the
   database to `.postelmd/pre-migrate-1-2.db` first. An earlier `:main` build refuses the

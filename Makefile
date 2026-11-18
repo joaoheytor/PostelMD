@@ -24,12 +24,12 @@ REPO        ?=
 DIGEST_FILE ?= bin/image-digest
 GATE_DIR    ?= bin/candidate
 
-.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-scan image-push image-gate print-trivy-image test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
+.PHONY: help ci perf build web-build image-bins image image-multiarch image-smoke image-smoke-upgrade image-scan image-push image-gate print-trivy-image test test-go test-web test-scripts e2e fuzz lint lint-go lint-web lint-repo vuln web-deps clean
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-ci: lint test vuln build e2e image-multiarch image-smoke image-scan ## Everything the CI `required` check runs (needs Docker)
+ci: lint test vuln build e2e image-multiarch image-smoke image-smoke-upgrade image-scan ## Everything the CI `required` check runs (needs Docker)
 
 build: web-build ## Build the postelmd binary, with the web app embedded, into bin/
 	CGO_ENABLED=0 go build -trimpath -tags webui -ldflags "$(LDFLAGS)" -o bin/postelmd ./cmd/postelmd
@@ -54,6 +54,9 @@ image-multiarch: image-bins ## Build the image for every release platform (not l
 image-smoke: image ## `docker run` smoke test of $(IMAGE) (ADR-0009), and adopting a notes folder
 	scripts/image-smoke.sh $(IMAGE)
 	scripts/image-smoke-adopt.sh $(IMAGE)
+
+image-smoke-upgrade: image ## 0.1 data upgraded by $(IMAGE), the runbook's rollback, db rebuild and vault claim
+	scripts/image-smoke-upgrade.sh $(IMAGE)
 
 image-scan: image ## Trivy gate of ADR-0015 on $(IMAGE): no critical, no high with a fix
 	TRIVY_IMAGE=$(TRIVY_IMAGE) scripts/image-scan.sh $(IMAGE)

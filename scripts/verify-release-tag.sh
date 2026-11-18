@@ -107,9 +107,12 @@ if [ "$format" -ge 2 ]; then
     { isnum "$on" && [ "$on" -le "$format" ]; } ||
       f2 "db rebuild and vault claim are off (errBeforeFormat2, identityCommandsReady in cmd/postelmd/rebuild_linux.go)"
   fi
-  damaged="ErrDamaged doesn't name db rebuild (errRebuildFix in internal/store/sql/conn.go, NameRebuild in cmd/postelmd/appdb_linux.go)"
-  at internal/store/sql/conn.go | grep -q 'postelmd db rebuild' || f2 "$damaged"
-  at cmd/postelmd/appdb_linux.go | grep -q 'NameRebuild(' || f2 "$damaged"
+  # ErrDamaged's own text (its declaration, to the line that closes it) is what every caller
+  # shows: it names db rebuild, never format 1's manual move, which would lose the file IDs.
+  errdamaged=$(at internal/store/sql/conn.go | awk '/^var ErrDamaged = / { s = 1 } s { print } s && /\)$/ { exit }')
+  damaged="ErrDamaged in internal/store/sql/conn.go doesn't name postelmd db rebuild, or still gives format 1's fix"
+  printf '%s\n' "$errdamaged" | tr -d '"+\t\n' | grep -q 'postelmd db rebuild' || f2 "$damaged"
+  ! printf '%s\n' "$errdamaged" | grep -Eq 'into a new folder|nothing is lost' || f2 "$damaged"
 fi
 
 echo "verify-release-tag: $tag OK ($(printf '%s\n' "$out" | grep '^Good' | head -n 1))"

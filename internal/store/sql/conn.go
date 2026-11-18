@@ -45,43 +45,12 @@ const (
 
 // ErrDamaged: the file isn't a database, or quick_check found a problem. Startup refuses and
 // changes nothing. Only those causes give it: a canceled context, a busy lock, an I/O or
-// permission error are plain errors. Until `postelmd db rebuild` arrives with data format 2,
-// the fix is to move the files aside: at format 1 the database holds only the boot UUID, and
-// the next start creates a new one (ADR-0034).
-var ErrDamaged = errors.New("sql: the database is damaged or isn't a database. With the server " +
-	"stopped, move app.db, app.db-wal and app.db-shm together into a new folder such as " +
-	".postelmd/damaged-<date>/, and never delete them; then start again. At this data format " +
-	"the database holds only the boot UUID, so nothing is lost (ADR-0030, ADR-0034)")
-
-// errRebuildFix is ErrDamaged's fix from data format 2, once postelmd db rebuild ships
-// (ADR-0030, ADR-0034): the database holds file IDs, so moving it aside by hand would lose
-// them without the rebuild's record.
-const errRebuildFix = "sql: the database is damaged or isn't a database. With the server stopped, run " +
+// permission error are plain errors. Its fix is postelmd db rebuild (ADR-0030, ADR-0034,
+// ADR-0040): the database holds file IDs, so moving it aside by hand would lose them without
+// the rebuild's record. The release gate checks this text names db rebuild.
+var ErrDamaged = errors.New("sql: the database is damaged or isn't a database. With the server stopped, run " +
 	"postelmd db rebuild: it moves app.db, app.db-wal and app.db-shm into .postelmd/damaged-<time>/, never " +
-	"deleting them, and makes a new database with new file IDs (ADR-0030, ADR-0034, ADR-0040)"
-
-// damagedRebuild is a damaged-database error whose text names db rebuild.
-type damagedRebuild struct{ err error }
-
-func (d damagedRebuild) Error() string {
-	var se *sqlite.Error
-	if errors.As(d.err, &se) {
-		return errRebuildFix + "\n" + se.Error()
-	}
-	return errRebuildFix
-}
-
-func (d damagedRebuild) Unwrap() error { return d.err }
-
-// NameRebuild is err with ErrDamaged's text replaced by the fix of a build that writes data
-// format 2 (postelmd db rebuild); errors.Is still finds ErrDamaged. Any other error is
-// returned as it is.
-func NameRebuild(err error) error {
-	if !errors.Is(err, ErrDamaged) {
-		return err
-	}
-	return damagedRebuild{err}
-}
+	"deleting them, and makes a new database with new file IDs (ADR-0030, ADR-0034, ADR-0040)")
 
 // damaged wraps err with ErrDamaged when SQLite says the file is corrupt or not a database.
 func damaged(err error) error {

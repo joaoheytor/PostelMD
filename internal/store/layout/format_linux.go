@@ -13,8 +13,9 @@ import (
 )
 
 // FormatVersion is the format of the data this build writes in /data (ADR-0025). It goes up
-// only when a later build changes what it stores in a way this one can't read.
-const FormatVersion = 1
+// only when a later build changes what it stores in a way this one can't read. Format 2 is
+// file IDs (ADR-0030); 0.1 writes 1 and can't open 2.
+const FormatVersion = 2
 
 // Files in the state directory.
 const (
@@ -30,19 +31,16 @@ var (
 )
 
 // CheckFormat checks the data format in the state directory for a build that writes data
-// format build (FormatVersion; cmd/postelmd's tests inject 2), under the instance lock, before
-// the app state is read and before the vault is opened or swept (ADR-0025), and returns the
-// format the data is at:
-//   - missing: a new or a pre-format data directory. At build 1 it writes 1. From build 2 it
-//     is format 1 and nothing is written: ADR-0030's format table runs the first upgrade,
-//     whose last step writes the format (ADR-0041's follow-up, ADR-0042);
+// format build (FormatVersion), under the instance lock, before the app state is read and
+// before the vault is opened or swept (ADR-0025), and returns the format the data is at:
+//   - missing: a new or a pre-format data directory. It is format 1 and nothing is written:
+//     ADR-0030's format table runs the first upgrade, whose last step writes the format
+//     (ADR-0041's follow-up, ADR-0042);
 //   - at most build: nothing to do;
 //   - newer: refused, so an older binary never touches data it doesn't understand;
 //   - anything else: refused as damaged.
 //
-// The write is a synced temp file, one rename and the directory's fsync: one step that
-// carries meaning, so a crash leaves no format file (the next start writes it) or a whole
-// one, and no intent is needed (CLAUDE.md rule 14).
+// It never writes: SetFormat does, at the end of the first upgrade and of db rebuild.
 func CheckFormat(state string, build int, opts ...fs.Option) (int, error) {
 	r, err := fs.OpenRoot(state, opts...)
 	if err != nil {
@@ -56,21 +54,16 @@ func CheckFormat(state string, build int, opts ...fs.Option) (int, error) {
 	case !errors.Is(err, iofs.ErrNotExist):
 		return 0, fmt.Errorf("layout: read %s/%s: %w", state, formatFile, err)
 	}
-	if build >= 2 {
-		return 1, nil
-	}
-	return 1, writeFormat(r, state, build)
+	return 1, nil
 }
 
-// MaxFormat is the newest data format this code can write: format 2's file IDs (ADR-0030).
-// FormatVersion is the one this build writes; part D of the IDs slice makes them equal.
-const MaxFormat = 2
-
 // SetFormat writes n into the format file, replacing what is there: the last step of the
-// first upgrade and of db rebuild (ADR-0030). Like CheckFormat's write, it is one rename,
-// so a crash leaves the old format or n. The caller holds the instance lock.
+// first upgrade and of db rebuild (ADR-0030). The write is a synced temp file, one rename
+// and the directory's fsync: one step that carries meaning, so a crash leaves the old format
+// or n, never a torn one, and no intent is needed (CLAUDE.md rule 14). The caller holds the
+// instance lock.
 func SetFormat(state string, n int, opts ...fs.Option) error {
-	if n < 1 || n > MaxFormat {
+	if n < 1 || n > FormatVersion {
 		return fmt.Errorf("layout: data format %d isn't one this build writes", n)
 	}
 	r, err := fs.OpenRoot(state, opts...)

@@ -49,7 +49,6 @@ func tree(t *testing.T, dir string) string {
 // it with the stored UUID, warns, and starts.
 func TestServeAtFormat2RewritesAnEmptyMarker(t *testing.T) {
 	data := v01Data(t, false)
-	atFormat2(t)
 	start(t, data).shutdown(t)
 	must(t, os.WriteFile(markerOf(data), nil, 0o600))
 	r := start(t, data)
@@ -109,7 +108,6 @@ func TestServeAtFormat2RefusesAFormat1StartBeforeTheVaultOpens(t *testing.T) {
 			c.setup(t, data)
 			// A save in flight when the last server stopped: the sweep would remove it.
 			must(t, os.WriteFile(filepath.Join(vaultOf(data), vault.TmpDir, "inflight.tmp"), []byte("draft"), 0o600))
-			atFormat2(t)
 			before := tree(t, vaultOf(data))
 			err := refusedStart(t, data)
 			if !errors.Is(err, c.want) {

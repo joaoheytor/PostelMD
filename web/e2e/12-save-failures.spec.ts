@@ -130,7 +130,10 @@ const stalls = [
 
 for (const { name, landed, more, what } of stalls) {
   test(`a save that never answers says it is retrying, then saves (${what})`, async ({ page }) => {
-    writeFileSync(vault(name), "# Stuck\n");
+    // Its own bytes: a note the previous test removed with the same bytes would make this one
+    // a rename to wait out (ADR-0031's rule 2; 16-rename-hold.spec.ts).
+    const start = `# Stuck ${name}\n`;
+    writeFileSync(vault(name), start);
     let stall: Awaited<ReturnType<typeof stallFirstSave>> | undefined;
     try {
       const shortened = await shortSaveTimeout(page);
@@ -142,8 +145,8 @@ for (const { name, landed, more, what } of stalls) {
       await expect(status).toHaveText("Saving…");
       if (more) await page.keyboard.type(more);
       await expect(status).toHaveText("Saving is taking too long; retrying", { timeout: 10_000 });
-      if (!landed) expect(readFileSync(vault(name), "utf8")).toBe("# Stuck\n");
-      await expect.poll(() => readFileSync(vault(name), "utf8")).toBe(`# Stuck\nscale the deployment${more}`);
+      if (!landed) expect(readFileSync(vault(name), "utf8")).toBe(start);
+      await expect.poll(() => readFileSync(vault(name), "utf8")).toBe(`${start}scale the deployment${more}`);
       await expect(status).toHaveText("Saved");
       expect(stall.saves()).toBe(more ? 3 : 2);
       // Every save the server saw ran under the shortened timer, not the production one.

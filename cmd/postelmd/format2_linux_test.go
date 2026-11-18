@@ -19,28 +19,26 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
-// atFormat2 makes this binary a build that writes data format 2 for one test: the format
-// table, the first upgrade at start, the identity commands and the owner check run as they
-// will once FormatVersion is 2 (part D of the IDs slice).
-func atFormat2(t *testing.T) {
-	t.Helper()
-	old := buildFormat
-	buildFormat = 2
-	t.Cleanup(func() { buildFormat = old })
-}
-
-// v01Data is a data directory as a format-1 build leaves it: set up, with a.md and an empty
-// marker, the format file written (or, with noFormat, removed: v0.1.0 data), app.db with no
-// file IDs.
+// v01Data is a data directory as 0.1 (v0.1.0-rc.1, the published one) leaves it: set up
+// (auth.json, secret.key), with a.md and an empty marker, format 1 (or, with noFormat, no
+// format file), and no app.db. This build writes format 2, so it starts one, then takes the
+// data back to 0.1's as the runbook's rollback does (ADR-0030, ADR-0043): the database and
+// pre-format-2/ go, the marker is emptied, the format is 1.
 func v01Data(t *testing.T, noFormat bool) string {
 	t.Helper()
 	data := t.TempDir()
 	r := start(t, data)
 	setUp(t, r)
 	r.shutdown(t)
+	state := filepath.Join(data, ".postelmd")
+	for _, n := range []string{"app.db", "app.db-wal", "app.db-shm", layout.PreFormat2} {
+		must(t, os.RemoveAll(filepath.Join(state, n)))
+	}
+	must(t, os.WriteFile(markerOf(data), nil, 0o600))
+	must(t, os.WriteFile(filepath.Join(state, "format"), []byte("1\n"), 0o600))
 	must(t, os.WriteFile(filepath.Join(vaultOf(data), "a.md"), []byte("A"), 0o600))
 	if noFormat {
-		must(t, os.Remove(filepath.Join(data, ".postelmd", "format")))
+		must(t, os.Remove(filepath.Join(state, "format")))
 	}
 	return data
 }
@@ -86,7 +84,6 @@ func TestServeAtFormat2RunsTheFirstUpgrade(t *testing.T) {
 	for _, noFormat := range []bool{false, true} {
 		t.Run(map[bool]string{false: "format 1", true: "no format file"}[noFormat], func(t *testing.T) {
 			data := v01Data(t, noFormat)
-			atFormat2(t)
 			r := start(t, data)
 			logs := r.out.String()
 			r.shutdown(t)
@@ -126,7 +123,6 @@ func TestServeAtFormat2ResumesAnUpgrade(t *testing.T) {
 		t.Run(strings.TrimSpace(format), func(t *testing.T) {
 			data := v01Data(t, false)
 			state := filepath.Join(data, ".postelmd")
-			atFormat2(t)
 			_, err := sqlstore.BeginUpgrade(state, time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC))
 			must(t, err)
 			must(t, os.WriteFile(filepath.Join(state, "format"), []byte(format), 0o600))
@@ -153,7 +149,6 @@ func TestServeAtFormat2RefusesByTheFormatTable(t *testing.T) {
 	upgraded := func(t *testing.T) string {
 		t.Helper()
 		data := v01Data(t, false)
-		atFormat2(t)
 		start(t, data).shutdown(t)
 		return data
 	}
@@ -168,7 +163,6 @@ func TestServeAtFormat2RefusesByTheFormatTable(t *testing.T) {
 		{"format 1, a marker naming a vault", func(t *testing.T) string {
 			data := v01Data(t, false)
 			must(t, vault.WriteMarker(vaultOf(data), other, 2))
-			atFormat2(t)
 			return data
 		}, ids.ErrStateNotHere, "postelmd db rebuild", false},
 		{"format 2, another vault's marker", func(t *testing.T) string {
@@ -227,7 +221,6 @@ func TestServeAtFormat2RefusesByTheFormatTable(t *testing.T) {
 // (ADR-0040): a first pass that fails (an unreadable folder) is logged, and serving goes on.
 func TestServeAtFormat2KeepsServingWhenTheFirstPassFails(t *testing.T) {
 	data := v01Data(t, false)
-	atFormat2(t)
 	start(t, data).shutdown(t)
 	locked := filepath.Join(vaultOf(data), "locked")
 	must(t, os.Mkdir(locked, 0o700))
@@ -246,14 +239,12 @@ func TestServeAtFormat2KeepsServingWhenTheFirstPassFails(t *testing.T) {
 
 // TestStartIDsRefusesAMismatchAtFormat2 is ADR-0036's decision 6 at format 2 (ADR-0040): the
 // format table has run, so a marker that doesn't name the database's vault is an error, not
-// a skipped scan with a warning (that stays for format 1: TestStartIDsSkipsAVaultItCantName).
+// a skipped scan with a warning (also for a marker it can't read: TestStartIDsRefusesAVaultItCantName).
 func TestStartIDsRefusesAMismatchAtFormat2(t *testing.T) {
 	ctx := context.Background()
-	data := t.TempDir()
-	start(t, data).shutdown(t)
+	data := v01Data(t, false)
 	dir := vaultOf(data)
 	assignIDs(t, data, scanVaultUUID, "00000000-0000-4000-8000-000000000000")
-	atFormat2(t)
 	v, err := vault.Open(dir)
 	must(t, err)
 	defer func() { _ = v.Close() }()

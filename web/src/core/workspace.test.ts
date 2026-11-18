@@ -157,6 +157,44 @@ describe("Workspace.open", () => {
     expect(ws.state.value.open?.doc.path).toBe("b.md");
     expect(ws.state.value.error).toBeUndefined();
   });
+
+  // A read may wait out the server's 503s for seconds (api.readNote): a newer open, a close
+  // or a logout (which closes) stops it, so no superseded read keeps polling.
+  it("aborts the read of an open that a newer open or a close supersedes", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const pending = (_path: string, signal?: AbortSignal) =>
+      new Promise<api.Note>((_, reject) => {
+        signals.push(signal);
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
+      });
+    vi.mocked(api.readNote).mockImplementationOnce(pending).mockImplementationOnce(pending);
+    const ws = new Workspace();
+    const a = ws.open("a.md");
+    const b = ws.open("b.md");
+    expect(signals.map((s) => s?.aborted)).toEqual([true, false]);
+    ws.close();
+    expect(signals.map((s) => s?.aborted)).toEqual([true, true]);
+    await Promise.all([a, b]);
+    expect(ws.state.value).toEqual({}); // superseded: no error shown, nothing open
+  });
+
+  it("aborts a pending read when the open, clean note is opened again (no reload)", async () => {
+    const ws = new Workspace();
+    await ws.open("a.md");
+    let signal: AbortSignal | undefined;
+    vi.mocked(api.readNote).mockImplementationOnce(
+      (_path, s) =>
+        new Promise<api.Note>((_, reject) => {
+          signal = s;
+          s?.addEventListener("abort", () => reject(s.reason as Error));
+        }),
+    );
+    const b = ws.open("b.md");
+    await ws.open("a.md"); // a.md is still the open note, clean: kept as it is
+    expect(signal?.aborted).toBe(true);
+    await b;
+    expect(ws.state.value.open?.doc.path).toBe("a.md");
+  });
 });
 
 describe("Workspace.createNote", () => {

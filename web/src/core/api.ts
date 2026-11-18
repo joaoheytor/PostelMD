@@ -3,6 +3,7 @@
  * the hook that tells the app when the session has expired.
  */
 import { modeOf } from "./filetype";
+import { readWaiting } from "./read-wait";
 import { decodeText, NotTextError, TooLargeError } from "./textfile";
 
 export class ApiError extends Error {
@@ -42,6 +43,7 @@ export async function request(method: string, url: string, init: RequestInit = {
   try {
     resp = await fetch(url, { ...init, method, credentials: "same-origin", cache: "no-store" });
   } catch {
+    if (init.signal?.aborted) throw init.signal.reason as Error; // the caller stopped it
     throw new NetworkError();
   }
   if (resp.status === 401 && !url.startsWith("/api/v1/session")) onUnauthorized();
@@ -151,10 +153,12 @@ export interface Note {
 
 /**
  * A file's text, exactly as its bytes say (a byte order mark included). Throws NotTextError
- * for a file the editor can't open: binary, not UTF-8, too large (textfile.ts).
+ * for a file the editor can't open: binary, not UTF-8, too large (textfile.ts). It waits out
+ * the server's 503s with Retry-After (read-wait.ts) until signal aborts.
  */
-export async function readNote(path: string): Promise<Note> {
-  const got = await request("GET", `/api/v1/notes/${encodePath(path)}`);
+export async function readNote(path: string, signal?: AbortSignal): Promise<Note> {
+  const url = `/api/v1/notes/${encodePath(path)}`;
+  const got = await readWaiting(() => request("GET", url, { signal: signal ?? null }), signal);
   if (got.status === 413) throw new TooLargeError(); // over the server's read limit
   const resp = await ok(got);
   // Never resp.text(): it drops a byte order mark and replaces bytes that aren't UTF-8.

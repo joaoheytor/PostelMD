@@ -31,7 +31,6 @@ func asAnotherUser(t *testing.T) {
 func TestOfflineCommandsRefuseAnotherUser(t *testing.T) {
 	data := v01Data(t, false)
 	state := filepath.Join(data, ".postelmd")
-	atFormat2(t)
 	asAnotherUser(t)
 	cfg := config.Config{DataDir: data, Yes: true}
 	// An empty stdin: a command that got past the check would read EOF, never block.
@@ -58,7 +57,6 @@ func TestOfflineCommandsRefuseAnotherUser(t *testing.T) {
 // check is on the data directory, before the layout creates its folders, so a command run as
 // another user (root without --user) creates nothing that the server couldn't open.
 func TestOfflineCommandsRefuseAnotherUserBeforeCreatingAnything(t *testing.T) {
-	atFormat2(t)
 	asAnotherUser(t)
 	stdin, err := os.Open(os.DevNull)
 	must(t, err)
@@ -79,20 +77,9 @@ func TestOfflineCommandsRefuseAnotherUserBeforeCreatingAnything(t *testing.T) {
 	}
 }
 
-// TestTheOwnerCheckIsInertAtFormat1: a format-1 build runs db rollback as any user, as it
-// always has.
-func TestTheOwnerCheckIsInertAtFormat1(t *testing.T) {
-	data := t.TempDir()
-	start(t, data).shutdown(t)
-	asAnotherUser(t)
-	if err := dbRollback(config.Config{DataDir: data}, &syncBuffer{}); !errors.Is(err, sqlstore.ErrRollbackRefused) {
-		t.Fatalf("db rollback at format 1 = %v, want its own refusal", err)
-	}
-}
-
-// TestServeDamagedDatabaseNamesDBRebuildAtFormat2: a format-2 build names postelmd db
-// rebuild for a damaged app.db (ADR-0034), on data at format 1 or 2, a command this build
-// has; the files are unchanged.
+// TestServeDamagedDatabaseNamesDBRebuildAtFormat2: serve names postelmd db rebuild for a
+// damaged app.db (ADR-0034), on data at format 1 or 2, and every `postelmd <command>` the
+// refusal names is one this build has; the files are unchanged.
 func TestServeDamagedDatabaseNamesDBRebuildAtFormat2(t *testing.T) {
 	for _, format := range []string{"1\n", "2\n"} {
 		t.Run(strings.TrimSpace(format), func(t *testing.T) {
@@ -102,7 +89,6 @@ func TestServeDamagedDatabaseNamesDBRebuildAtFormat2(t *testing.T) {
 			junk := bytes.Repeat([]byte("not a database "), 512)
 			must(t, os.WriteFile(filepath.Join(state, "app.db"), junk, 0o600))
 			must(t, os.WriteFile(filepath.Join(state, "format"), []byte(format), 0o600))
-			atFormat2(t)
 			err := refusedStart(t, data)
 			if !errors.Is(err, sqlstore.ErrDamaged) || !strings.Contains(err.Error(), "postelmd db rebuild") {
 				t.Fatalf("serve on a damaged app.db = %v, want ErrDamaged naming db rebuild", err)
@@ -119,5 +105,27 @@ func TestServeDamagedDatabaseNamesDBRebuildAtFormat2(t *testing.T) {
 				t.Fatalf("the damaged file was changed: %v", rerr)
 			}
 		})
+	}
+}
+
+// TestVaultClaimOnADamagedDatabaseNamesDBRebuild: vault claim, too, names db rebuild for a
+// damaged app.db, not format 1's move-aside fix, which would lose the file IDs.
+func TestVaultClaimOnADamagedDatabaseNamesDBRebuild(t *testing.T) {
+	data := rebuiltData(t)
+	junk := bytes.Repeat([]byte("not a database "), 512)
+	must(t, os.WriteFile(filepath.Join(data, ".postelmd", "app.db"), junk, 0o600))
+	for _, n := range []string{"app.db-wal", "app.db-shm"} {
+		must(t, os.RemoveAll(filepath.Join(data, ".postelmd", n)))
+	}
+	must(t, os.WriteFile(markerOf(data), nil, 0o600)) // what a claim would write
+	stderr := runAndCheck(t, []string{"vault", "claim", "--yes", "--data", data}, 1, "", "postelmd db rebuild")
+	if strings.Contains(stderr, "into a new folder") {
+		t.Fatalf("vault claim gives format 1's manual fix: %s", stderr)
+	}
+	if b, err := os.ReadFile(filepath.Join(data, ".postelmd", "app.db")); err != nil || !bytes.Equal(b, junk) { //nolint:gosec // G304: the test's data
+		t.Fatalf("the damaged app.db was changed: %v", err)
+	}
+	if b, err := os.ReadFile(markerOf(data)); err != nil || len(b) != 0 {
+		t.Fatalf("the refused claim wrote the marker: %q, %v", b, err)
 	}
 }

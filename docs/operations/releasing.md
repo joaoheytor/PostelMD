@@ -45,14 +45,19 @@ or reused.
     targets one by one, not `make ci`);
   - `postelmd db rebuild` and `postelmd vault claim` in `postelmd help`, and turned on at
     that format: either no non-test file under `cmd/` names `errBeforeFormat2`, its
-    definition included (part D deletes that switch), or `identityCommandsReady` in
+    definition included (part D deleted that switch), or `identityCommandsReady` in
     `cmd/postelmd/rebuild_linux.go` turns them on at that format or below;
-  - the damaged-database error naming `db rebuild` (`errRebuildFix` in
-    `internal/store/sql/conn.go`, `NameRebuild` in `cmd/postelmd/appdb_linux.go`). Both are
-    already true on `main` since #193: these checks only guard against a regression.
+  - the damaged-database error naming `db rebuild`: `ErrDamaged`'s own declaration in
+    `internal/store/sql/conn.go` says `postelmd db rebuild`, and not format 1's manual move
+    (`into a new folder`, `nothing is lost`), since every caller shows that text. True on
+    `main` since #196: the check only guards against a regression.
 
   The release notes of that release say, first, to copy the data before upgrading, and link
   the runbook.
+- **No v0.2 tag (`v0.2.*`, release candidates included) until `make perf` measures format-2
+  data and reports the first upgrade's time apart** (ADR-0030 follow-up 3,
+  [#197](https://github.com/joaoheytor/PostelMD/issues/197)). The gate doesn't check this
+  one: check that #197 is closed.
 
 ## 1. Release candidate
 
