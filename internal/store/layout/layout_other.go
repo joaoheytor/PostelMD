@@ -31,7 +31,7 @@ var ErrNotesAtRoot = errors.New("layout: Markdown files found directly in the da
 var ErrNoVolume = errors.New("layout: no volume is mounted at /data")
 
 // FormatVersion is the format of the data this build writes in /data (ADR-0025).
-const FormatVersion = 1
+const FormatVersion = 2
 
 // CheckFormat is unsupported outside Linux (issue #34).
 func CheckFormat(state string, _ int, _ ...fs.Option) (int, error) {

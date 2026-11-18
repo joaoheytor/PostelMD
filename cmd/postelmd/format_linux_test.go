@@ -15,7 +15,7 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/config"
 )
 
-// newerData is a data directory a newer PostelMD wrote (format 2), with a temp file the vault
+// newerData is a data directory a newer PostelMD wrote (format 3), with a temp file the vault
 // sweep would remove if the vault opened.
 func newerData(t *testing.T) (data, leftover string) {
 	t.Helper()
@@ -27,7 +27,7 @@ func newerData(t *testing.T) (data, leftover string) {
 		}
 	}
 	leftover = filepath.Join(tmp, "newer-build-temp")
-	for p, s := range map[string]string{filepath.Join(data, ".postelmd", "format"): "2\n",
+	for p, s := range map[string]string{filepath.Join(data, ".postelmd", "format"): "3\n",
 		filepath.Join(tmp, ".created-by-postelmd"): "", leftover: "x"} {
 		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
 			t.Fatal(err)
@@ -39,7 +39,7 @@ func newerData(t *testing.T) (data, leftover string) {
 // TestOlderBinaryRefusesNewerData: serve and reset-password both refuse data written by a
 // newer format, with the fix, before the vault opens (its sweep would change the data).
 func TestOlderBinaryRefusesNewerData(t *testing.T) {
-	const want = "this data was written by a newer PostelMD (format 2); run that version or newer"
+	const want = "this data was written by a newer PostelMD (format 3); run that version or newer"
 	data, leftover := newerData(t)
 	cfg := config.Config{DataDir: data, Listen: "127.0.0.1:0"}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // a server that starts stops here
@@ -64,12 +64,17 @@ func TestOlderBinaryRefusesNewerData(t *testing.T) {
 	}
 }
 
-// TestFirstStartWritesTheFormat: a new data directory gets format 1 at the first start.
+// TestFirstStartWritesTheFormat: a new data directory has no format file, which reads as
+// format 1, so its first start runs the first upgrade (ADR-0042) and ends at format 2.
 func TestFirstStartWritesTheFormat(t *testing.T) {
 	data := t.TempDir()
 	r := start(t, data)
+	logs := r.out.String()
 	r.shutdown(t)
-	if b, err := os.ReadFile(filepath.Join(data, ".postelmd", "format")); err != nil || string(b) != "1\n" {
-		t.Fatalf("format = %q, %v; want 1", b, err)
+	if b, err := os.ReadFile(filepath.Join(data, ".postelmd", "format")); err != nil || string(b) != "2\n" {
+		t.Fatalf("format = %q, %v; want 2", b, err)
+	}
+	if !strings.Contains(logs, `"msg":"first upgrade"`) {
+		t.Fatalf("no first upgrade in the logs:\n%s", logs)
 	}
 }

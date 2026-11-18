@@ -2,6 +2,7 @@
  * The HTTP API (ADR-0020), as plain functions over fetch. Nothing here keeps state, except
  * the hook that tells the app when the session has expired.
  */
+import { timeout } from "./disposable";
 import { modeOf } from "./filetype";
 import { decodeText, NotTextError, TooLargeError } from "./textfile";
 
@@ -154,11 +155,31 @@ export interface Note {
  * for a file the editor can't open: binary, not UTF-8, too large (textfile.ts).
  */
 export async function readNote(path: string): Promise<Note> {
-  const got = await request("GET", `/api/v1/notes/${encodePath(path)}`);
+  const got = await readWaiting(`/api/v1/notes/${encodePath(path)}`);
   if (got.status === 413) throw new TooLargeError(); // over the server's read limit
   const resp = await ok(got);
   // Never resp.text(): it drops a byte order mark and replaces bytes that aren't UTF-8.
   return { content: decodeText(new Uint8Array(await resp.arrayBuffer())), etag: resp.headers.get("ETag") ?? "" };
+}
+
+/** How long a read waits out 503s with Retry-After: a rename rule's hold (ADR-0031) lasts at most 10 s. */
+const readWaitMs = 20_000;
+
+/**
+ * GET url, again after each 503 that has a Retry-After, as it says, for up to readWaitMs: a
+ * path a rename rule holds (ADR-0031), or a vault busy for a moment. Any other answer, or a
+ * 503 without one, is returned as it is.
+ */
+async function readWaiting(url: string): Promise<Response> {
+  for (let waited = 0; ; ) {
+    const resp = await request("GET", url);
+    const ms = Number(resp.headers.get("Retry-After")) * 1000;
+    if (resp.status !== 503 || !(ms > 0) || waited + ms > readWaitMs) return resp;
+    await resp.body?.cancel();
+    // Each timer fires once and is done: nothing is left to clear (CLAUDE.md rule 8).
+    await new Promise<void>((resolve) => timeout(resolve, ms));
+    waited += ms;
+  }
 }
 
 /**

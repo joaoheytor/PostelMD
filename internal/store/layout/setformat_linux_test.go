@@ -21,18 +21,21 @@ func TestSetFormat(t *testing.T) {
 	if err := SetFormat(state, FormatVersion); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFormat(t, state); got != "1\n" {
+	if got := readFormat(t, state); got != "2\n" {
 		t.Fatalf("format = %q", got)
 	}
 	if _, err := os.Lstat(filepath.Join(state, formatNew)); !os.IsNotExist(err) {
 		t.Fatalf("the temp is left: %v", err)
 	}
-	for _, n := range []int{0, MaxFormat + 1} {
+	if fi, err := os.Stat(filepath.Join(state, formatFile)); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("format file: %v, %v; want 0600", fi, err)
+	}
+	for _, n := range []int{0, FormatVersion + 1} {
 		if err := SetFormat(state, n); err == nil {
 			t.Fatalf("SetFormat(%d) wrote it", n)
 		}
 	}
-	if got := readFormat(t, state); got != "1\n" {
+	if got := readFormat(t, state); got != "2\n" {
 		t.Fatalf("a refused SetFormat changed the format to %q", got)
 	}
 }

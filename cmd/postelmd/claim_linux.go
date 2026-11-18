@@ -37,7 +37,7 @@ func vaultClaim(cfg config.Config, stdin *os.File, stdout io.Writer) error {
 		}
 		db, err := sqlstore.OpenExisting(ctx, paths.State, slog.New(slog.DiscardHandler))
 		if err != nil {
-			return err
+			return sqlstore.NameRebuild(err)
 		}
 		defer func() { _ = db.Close() }()
 		c, err := ids.CheckClaim(ctx, db, paths.Vault)

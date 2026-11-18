@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// TestCheckFormatAtFormat2 is CheckFormat for a build that writes data format 2 (the format is
-// injected, so this runs at every FormatVersion). A missing format file is v0.1 data, or a new
+// TestCheckFormatAtFormat2 is CheckFormat for this build, which writes data format 2. A
+// missing format file is v0.1 data, or a new
 // data directory: it is format 1, and nothing is written, so the first upgrade still runs
 // (its last step writes 2). 1 and 2 are read as they are; anything newer is refused.
 func TestCheckFormatAtFormat2(t *testing.T) {
@@ -39,15 +39,15 @@ func TestCheckFormatAtFormat2(t *testing.T) {
 	}
 }
 
-// TestSetFormatWritesFormat2: the first upgrade's last step writes 2 at any FormatVersion;
-// a format newer than this code knows is refused.
+// TestSetFormatWritesFormat2: the first upgrade's last step writes 2; a format newer than
+// this build writes is refused.
 func TestSetFormatWritesFormat2(t *testing.T) {
 	state := t.TempDir()
 	must(t, SetFormat(state, 2))
 	if got := readFormat(t, state); got != "2\n" {
 		t.Fatalf("format = %q", got)
 	}
-	if err := SetFormat(state, MaxFormat+1); err == nil {
+	if err := SetFormat(state, FormatVersion+1); err == nil {
 		t.Fatal("SetFormat wrote a format this code doesn't know")
 	}
 }

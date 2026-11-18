@@ -24,35 +24,30 @@ type instance struct {
 	stopIDs func()
 }
 
-// buildFormat is the data format this build writes, layout.FormatVersion. Tests set it to 2
-// to run format 2's startup and commands (ADR-0042) before FormatVersion is raised.
-var buildFormat = layout.FormatVersion
+// buildFormat is the data format this build writes (ADR-0025, ADR-0042). The release gate
+// (scripts/verify-release-tag.sh) reads this declaration.
+const buildFormat = layout.FormatVersion
 
 // dataStart is what the format check found (ADR-0030's step 2).
 type dataStart struct {
-	format  int  // the data's format; a missing file is 1 from build format 2 (ADR-0042)
-	upgrade bool // build format 2: the first upgrade runs (format 1) or resumes (its intent is there)
+	format  int  // the data's format; a missing file is 1 (ADR-0042)
+	upgrade bool // the first upgrade runs (format 1) or resumes (its intent is there)
 }
 
 // geteuid is os.Geteuid; tests replace it to be another user.
 var geteuid = os.Geteuid
 
 // checkOwner is the owner check of every command that changes the state with the server
-// stopped, from build format 2 (ADR-0042), run before layout.Prepare creates any folder; at
-// format 1 it checks nothing.
+// stopped (ADR-0042), run before layout.Prepare creates any folder.
 func checkOwner(dataDir string) error {
-	if buildFormat < 2 {
-		return nil
-	}
 	return layout.CheckOwner(dataDir, geteuid())
 }
 
 // openInstance runs the startup steps after the listener (ADR-0030's order, as far as this
 // build goes): the data format (ADR-0025), app.db with its check, migrations and this start's
-// boot UUID, the auth state, go-git's transports, from build format 2 the format table's
-// vault check, the vault (adoption check, temp sweep, rename probe) and its git repository,
-// from build format 2 the first upgrade, then the startup scan's first pass when the vault
-// has file IDs (ADR-0031). Nothing is opened before the format check.
+// boot UUID, the auth state, go-git's transports, the format table's vault check, the vault
+// (adoption check, temp sweep, rename probe) and its git repository, the first upgrade, then
+// the startup scan's first pass when the vault has file IDs (ADR-0031). Nothing is opened before the format check.
 func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slog.Logger) (*instance, error) {
 	if err := ctx.Err(); err != nil { // stopped while the listener came up
 		return nil, err

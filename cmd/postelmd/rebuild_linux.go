@@ -17,22 +17,10 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/store/lock"
 )
 
-// identityCommandsReady: db rebuild and vault claim write the vault marker and the format of
-// data format 2, so they refuse, changing nothing, until this build's data format is 2
-// (ADR-0040; tests set buildFormat to 2).
-func identityCommandsReady() bool { return buildFormat >= 2 }
-
-// errBeforeFormat2 is their refusal before data format 2.
-var errBeforeFormat2 = fmt.Errorf("this command arrives with data format 2, and this build writes data format %d; "+
-	"nothing was changed (ADR-0040)", layout.FormatVersion)
-
 // offline checks the owner, takes the instance lock and checks the data format, as every
 // command that changes the state does with the server stopped (ADR-0025, ADR-0042), then
 // runs fn. The lock is released after fn.
 func offline(cfg config.Config, fn func(layout.Paths) error) error {
-	if !identityCommandsReady() {
-		return errBeforeFormat2
-	}
 	if err := checkOwner(cfg.DataDir); err != nil {
 		return err
 	}

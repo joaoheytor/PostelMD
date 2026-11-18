@@ -789,10 +789,10 @@ was full or reported an I/O error, or the database is damaged. Only a restart en
 
 ## Database lost, or the vault marker doesn't match
 
-From data format 2 only (the release that assigns file IDs; ADR-0040). Builds before it
-have both commands but refuse them with `this command arrives with data format 2`, changing
-nothing; at format 1, a damaged database is the manual move in
-[Upgrade and rollback](#upgrade-and-rollback). Both run with the server stopped, with the
+From data format 2 only (the release that assigns file IDs, and `:main` since the commit
+that raised the format; ADR-0040). Earlier `:main` builds have both commands but refuse them
+with `this command arrives with data format 2`, changing nothing; on those, at format 1, a
+damaged database is the manual move in [Upgrade and rollback](#upgrade-and-rollback). Both run with the server stopped, with the
 same image, volumes and user as the server.
 
 **First, free disk space** (see [Disk full](#disk-full-or-permission-errors)): `db rebuild`

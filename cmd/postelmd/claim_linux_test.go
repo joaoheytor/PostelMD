@@ -34,15 +34,20 @@ func rebuiltData(t *testing.T) string {
 	return data
 }
 
-// TestTheIdentityCommandsRefuseBeforeFormat2: at data format 1 both commands refuse and
-// create nothing, not even the data directory's folders (ADR-0040).
-func TestTheIdentityCommandsRefuseBeforeFormat2(t *testing.T) {
-	for _, args := range [][]string{{"db", "rebuild"}, {"vault", "claim", "--yes"}} {
-		data := filepath.Join(t.TempDir(), "data")
-		runAndCheck(t, append(args, "--data", data), 1, "", "arrives with data format 2")
-		if _, err := os.Lstat(data); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("%v made the data directory: %v", args, err)
-		}
+// TestTheIdentityCommandsRunAtThisBuildsFormat: this build writes data format 2, so db
+// rebuild and vault claim run (ADR-0040): on 0.1's data, db rebuild makes a database with
+// IDs and writes format 2, and vault claim then claims the vault, with no format switch to
+// refuse them.
+func TestTheIdentityCommandsRunAtThisBuildsFormat(t *testing.T) {
+	data := v01Data(t, false)
+	runAndCheck(t, []string{"db", "rebuild", "--data", data}, 0, "1 files have new IDs", "")
+	if f := formatOf(t, data); f != "2\n" {
+		t.Fatalf("format after db rebuild = %q, want 2", f)
+	}
+	must(t, os.WriteFile(markerOf(data), nil, 0o600))
+	runAndCheck(t, []string{"vault", "claim", "--yes", "--data", data}, 0, "Claimed: the vault marker names this database's vault", "")
+	if m, err := vault.ReadMarker(vaultOf(data)); err != nil || m.VaultUUID != identityOf(t, data).VaultUUID {
+		t.Fatalf("marker after vault claim: %+v, %v", m, err)
 	}
 }
 
@@ -52,7 +57,6 @@ func TestTheIdentityCommandsRefuseBeforeFormat2(t *testing.T) {
 // for an upgrade the next start can finish (its vault UUID is the database's, the marker
 // empty), db rebuild and vault claim change nothing and say to start the server (ADR-0041).
 func TestTheIdentityCommandsRefuseDuringAnUpgrade(t *testing.T) {
-	atFormat2(t)
 	data := rebuiltData(t)
 	state := filepath.Join(data, ".postelmd")
 	m, err := vault.ReadMarker(vaultOf(data))
@@ -79,7 +83,6 @@ func TestTheIdentityCommandsRefuseDuringAnUpgrade(t *testing.T) {
 // TestDBRebuildTakesOverAStuckUpgrade: an upgrade.intent whose vault UUID isn't the
 // database's can't finish; db rebuild takes it over, says so, and records it (ADR-0041).
 func TestDBRebuildTakesOverAStuckUpgrade(t *testing.T) {
-	atFormat2(t)
 	data := rebuiltData(t)
 	state := filepath.Join(data, ".postelmd")
 	earlier, err := filepath.Glob(filepath.Join(state, "damaged-*"))
@@ -108,7 +111,6 @@ func TestDBRebuildTakesOverAStuckUpgrade(t *testing.T) {
 }
 
 func TestDBRebuildCommand(t *testing.T) {
-	atFormat2(t)
 	data := t.TempDir()
 	start(t, data).shutdown(t)
 	var stdout, stderr strings.Builder
@@ -136,7 +138,6 @@ func TestDBRebuildCommand(t *testing.T) {
 // and then writes it; a second run has nothing to do. When the identity check fails, --yes
 // isn't enough and --force is.
 func TestVaultClaimCommand(t *testing.T) {
-	atFormat2(t)
 	data := rebuiltData(t)
 	m, _ := vault.ReadMarker(vaultOf(data))
 	empty := func() {
@@ -186,7 +187,6 @@ func replaceFile(t *testing.T, p string) {
 // TestTheIdentityCommandsAudit: db rebuild and vault claim each write one audit record to
 // stdout, the sink serve uses; vault claim's says how it was confirmed.
 func TestTheIdentityCommandsAudit(t *testing.T) {
-	atFormat2(t)
 	data := t.TempDir()
 	start(t, data).shutdown(t)
 	var out strings.Builder
@@ -207,7 +207,6 @@ func TestTheIdentityCommandsAudit(t *testing.T) {
 // TestVaultClaimAsks: on a terminal, "yes" claims when the check passes, the vault's path
 // when it fails; any other answer changes nothing.
 func TestVaultClaimAsks(t *testing.T) {
-	atFormat2(t)
 	old := isTerminal
 	isTerminal = func(int) bool { return true }
 	t.Cleanup(func() { isTerminal = old })

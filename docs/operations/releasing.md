@@ -45,7 +45,7 @@ or reused.
     targets one by one, not `make ci`);
   - `postelmd db rebuild` and `postelmd vault claim` in `postelmd help`, and turned on at
     that format: either no non-test file under `cmd/` names `errBeforeFormat2`, its
-    definition included (part D deletes that switch), or `identityCommandsReady` in
+    definition included (part D deleted that switch), or `identityCommandsReady` in
     `cmd/postelmd/rebuild_linux.go` turns them on at that format or below;
   - the damaged-database error naming `db rebuild` (`errRebuildFix` in
     `internal/store/sql/conn.go`, `NameRebuild` in `cmd/postelmd/appdb_linux.go`). Both are

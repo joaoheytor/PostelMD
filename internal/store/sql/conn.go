@@ -45,17 +45,16 @@ const (
 
 // ErrDamaged: the file isn't a database, or quick_check found a problem. Startup refuses and
 // changes nothing. Only those causes give it: a canceled context, a busy lock, an I/O or
-// permission error are plain errors. Until `postelmd db rebuild` arrives with data format 2,
-// the fix is to move the files aside: at format 1 the database holds only the boot UUID, and
-// the next start creates a new one (ADR-0034).
+// permission error are plain errors. Its own text is format 1's fix, moving the files aside
+// (ADR-0034): what 0.1 said. A build that writes data format 2 shows it through NameRebuild,
+// which names postelmd db rebuild, as serve and vault claim do.
 var ErrDamaged = errors.New("sql: the database is damaged or isn't a database. With the server " +
 	"stopped, move app.db, app.db-wal and app.db-shm together into a new folder such as " +
 	".postelmd/damaged-<date>/, and never delete them; then start again. At this data format " +
 	"the database holds only the boot UUID, so nothing is lost (ADR-0030, ADR-0034)")
 
-// errRebuildFix is ErrDamaged's fix from data format 2, once postelmd db rebuild ships
-// (ADR-0030, ADR-0034): the database holds file IDs, so moving it aside by hand would lose
-// them without the rebuild's record.
+// errRebuildFix is ErrDamaged's fix from data format 2 (ADR-0030, ADR-0034): the database
+// holds file IDs, so moving it aside by hand would lose them without the rebuild's record.
 const errRebuildFix = "sql: the database is damaged or isn't a database. With the server stopped, run " +
 	"postelmd db rebuild: it moves app.db, app.db-wal and app.db-shm into .postelmd/damaged-<time>/, never " +
 	"deleting them, and makes a new database with new file IDs (ADR-0030, ADR-0034, ADR-0040)"

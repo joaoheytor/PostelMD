@@ -58,12 +58,13 @@ func TestReadOnlyWiringHelper(t *testing.T) {
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &lim); err != nil {
 		t.Fatal(err)
 	}
-	a := sqlstore.Assignment{VaultUUID: "6f1c2a7e-3b4d-4c5e-8f90-a1b2c3d4e5f6", Now: time.Now()}
+	// The first upgrade has assigned IDs at the start, so the write is a scan's: new IDs.
+	var unit []sqlstore.Change
 	for i := range 4000 {
-		a.Files = append(a.Files, sqlstore.NewFile{Path: fmt.Sprintf("bulk/%04d-%s.md", i, strings.Repeat("x", 200)),
+		unit = append(unit, sqlstore.InsertFile{Path: fmt.Sprintf("bulk/%04d-%s.md", i, strings.Repeat("x", 200)),
 			SHA256: bytes.Repeat([]byte{byte(i)}, 32), Stat: sqlstore.FileStat{Size: 1, Inode: uint64(1000 + i)}}) //nolint:gosec // G115: a small count
 	}
-	if err := in.db.(*sqlstore.DB).Assign(context.Background(), a); err == nil {
+	if _, err := in.db.(*sqlstore.DB).ApplyScan(context.Background(), time.Now(), [][]sqlstore.Change{unit}); err == nil {
 		t.Fatal("the write past the file size limit succeeded")
 	}
 	if !in.vault.ReadOnly() {

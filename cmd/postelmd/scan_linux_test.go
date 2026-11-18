@@ -54,61 +54,36 @@ func generationOf(t *testing.T, data, p string) int64 {
 	return f.Generation
 }
 
-// serve runs the startup scan before it is ready when the database's IDs describe the
-// mounted vault, and leaves everything as it is otherwise (format 1: nothing assigned; a
-// marker naming another vault: format 2's table decides).
+// serve runs the startup scan before it is ready, on the vault the database's IDs describe:
+// an edit made outside bumps its file's generation, a new file gets an ID, and a file the
+// scan hasn't seen gets one at its first read. (A marker naming another vault, or 0.1's data
+// with nothing assigned, is the format table's: TestServeAtFormat2RefusesByTheFormatTable,
+// TestServeAtFormat2RunsTheFirstUpgrade.)
 func TestServeRunsTheStartupScan(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		assign  bool
-		marker  string
-		scanned bool
-	}{
-		{"assigned, this vault", true, scanVaultUUID, true},
-		{"assigned, another vault's marker", true, "00000000-0000-4000-8000-000000000000", false},
-		{"not assigned (format 1)", false, "", false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			data := t.TempDir()
-			first := start(t, data) // creates the layout, app.db and an adopted vault
-			setUp(t, first)
-			first.shutdown(t)
-			notes := filepath.Join(data, "vaults", "notes")
-			must(t, os.WriteFile(filepath.Join(notes, "a.md"), []byte("A"), 0o600))
-			if c.assign {
-				assignIDs(t, data, scanVaultUUID, c.marker)
-			}
-			must(t, os.WriteFile(filepath.Join(notes, "a.md"), []byte("A, edited outside"), 0o600))
-			must(t, os.WriteFile(filepath.Join(notes, "new.md"), []byte("new"), 0o600))
-			r := start(t, data)
-			logs := r.out.String() // ready: the first pass has run
-			// A file the scan hasn't seen: its read gives it an ID (the router's read hook).
-			must(t, os.WriteFile(filepath.Join(notes, "later.md"), []byte("later"), 0o600))
-			if code := readNote(t, r, "later.md"); code != http.StatusOK {
-				t.Fatalf("GET later.md = %d", code)
-			}
-			r.shutdown(t)
-			if g, want := generationOf(t, data, "later.md"), map[bool]int64{true: 1}[c.scanned]; g != want {
-				t.Fatalf("later.md at generation %d after its read, want %d", g, want)
-			}
-			ran := strings.Contains(logs, `"msg":"startup scan","pass":1,"new_ids":1,"generation_bumps":1`)
-			if ran != c.scanned {
-				t.Fatalf("scanned = %v, want %v; logs:\n%s", ran, c.scanned, logs)
-			}
-			wantGen, wantNew := int64(0), int64(0)
-			if c.assign {
-				wantGen = 1
-			}
-			if c.scanned {
-				wantGen, wantNew = 2, 1
-			}
-			if g, n := generationOf(t, data, "a.md"), generationOf(t, data, "new.md"); g != wantGen || n != wantNew {
-				t.Fatalf("a.md at generation %d, new.md at %d; want %d, %d", g, n, wantGen, wantNew)
-			}
-			if strings.Contains(logs, "a.md") || strings.Contains(logs, "new.md") {
-				t.Fatalf("a log record names a note:\n%s", logs)
-			}
-		})
+	data := v01Data(t, false) // a.md, with no ID yet
+	notes := vaultOf(data)
+	start(t, data).shutdown(t) // the first upgrade: a.md at generation 1
+	must(t, os.WriteFile(filepath.Join(notes, "a.md"), []byte("A, edited outside"), 0o600))
+	must(t, os.WriteFile(filepath.Join(notes, "new.md"), []byte("new"), 0o600))
+	r := start(t, data)
+	logs := r.out.String() // ready: the first pass has run
+	// A file the scan hasn't seen: its read gives it an ID (the router's read hook).
+	must(t, os.WriteFile(filepath.Join(notes, "later.md"), []byte("later"), 0o600))
+	if code := readNote(t, r, "later.md"); code != http.StatusOK {
+		t.Fatalf("GET later.md = %d", code)
+	}
+	r.shutdown(t)
+	if g := generationOf(t, data, "later.md"); g != 1 {
+		t.Fatalf("later.md at generation %d after its read, want 1", g)
+	}
+	if !strings.Contains(logs, `"msg":"startup scan","pass":1,"new_ids":1,"generation_bumps":1`) {
+		t.Fatalf("no scan of one new file and one edit; logs:\n%s", logs)
+	}
+	if g, n := generationOf(t, data, "a.md"), generationOf(t, data, "new.md"); g != 2 || n != 1 {
+		t.Fatalf("a.md at generation %d, new.md at %d; want 2, 1", g, n)
+	}
+	if strings.Contains(logs, "a.md") || strings.Contains(logs, "new.md") {
+		t.Fatalf("a log record names a note:\n%s", logs)
 	}
 }
 
@@ -145,14 +120,14 @@ func readNote(t *testing.T, r *running, p string) int {
 	return resp.StatusCode
 }
 
-// startIDs skips the scan, with a warning, when the vault marker can't name the database's
-// vault: format 1's empty marker, or a marker that isn't a regular file (ADR-0030's table).
-func TestStartIDsSkipsAVaultItCantName(t *testing.T) {
+// TestStartIDsRefusesAVaultItCantName: at format 2 the format table has run before startIDs,
+// so a vault marker that can't name the database's vault (missing, empty, or not a regular
+// file) is an error, and nothing is scanned (ADR-0036's decision 6, ADR-0040).
+func TestStartIDsRefusesAVaultItCantName(t *testing.T) {
 	for _, name := range []string{"no marker", "an empty marker", "a symlinked marker"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			data := t.TempDir()
-			start(t, data).shutdown(t)
+			data := v01Data(t, false)
 			dir := filepath.Join(data, "vaults", "notes")
 			must(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("A"), 0o600))
 			assignIDs(t, data, scanVaultUUID, scanVaultUUID)
@@ -176,12 +151,10 @@ func TestStartIDsSkipsAVaultItCantName(t *testing.T) {
 			db, err := sqlstore.Open(ctx, filepath.Join(data, ".postelmd"), slog.New(slog.DiscardHandler))
 			must(t, err)
 			defer func() { _ = db.Close() }()
-			logs := &syncBuffer{}
-			got, stop, err := startIDs(ctx, db, v, dir, slog.New(slog.NewJSONHandler(logs, nil)))
-			must(t, err)
+			got, stop, err := startIDs(ctx, db, v, dir, slog.New(slog.DiscardHandler))
 			stop()
-			if got != nil || !strings.Contains(logs.String(), "the vault marker doesn't name its vault") {
-				t.Fatalf("startIDs = %v; logs:\n%s", got, logs.String())
+			if got != nil || err == nil {
+				t.Fatalf("startIDs = %v, %v; want an error and no scan", got, err)
 			}
 			if _, err := db.FileByPath(ctx, "new.md"); !errors.Is(err, sqlstore.ErrNoFile) {
 				t.Fatalf("new.md got a row: %v", err)

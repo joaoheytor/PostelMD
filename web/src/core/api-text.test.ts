@@ -21,6 +21,47 @@ describe("reading a file's text", () => {
     await expect(readNote("logo.png")).rejects.toThrow(NotTextError);
   });
 
+  // A path held by a rename rule (ADR-0031) answers 503 with Retry-After until it resolves,
+  // within SecondPass (10 s): the read waits for it instead of failing the open.
+  it("waits out a 503 with Retry-After, as the server says, then reads", async () => {
+    vi.useFakeTimers();
+    try {
+      const busy = () => new Response('{"error":"busy, retry"}', { status: 503, headers: { "Retry-After": "2" } });
+      const calls: number[] = [];
+      vi.stubGlobal("fetch", (() => {
+        calls.push(Date.now());
+        return Promise.resolve(calls.length < 3 ? busy() : new Response("# A\n", { status: 200, headers: { ETag: '"e1"' } }));
+      }) as typeof fetch);
+      const read = readNote("a.md");
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(await read).toEqual({ content: "# A\n", etag: '"e1"' });
+      const [first = 0] = calls;
+      expect(calls.map((t) => t - first)).toEqual([0, 2_000, 4_000]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after 20 s of 503s, and a 503 without Retry-After at once", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const busy = (retry: boolean) =>
+        (() => (calls++, Promise.resolve(new Response("{}", { status: 503, headers: retry ? { "Retry-After": "5" } : {} })))) as typeof fetch;
+      vi.stubGlobal("fetch", busy(true));
+      const held = readNote("a.md").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await held).toMatchObject({ status: 503 });
+      expect(calls).toBe(5); // at 0, 5, 10, 15 and 20 s
+      calls = 0;
+      vi.stubGlobal("fetch", busy(false));
+      await expect(readNote("a.md")).rejects.toMatchObject({ status: 503 });
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a file the server won't read for its size is too large, like one it sends (#144)", async () => {
     vi.stubGlobal("fetch", answer(413, new TextEncoder().encode('{"error":"too large"}')));
     await expect(readNote("huge.log")).rejects.toThrow(TooLargeError);

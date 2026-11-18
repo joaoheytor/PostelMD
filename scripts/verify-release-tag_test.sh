@@ -256,24 +256,25 @@ done
 pieces 2
 workflow optional "run: make image-smoke-upgrade"
 case_ fail "CI runs it in a job the required check doesn't need" "CI doesn't run"
-# This repository's own files, with FormatVersion faked to 2: until the upgrade smoke test
-# lands (part D), the gate refuses them.
+# This repository's own files, at format 2: the gate passes them (the release's own dry run),
+# and refuses them without the upgrade smoke test in make ci.
 root=$(dirname "$script")/..
 for f in internal/store/layout/format_linux.go cmd/postelmd/main.go cmd/postelmd/rebuild_linux.go cmd/postelmd/instance.go \
-  cmd/postelmd/appdb_linux.go internal/store/sql/conn.go docs/operations/upgrading-to-format-2.md \
-  Makefile .github/workflows/ci.yaml; do
+  cmd/postelmd/appdb_linux.go cmd/postelmd/claim_linux.go internal/store/sql/conn.go \
+  docs/operations/upgrading-to-format-2.md Makefile .github/workflows/ci.yaml; do
   cp "$root/$f" "$r/$f"
 done
+grep -q '^const FormatVersion = 2$' "$r/internal/store/layout/format_linux.go" ||
+  { echo "FAIL this repository isn't at FormatVersion 2"; failures=$((failures + 1)); }
 commit_main "this repository's files at their own format"
 sign trusted v0.7.0-rc.24
-expect pass v0.7.0-rc.24 "this repository's files at FormatVersion 1"
-sed 's/^const FormatVersion = 1$/const FormatVersion = 2/' "$root/internal/store/layout/format_linux.go" \
-  >"$r/internal/store/layout/format_linux.go"
-grep -q '^const FormatVersion = 2$' "$r/internal/store/layout/format_linux.go" ||
-  { echo "FAIL the fixture couldn't fake FormatVersion 2"; failures=$((failures + 1)); }
-commit_main "this repository's files with FormatVersion faked to 2"
+expect pass v0.7.0-rc.24 "this repository's files at FormatVersion 2"
+sed 's/^\(ci:.*\) image-smoke-upgrade /\1 /' "$root/Makefile" >"$r/Makefile"
+{ grep -q '^ci: lint ' "$r/Makefile" && ! grep -Eq '^ci:.* image-smoke-upgrade( |$)' "$r/Makefile"; } ||
+  { echo "FAIL the fixture couldn't drop image-smoke-upgrade from make ci"; failures=$((failures + 1)); }
+commit_main "this repository's files without the upgrade smoke test in make ci"
 sign trusted v0.7.0-rc.25
-expect fail v0.7.0-rc.25 "this repository's files with FormatVersion faked to 2" "upgrade smoke test"
+expect fail v0.7.0-rc.25 "this repository's files without the upgrade smoke test in make ci" "upgrade smoke test"
 
 # Revocation: removing the key on main makes its existing tags fail.
 : >"$work/repo/.github/allowed_signers"

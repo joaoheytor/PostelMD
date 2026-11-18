@@ -13,14 +13,14 @@ import (
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
 
-// checkDataFormat is ADR-0030's step 2: the data format, under the instance lock. At build
-// format 1 a missing format file is written, as always. From build format 2 it is read as
-// format 1 and nothing is written (ADR-0042), and the first upgrade runs when the data is at
-// format 1 or upgrade.intent is there (an upgrade killed after writing the format, ADR-0041).
+// checkDataFormat is ADR-0030's step 2: the data format, under the instance lock. A missing
+// format file is read as format 1 and nothing is written (ADR-0042), and the first upgrade
+// runs when the data is at format 1 or upgrade.intent is there (an upgrade killed after
+// writing the format, ADR-0041).
 func checkDataFormat(state string) (dataStart, error) {
 	format, err := layout.CheckFormat(state, buildFormat)
-	if err != nil || buildFormat < 2 {
-		return dataStart{format: format}, err
+	if err != nil {
+		return dataStart{}, err
 	}
 	in, err := sqlstore.ReadUpgradeIntent(state)
 	if err != nil {
@@ -29,14 +29,14 @@ func checkDataFormat(state string) (dataStart, error) {
 	return dataStart{format: format, upgrade: format < 2 || in != nil}, nil
 }
 
-// checkVaultAtStart runs, from build format 2, ADR-0030's format table before the vault
-// opens, whose adoption, temp sweep and rename probe would change a vault the table refuses:
-// the first upgrade's refusals (the format-1 rows, ADR-0041) when it is to run, else the
-// format-2 rows (ids.CheckVault).
+// checkVaultAtStart runs ADR-0030's format table before the vault opens, whose adoption,
+// temp sweep and rename probe would change a vault the table refuses: the first upgrade's
+// refusals (the format-1 rows, ADR-0041) when it is to run, else the format-2 rows
+// (ids.CheckVault).
 func checkVaultAtStart(ctx context.Context, db appDB, start dataStart, paths layout.Paths, log *slog.Logger) error {
 	sdb, ok := db.(*sqlstore.DB)
 	switch {
-	case buildFormat < 2 || !ok:
+	case !ok:
 		return nil
 	case start.upgrade:
 		return ids.CheckUpgrade(ctx, sdb, ids.UpgradeOptions{State: paths.State, Vault: paths.Vault})
