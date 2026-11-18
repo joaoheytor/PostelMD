@@ -87,6 +87,11 @@ func holdUnderNotes(ctx context.Context, db *DB) error {
 }
 
 // then runs the setups in order, stopping at the first error.
+// flagged is a setup step that flags the open intent opID.
+func flagged(opID string) func(context.Context, *DB) error {
+	return func(ctx context.Context, db *DB) error { return db.Flag(ctx, opID) }
+}
+
 func then(steps ...func(context.Context, *DB) error) func(context.Context, *DB) error {
 	return func(ctx context.Context, db *DB) error {
 		for _, s := range steps {
@@ -137,7 +142,14 @@ func intentCases() map[string]intentCase {
 		}},
 		"restore-drop": {"drop", restore, func(ctx context.Context, db *DB) error { return db.Drop(ctx, opA) }},
 		"flag":         {"flag", save, func(ctx context.Context, db *DB) error { return db.Flag(ctx, opA) }},
-		"purge-begin":  {"purge-begin", nothing, func(ctx context.Context, db *DB) error { return db.BeginPurge(ctx, purged) }},
+		"save-resolve": {"resolve", then(save, flagged(opA)), func(ctx context.Context, db *DB) error { return db.Resolve(ctx, opA) }},
+		"delete-resolve": {"resolve", then(del, flagged(stamp)), func(ctx context.Context, db *DB) error {
+			return db.Resolve(ctx, stamp)
+		}},
+		"restore-resolve": {"resolve", then(restore, flagged(opA)), func(ctx context.Context, db *DB) error {
+			return db.Resolve(ctx, opA)
+		}},
+		"purge-begin": {"purge-begin", nothing, func(ctx context.Context, db *DB) error { return db.BeginPurge(ctx, purged) }},
 		"purge-drop": {"trash-drop", func(ctx context.Context, db *DB) error { return db.BeginPurge(ctx, purged) },
 			func(ctx context.Context, db *DB) error { return db.DropTrashRecord(ctx, purged, "purging") }},
 	}

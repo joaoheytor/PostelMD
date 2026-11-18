@@ -117,6 +117,14 @@ Before 1.0, breaking changes bump the minor version (see [GOVERNANCE.md](GOVERNA
   marker names another vault) does `db rebuild` take it over, moving the intent into its
   `damaged-<time>/` folder. See the runbook's "Database lost, or the vault marker doesn't
   match".
+- `postelmd intents list` and `postelmd intents resolve <op-id>`, offline commands for the
+  operations a crash interrupted (intents, data format 2). `list` shows each one's op ID,
+  kind, state, time and its folder of copies in `.postelmd/recovery/`. `resolve` ends a
+  flagged one (an operation that found another program changing the note meanwhile) once you
+  have kept what you want from the copies: it removes its temp file only after a copy of it
+  is in `recovery/<op-id>/`, keeps the copies, writes an `intent.resolved` audit record, and
+  lets the scan track the note's path again. It refuses an open one, which the next start
+  finishes. See the runbook's "Flagged intents: list and resolve".
 
 ### Changed
 - `/healthz` and `/readyz` answer `200` instead of `204`. The server answers `/healthz` as

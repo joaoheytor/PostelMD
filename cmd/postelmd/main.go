@@ -33,6 +33,8 @@ Commands:
   db rebuild       Make a new database, with new file IDs, with the server stopped
   vault claim      Mark the mounted vault as this database's, with the server stopped
                    (flags: --yes, --force)
+  intents list     List the operations a crash interrupted, with the server stopped
+  intents resolve  End a flagged one by its op ID, with the server stopped
   healthcheck      Exit 0 if the local server answers /healthz
   version          Print the version and build information
 `
@@ -48,7 +50,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	name, rest := args[0], args[1:]
-	if name == "db" || name == "vault" {
+	if name == "db" || name == "vault" || name == "intents" {
 		if len(rest) == 0 {
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -56,7 +58,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		name, rest = name+" "+rest[0], rest[1:]
 	}
 	switch name {
-	case "serve", "reset-password", "healthcheck", "db rollback", "db rebuild", "vault claim":
+	case "serve", "reset-password", "healthcheck", "db rollback", "db rebuild", "vault claim", "intents list", "intents resolve":
 		cfg, err := config.Load(name, rest, stderr)
 		if err != nil {
 			if !errors.Is(err, config.ErrPrinted) {
@@ -92,6 +94,10 @@ func runCommand(name string, cfg config.Config, stdout io.Writer) error {
 		return dbRebuild(cfg, stdout)
 	case "vault claim":
 		return vaultClaim(cfg, os.Stdin, stdout)
+	case "intents list":
+		return intentsList(cfg, stdout)
+	case "intents resolve":
+		return intentsResolve(cfg, stdout)
 	default:
 		return healthcheck(cfg)
 	}

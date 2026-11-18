@@ -29,6 +29,8 @@ type Config struct {
 	AllowedHosts []string
 	// Yes and Force are vault claim's --yes and --force (flags only; ADR-0040).
 	Yes, Force bool
+	// OpID is intents resolve's argument: the flagged intent to end (ADR-0033).
+	OpID string
 }
 
 // file is config.yaml. Pointers tell a setting that's absent from one set to its zero value.
@@ -63,6 +65,15 @@ func load(name string, args []string, getenv func(string) string, stderr io.Writ
 	}
 	if err := fl.Parse(args); err != nil {
 		return c, fmt.Errorf("%w: %w", ErrPrinted, err)
+	}
+	if name == "intents resolve" { // its one argument, the op ID, before or after the flags
+		if fl.NArg() == 0 || fl.Arg(0) == "" {
+			return c, errors.New("config: intents resolve takes the op ID of a flagged intent (postelmd intents list)")
+		}
+		c.OpID = fl.Arg(0)
+		if err := fl.Parse(fl.Args()[1:]); err != nil {
+			return c, fmt.Errorf("%w: %w", ErrPrinted, err)
+		}
 	}
 	if fl.NArg() > 0 {
 		return c, fmt.Errorf("config: unexpected argument %q", fl.Arg(0))

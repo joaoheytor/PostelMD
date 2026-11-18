@@ -96,6 +96,19 @@ func copyInto(rec, dst string, open func() (io.ReadCloser, error)) error {
 	return syncBoth(tmp, dst)
 }
 
+// IntentCopies is the intent opID's recovery/<op-id>/ folder in stateDir when there is one,
+// else "".
+func IntentCopies(stateDir, opID string) string {
+	if !plainName(opID) {
+		return ""
+	}
+	dir := filepath.Join(stateDir, "recovery", opID)
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return dir
+}
+
 // mkdirCopies creates a recovery copies' folder (0700) and fsyncs its parent, unless it is a
 // folder already; something else there is refused by its name, never replaced. It is
 // mkdirDurable without db rebuild's interference error, which names that command's runbook.

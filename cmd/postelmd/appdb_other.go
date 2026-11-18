@@ -57,6 +57,16 @@ func dbRebuild(_ config.Config, _ io.Writer) error {
 	return fmt.Errorf("db rebuild: %w", errors.ErrUnsupported)
 }
 
+// intentsList is unsupported outside Linux, like the store it needs.
+func intentsList(_ config.Config, _ io.Writer) error {
+	return fmt.Errorf("intents list: %w", errors.ErrUnsupported)
+}
+
+// intentsResolve is unsupported outside Linux, like the store it needs.
+func intentsResolve(_ config.Config, _ io.Writer) error {
+	return fmt.Errorf("intents resolve: %w", errors.ErrUnsupported)
+}
+
 // vaultClaim is unsupported outside Linux, like the store it needs.
 func vaultClaim(_ config.Config, _ *os.File, _ io.Writer) error {
 	return fmt.Errorf("vault claim: %w", errors.ErrUnsupported)

@@ -150,20 +150,30 @@ func (db *DB) Drop(ctx context.Context, opID string) error {
 		if err != nil {
 			return err
 		}
-		switch in.Kind {
-		case IntentDelete:
-			err = one(ctx, tx, "drop a moving trash record", "DELETE FROM trash_records WHERE op_id = ? AND state = 'moving'", opID)
-		case IntentRestore:
-			var p RestoreIntent
-			if err = in.Decode(&p); err == nil {
-				err = setTrashState(ctx, tx, p.TrashOpID, "restoring", "trashed")
-			}
-		}
-		if err != nil {
-			return staleAs(err, ErrTrashState)
+		if err := undoBegun(ctx, tx, in); err != nil {
+			return err
 		}
 		return deleteIntent(ctx, tx, opID)
 	})
+}
+
+// undoBegun undoes what began with the intent in, in tx: a delete's moving trash record is
+// removed, a restore's record goes back from restoring to trashed.
+func undoBegun(ctx context.Context, tx *sql.Tx, in Intent) error {
+	var err error
+	switch in.Kind {
+	case IntentDelete:
+		err = one(ctx, tx, "drop a moving trash record", "DELETE FROM trash_records WHERE op_id = ? AND state = 'moving'", in.OpID)
+	case IntentRestore:
+		var p RestoreIntent
+		if err = in.Decode(&p); err == nil {
+			err = setTrashState(ctx, tx, p.TrashOpID, "restoring", "trashed")
+		}
+	}
+	if err != nil {
+		return staleAs(err, ErrTrashState)
+	}
+	return nil
 }
 
 // Flag marks an open intent flagged: recovery found interference and kept both sides in

@@ -316,3 +316,12 @@ adds the crash test for its rows, under the process-kill and power-loss models.
   v0.1 kept deleted items until the trash was emptied by hand. The CHANGELOG says so, and
   that items deleted under v0.1 get 7 days from the upgrade (ADR-0031's import clock).
 
+## Clarifications
+- **2026-11-18, how the operator decides.** "A flagged intent stays until the operator
+  decides" is carried out, until [#199](https://github.com/joaoheytor/PostelMD/issues/199)'s
+  web app, by `postelmd intents list` and `postelmd intents resolve <op-id>`, offline under
+  the instance lock (runbook: "Flagged intents: list and resolve"). Resolve takes only a
+  flagged intent; it removes the intent's temp after a copy of it is in `recovery/<op-id>/`,
+  then ends the intent as Drop does, with an `intent.resolved` audit event. An open intent
+  stays recovery's.
+

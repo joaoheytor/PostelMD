@@ -36,6 +36,7 @@ type Store interface {
 	Drop(ctx context.Context, opID string) error
 	Flag(ctx context.Context, opID string) error
 	CompleteSave(ctx context.Context, opID string, stat sqlstore.FileStat) error
+	Resolve(ctx context.Context, opID string) error
 }
 
 // Totals counts Recover's actions, for its log record.
