@@ -6,8 +6,10 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/joaoheytor/PostelMD/internal/audit"
 	pmhttp "github.com/joaoheytor/PostelMD/internal/http"
 	"github.com/joaoheytor/PostelMD/internal/ids"
+	"github.com/joaoheytor/PostelMD/internal/intents"
 	sqlstore "github.com/joaoheytor/PostelMD/internal/store/sql"
 	"github.com/joaoheytor/PostelMD/internal/vault"
 )
@@ -31,6 +33,26 @@ func openAppDB(ctx context.Context, state, boot string, start dataStart, log *sl
 		return nil, err
 	}
 	return db, nil
+}
+
+// recoverIntents runs intent recovery (ADR-0033) after the first upgrade, then the temp
+// folder's sweep, which spares the temps of the intents left (the flagged ones), and logs
+// what recovery did. The scan runs after both.
+func recoverIntents(ctx context.Context, db appDB, v *vault.Vault, state string, log *slog.Logger) error {
+	sdb, ok := db.(*sqlstore.DB)
+	if !ok {
+		return v.Sweep(nil)
+	}
+	t, err := intents.Recover(ctx, intents.Recovery{DB: sdb, Vault: v, State: state, Log: log, Audit: audit.New(log)})
+	if err != nil {
+		return err
+	}
+	log.Info("intent recovery", "rolled_forward", t.RolledForward, "dropped", t.Dropped, "kept", t.Kept, "flagged", t.Flagged)
+	spare, err := intents.Remaining(ctx, sdb)
+	if err != nil {
+		return err
+	}
+	return v.Sweep(spare)
 }
 
 // startIDs runs the startup scan (ADR-0030's step 7, ADR-0031) when the database's file IDs

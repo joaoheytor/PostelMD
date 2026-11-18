@@ -112,6 +112,7 @@ func TestLaterStartsSweepPostelMDsTemps(t *testing.T) {
 	v, err := Open(dir)
 	must(t, err)
 	t.Cleanup(func() { _ = v.Close() })
+	must(t, v.Sweep(nil)) // the start's sweep, after recovery (ADR-0033)
 	assertNoTemps(t, dir)
 	if items, _, err := v.ListTrash(10); err != nil || len(items) != 1 {
 		t.Fatalf("trash after a restart: %v, %v; want 1 item", items, err)

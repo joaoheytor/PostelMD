@@ -37,6 +37,11 @@ func firstUpgrade(context.Context, appDB, *vault.Vault, dataStart, layout.Paths,
 	return nil
 }
 
+// recoverIntents has no intents to recover outside Linux (openAppDB fails first); it sweeps.
+func recoverIntents(_ context.Context, _ appDB, v *vault.Vault, _ string, _ *slog.Logger) error {
+	return v.Sweep(nil)
+}
+
 // startIDs has nothing to scan outside Linux: openAppDB fails first.
 func startIDs(context.Context, appDB, *vault.Vault, string, *slog.Logger) (pmhttp.IDs, func(), error) {
 	return nil, func() {}, nil

@@ -82,9 +82,9 @@ type Vault struct {
 }
 
 // Open opens the vault at dir, refuses an adopted folder whose reserved folders hold entries
-// PostelMD didn't create (adopt), removes every leftover temp file (a save that didn't finish
-// never answered 200, so its edit is still the client's draft), and refuses a filesystem
-// without RENAME_NOREPLACE (ADR-0020). Call it before serving requests.
+// PostelMD didn't create (adopt), and refuses a filesystem without RENAME_NOREPLACE
+// (ADR-0020). It leaves the temp folder's entries: intent recovery judges them first, then
+// the start runs Sweep (ADR-0033). Call it before serving requests.
 func Open(dir string, opts ...fs.Option) (*Vault, error) {
 	root, err := fs.OpenRoot(dir, opts...)
 	if err != nil {
@@ -94,7 +94,7 @@ func Open(dir string, opts ...fs.Option) (*Vault, error) {
 		log: slog.New(slog.DiscardHandler)}
 	err = v.adopt()
 	if err == nil {
-		err = v.sweepTemps()
+		err = v.ensureDir(TmpDir)
 	}
 	if err == nil {
 		err = v.probeNoReplace()
