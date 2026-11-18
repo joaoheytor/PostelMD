@@ -96,8 +96,9 @@ func crashEverywhere(t *testing.T, op func(v *Vault) error, check func(t *testin
 		t.Run("kill", func(t *testing.T) { check(t, files(t, dir), completed, false) })
 		t.Run("power loss", func(t *testing.T) { check(t, powerLossFiles(disk.AfterPowerLoss()), completed, true) })
 
-		reopened, err := Open(dir) // restart: the sweep runs
+		reopened, err := Open(dir) // restart: open, then the sweep (after recovery, ADR-0033)
 		must(t, err)
+		must(t, reopened.Sweep(nil))
 		_ = reopened.Close()
 		if n := temps(dir); n != 0 {
 			t.Fatalf("crash at step %d: %d temp files after a restart", crashAt, n)

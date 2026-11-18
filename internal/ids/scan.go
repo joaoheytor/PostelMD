@@ -84,6 +84,11 @@ func (s *Scanner) fullPass(ctx context.Context, now time.Time) (Totals, error) {
 		paths = append(paths, p)
 	}
 	slices.Sort(paths)
+	named, err := s.intentPaths(ctx)
+	if err != nil {
+		return Totals{}, err
+	}
+	rows, holds, paths = leaveAlone(named, rows, holds, paths)
 	t := &Totals{}
 	p := &planner{now: now, rows: rows, holds: holds, paths: paths, totals: t, hash: s.hasher(ctx),
 		stat: func(path string) (fs.Stat, bool) { st, ok := disk[path]; return st, ok }}
@@ -148,6 +153,10 @@ func (s *Scanner) seen(ctx context.Context, p string) (time.Duration, error) {
 	if _, err := s.db.FileByPath(ctx, p); !errors.Is(err, sqlstore.ErrNoFile) {
 		return 0, err
 	}
+	named, err := s.intentPaths(ctx)
+	if err != nil || named(p) {
+		return 0, err
+	}
 	hash := s.hasher(ctx)
 	o, ok := hash(p)
 	if !ok {
@@ -162,6 +171,7 @@ func (s *Scanner) seen(ctx context.Context, p string) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
+	rows, holds, _ = leaveAlone(named, rows, holds, nil)
 	pl := &planner{now: now, rows: rows, holds: holds, paths: []string{p}, only: p, totals: &Totals{},
 		hash: func(path string) (observed, bool) {
 			if path == p {

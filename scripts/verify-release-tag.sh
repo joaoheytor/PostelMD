@@ -107,6 +107,13 @@ if [ "$format" -ge 2 ]; then
     { isnum "$on" && [ "$on" -le "$format" ]; } ||
       f2 "db rebuild and vault claim are off (errBeforeFormat2, identityCommandsReady in cmd/postelmd/rebuild_linux.go)"
   fi
+  # Intent recovery flags every kind whose recovery hasn't shipped through one function,
+  # noRecoveryYet (ADR-0033); the PR that ships the last kind deletes it. While any non-test
+  # file under internal/ names it, an interrupted create, move, delete or restore would stop
+  # its paths until an operator steps in, so the release waits.
+  if git grep -q -w noRecoveryYet "$commit" -- 'internal/*.go' ':!*_test.go'; then
+    f2 "intent recovery is unfinished (noRecoveryYet in internal/intents)"
+  fi
   # ErrDamaged's own text (its declaration, to the line that closes it) is what every caller
   # shows: it names db rebuild, never format 1's manual move, which would lose the file IDs.
   errdamaged=$(at internal/store/sql/conn.go | awk '/^var ErrDamaged = / { s = 1 } s { print } s && /\)$/ { exit }')

@@ -1,6 +1,6 @@
 package vault
 
-// What Open does before serving: adopt the reserved folders, sweep the temp folder, probe
+// What Open does before serving: adopt the reserved folders and probe
 // for RENAME_NOREPLACE.
 
 import (
@@ -96,36 +96,6 @@ func CheckOpenable(dir string, opts ...fs.Option) error {
 		return fmt.Errorf("vault: check %s: %w", TmpDir, err)
 	}
 	return v.probeNoReplace()
-}
-
-// sweepTemps removes every leftover temp file, apart from the marker: a save that didn't
-// finish never answered 200, so its edit is still the client's draft.
-func (v *Vault) sweepTemps() error {
-	if err := v.ensureDir(TmpDir); err != nil {
-		return err
-	}
-	entries, err := v.root.ReadDir(TmpDir)
-	if err != nil {
-		return err
-	}
-	swept := 0
-	for _, e := range entries {
-		if e.Name() == ownerMarker {
-			continue
-		}
-		swept++
-		rm := v.root.Remove
-		if e.IsDir() { // a repository Init didn't finish
-			rm = v.removeTree
-		}
-		if err := rm(TmpDir + "/" + e.Name()); err != nil {
-			return fmt.Errorf("vault: sweep %s: %w", e.Name(), err)
-		}
-	}
-	if swept > 0 {
-		return v.root.SyncDir(TmpDir)
-	}
-	return nil
 }
 
 // probeNoReplace renames a temp file to an absent name with RENAME_NOREPLACE. The target

@@ -182,16 +182,6 @@ func TestTooLarge(t *testing.T) {
 	}
 }
 
-func TestOpenSweepsTempFiles(t *testing.T) {
-	first, dir := newVault(t) // makes and marks the temp folder
-	_ = first.Close()
-	must(t, os.WriteFile(filepath.Join(dir, TmpDir, "leftover"), []byte("half a save"), 0o600))
-	v, err := Open(dir)
-	must(t, err)
-	t.Cleanup(func() { _ = v.Close() })
-	assertNoTemps(t, dir)
-}
-
 func assertNoTemps(t *testing.T, dir string) {
 	t.Helper()
 	if n := temps(dir); n != 0 {

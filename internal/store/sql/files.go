@@ -37,8 +37,14 @@ func createExclusive(path, what string) (*os.File, error) {
 	return f, nil
 }
 
-// syncDir fsyncs the folder holding path, so a created file's entry is durable.
-func syncDir(path string) error {
+// syncDir fsyncs the folder holding path, so a created file's entry is durable. A variable,
+// with syncFile, so a test can model what a power loss keeps (TestKeepIntentCopyIsDurable).
+var syncDir = syncParent
+
+// syncFile fsyncs f's data.
+var syncFile = (*os.File).Sync
+
+func syncParent(path string) error {
 	d, err := os.Open(filepath.Dir(path)) //nolint:gosec // G304: the state directory
 	if err != nil {
 		return err

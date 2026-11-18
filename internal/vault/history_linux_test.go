@@ -226,8 +226,9 @@ func TestCommitCrashEverywhere(t *testing.T) {
 			t.Fatalf("kill at %d: %v", n, err)
 		}
 
-		v, err = Open(dir) // restart
+		v, err = Open(dir) // restart: open, then the sweep (after recovery, ADR-0033)
 		must(t, err)
+		must(t, v.Sweep(nil))
 		_, err = v.EnableGit()
 		must(t, err)
 		if left := temps(dir); left != 0 {

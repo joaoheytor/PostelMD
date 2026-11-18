@@ -46,8 +46,9 @@ func checkOwner(dataDir string) error {
 // openInstance runs the startup steps after the listener (ADR-0030's order, as far as this
 // build goes): the data format (ADR-0025), app.db with its check, migrations and this start's
 // boot UUID, the auth state, go-git's transports, the format table's vault check, the vault
-// (adoption check, temp sweep, rename probe) and its git repository, the first upgrade, then
-// the startup scan's first pass when the vault has file IDs (ADR-0031). Nothing is opened before the format check.
+// (adoption check, rename probe) and its git repository, the first upgrade, intent recovery
+// and the temp sweep (ADR-0033), then the startup scan's first pass when the vault has file
+// IDs (ADR-0031). Nothing is opened before the format check.
 func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slog.Logger) (*instance, error) {
 	if err := ctx.Err(); err != nil { // stopped while the listener came up
 		return nil, err
@@ -79,6 +80,13 @@ func openInstance(ctx context.Context, paths layout.Paths, boot string, log *slo
 	// errors, ADR-0037).
 	db.OnWriterFault(goReadOnly(in.vault, log))
 	if err := firstUpgrade(ctx, db, in.vault, start, paths, log); err != nil {
+		in.close(log, true)
+		return nil, err
+	}
+	// After the upgrade (which ends with no intent open), before the sweep (which must spare
+	// the temps recovery judges) and before the scan: the scan leaves an intent's paths alone,
+	// so with the intents ended first its first pass decides those paths too (ADR-0033).
+	if err := recoverIntents(ctx, db, in.vault, paths.State, log); err != nil {
 		in.close(log, true)
 		return nil, err
 	}

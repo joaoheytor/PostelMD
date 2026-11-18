@@ -64,7 +64,7 @@ Nothing important lives anywhere else:
 | `.postelmd/` | Credentials (password hash), the session secret, `config.yaml` if you wrote one; from `:main` after PR #175, `app.db` (with `app.db-wal` and `app.db-shm` while it runs), the database; from `:main` with the file-identity tables, `pre-migrate-<from>-<to>.db` (the database as it was before an upgrade from version `<from>` to `<to>`, such as `pre-migrate-1-2.db`) and `post-migration-started-<from>-<to>` (a record that the upgrade finished): keep both with `app.db` |
 | `.postelmd/rollback-<time>/` | Written by `db rollback` (any data format): the database it replaced, with its `-wal` and `-shm`, and the pre-migration copy it restored from |
 | `.postelmd/damaged-<time>/` | From data format 2: the database files `db rebuild` moved aside (and any `attempt-<n>/` it made); the only copy of the old file IDs |
-| `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept |
+| `.postelmd/recovery/` | From data format 2: `rebuild-<time>/` holds the unfinished saves `db rebuild` kept; `<op-id>/` (32 hex digits) holds what the start kept of a save that didn't finish: `temp`, the edit, when the note had changed outside PostelMD meanwhile (a warning in the log names the op ID), or `temp` and `target` for an operation flagged as interference (an error and an `intent.flagged` audit event name it; the note stays as it is until you decide). Copy back what you want to keep. ADR-0033 removes them after 7 days; until the purge job ships, they stay until you remove them |
 | `.postelmd/rebuild.intent` | Only while a `db rebuild` is unfinished: back it up with the rest, and restore it with them, so the restored instance finishes that rebuild |
 
 If you adopted a folder with `-v ~/notes:/data/vaults/notes`, back up `~/notes` too: it
@@ -795,6 +795,23 @@ was full or reported an I/O error, or the database is damaged. Only a restart en
 2. Fix the cause: free space (`df -h "$data"`), or check the disk (`dmesg` for I/O errors).
 3. Restart: `docker restart postelmd`. The start checks the database (`quick_check`); if it
    is damaged, the start refuses and the message says what to do.
+
+## Start refuses: intent recovery
+
+Builds with intents only (data format 2). Symptom: the container exits at every start, and
+the last line is `postelmd serve: intent recovery: the <kind> intent <op-id>: …`. At start,
+PostelMD finishes or undoes each operation a crash interrupted (an *intent*, ADR-0033)
+before it serves anything. Here it couldn't, so it refuses, and it refuses again at every start
+until the cause is gone: serving with the operation half done could lose an edit.
+
+1. Read the rest of the line: the error after the op ID says which step failed. Most often
+   it is the disk (`ENOSPC`, `EIO`: free space with `df -h "$data"`, check `dmesg`) or a
+   permission on `.postelmd/recovery/` or the vault's `.postelmd-tmp/` (they must belong to
+   the user PostelMD runs as, mode `0700`). Fix it and restart.
+2. If the cause can't be fixed, a later build adds `postelmd intents resolve <op-id>` to end
+   one intent by hand (#199). Until then, the way out is `postelmd db rebuild`
+   ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)): it starts a new
+   database with no intents, and keeps the vault's temps in `.postelmd/recovery/`.
 
 ## Database lost, or the vault marker doesn't match
 

@@ -176,7 +176,9 @@ func assignAndMark(ctx context.Context, db *sqlstore.DB, o RebuildOptions, r sql
 }
 
 // assign is the first assignment's transaction (ADR-0031) with a new vault UUID and the
-// rebuild's UUID. It opens the vault, which adopts it and sweeps what step 3 left.
+// rebuild's UUID. It opens the vault, which adopts it; Open no longer sweeps (ADR-0033), so
+// what step 3 left in the temp folder (the entries it logged, a folder) waits for the next
+// serve start's sweep, which the new database's empty intents table spares nothing of.
 func assign(ctx context.Context, db *sqlstore.DB, o RebuildOptions, r sqlstore.Rebuild, out *Rebuilt) error {
 	v, err := vault.Open(o.Vault, o.FS...)
 	if err != nil {
