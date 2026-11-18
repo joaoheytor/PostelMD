@@ -45,8 +45,10 @@ type Totals struct {
 
 // Recover judges every open intent, oldest first, and leaves only the flagged ones. A
 // flagged intent is left as it is: the operator decides (#199). An intent it can't end
-// stops it with an error naming that intent's kind and op ID, never a path, and the start
-// refuses (the runbook's "Start refuses: intent recovery").
+// stops it with an error that names that intent's kind and op ID; the cause it wraps may
+// quote a path (an os.Root PathError, an Lstat in the state directory), so it is printed
+// to the operator, not logged. The start refuses (the runbook's "Start refuses: intent
+// recovery").
 func Recover(ctx context.Context, r Recovery) (Totals, error) {
 	var t Totals
 	err := r.Vault.Locked(ctx, func() error {

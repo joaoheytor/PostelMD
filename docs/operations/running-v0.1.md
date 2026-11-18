@@ -808,9 +808,9 @@ until the cause is gone: serving with the operation half done could lose an edit
    it is the disk (`ENOSPC`, `EIO`: free space with `df -h "$data"`, check `dmesg`) or a
    permission on `.postelmd/recovery/` or the vault's `.postelmd-tmp/` (they must belong to
    the user PostelMD runs as, mode `0700`). Fix it and restart.
-2. If the cause can't be fixed, a later build adds `postelmd intents resolve <op-id>` to end
-   one intent by hand (#199). Until then, the way out is `postelmd db rebuild`
-   ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)): it starts a new
+2. If the cause can't be fixed, the last resort is `postelmd db rebuild`
+   ([Database lost](#database-lost-or-the-vault-marker-doesnt-match)). **It replaces every
+   file ID**: links and history that name a note by its ID stop matching. It starts a new
    database with no intents, and keeps the vault's temps in `.postelmd/recovery/`.
 
 ## Database lost, or the vault marker doesn't match
