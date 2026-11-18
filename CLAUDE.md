@@ -170,6 +170,11 @@ CHANGELOG.md           Keep a Changelog; every user-visible PR adds to [Unreleas
   PRs, any other `gh api` and repo settings stay permission prompts. The guard is a
   guardrail for agents, not the gate: the allowed test runners (`make`, `go test`, `npm`)
   can run any code, so GitHub branch protection and rulesets are the hard gate.
+  The maintainer may opt in, per clone, with a git-ignored `.claude/guard-trust.local.json`
+  (`{"trust": ["shell-writes", "unparsed-local", "accepted-adr"]}`, any subset; see
+  `.claude/hooks/trust.py`): then shell writes inside the project, CAN'T PARSE on a command
+  that stays local (no outward tool or path outside the project) and edits to Accepted ADRs
+  stop asking. Every other ask and every deny stay; agents never create or edit that file.
 - The per-PR steps are in the `pr-slice` skill; `milestone-audit` maps a roadmap milestone's
   acceptance criteria to the tests that assert them; `pr-review` picks the reviewer personas
   in `.claude/agents/` for a PR.

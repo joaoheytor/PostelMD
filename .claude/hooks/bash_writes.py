@@ -157,6 +157,17 @@ def git_tracks(path):
     return ignored.returncode == 1  # 0: ignored (build output); 128: git can't tell
 
 
+def resolve(target, cwd, project):
+    """The normalized path a write target names, or None when it holds a variable or a
+    substitution the guard can't know before it runs ($CLAUDE_PROJECT_DIR is known)."""
+    for var in ("${CLAUDE_PROJECT_DIR}", "$CLAUDE_PROJECT_DIR"):
+        if project and target.startswith(var):
+            target = project + target[len(var):]
+    if "$" in target or "`" in target:
+        return None
+    return os.path.normpath(os.path.join(cwd, os.path.expanduser(target)))
+
+
 def repo_write_targets(cmd, cwd):
     """The targets of cmd that are repository files (in a git work tree, not ignored)."""
     if not re.search(r">|\btee\b|\bsed\b|\bperl\b", cmd):
@@ -164,12 +175,9 @@ def repo_write_targets(cmd, cwd):
     found = []
     project = os.environ.get("CLAUDE_PROJECT_DIR", "")
     for t in write_targets(cmd):
-        for var in ("${CLAUDE_PROJECT_DIR}", "$CLAUDE_PROJECT_DIR"):
-            if project and t.startswith(var):
-                t = project + t[len(var):]
-        if "$" in t or "`" in t:
+        path = resolve(t, cwd, project)
+        if path is None:
             continue  # unexpanded variable or substitution: unknown before it runs
-        path = os.path.normpath(os.path.join(cwd, os.path.expanduser(t)))
         if ".git" in path.split(os.sep) or os.path.basename(path) == "config.worktree":
             found.append(t)  # git config and hooks: core.fsmonitor, hooksPath, diff.external...
         elif not scratch(path, (project,)) and git_tracks(path):

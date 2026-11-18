@@ -21,6 +21,10 @@ Modes (first CLI argument):
            mentions git, go, gh, npm, npx, make or scripts/ asks when it can't be tokenized
            or shscan.py flags it, and when a wrapper (sudo, xargs, nice -n, ...) runs one.
 
+The maintainer's git-ignored .claude/guard-trust.local.json (trust.py) can stop three asks:
+shell writes inside the project, CAN'T PARSE on a command that stays local (localcmd.py) and
+edits to Accepted ADRs. Every other ask, and every deny, stays; writing that file asks.
+
 These are guardrails for an agent, not a security boundary: CI and branch protection are the
 hard gates.
 
@@ -41,9 +45,11 @@ from content import has_secret, public_reasons
 from gitdir import cd_outside, check as check_gitdir
 from outward import CMD_START, GH, GIT, check as check_outward
 from gh_rules import output_filters as gh_output_filters
+from localcmd import local_only
 from shparse import bare, indirect, segments, wrapped
 from shscan import mentions_tool, unmodelled
 from shvars import normalize
+import trust
 # Paths where secret-SHAPED fixtures are legitimate (the secret scanner's own tests):
 # downgrade deny -> ask so a human confirms the value is fake. Failure scenarios live in
 # _test.go files next to the code they cover.
@@ -88,6 +94,9 @@ def check_secrets(tool_input):
 
 def check_public(tool_input):
     path = rel_path(tool_input)
+    if os.path.basename(path) == trust.NAME:
+        respond("ask", f"{path} is the maintainer's opt-in that stops some guard prompts "
+                       "(trust.py). Only the maintainer turns it on.")
     if path.endswith("public-guard.local.txt") or path.startswith(".claude/hooks/"):
         return
     reasons = public_reasons(written_text(tool_input), path)
@@ -141,8 +150,8 @@ def check_adr(tool_input):
     on_main, where = adr_on_main(full)
     if on_main is None:  # not in git: judge the file as it is
         on_main, where = current, "the file on disk"
-    if not ACCEPTED.search(on_main):
-        return  # Proposed on main, or new on this branch: still editable
+    if not ACCEPTED.search(on_main) or trust.trusted("accepted-adr"):
+        return  # Proposed on main, new on this branch, or the maintainer's opt-in
     if tool_input.get("content") is not None:
         respond("ask", f"{path} is ACCEPTED on {where}: rewriting the whole file may change its "
                        "Decision. Accepted decisions change only by superseding; clarifications "
@@ -222,7 +231,10 @@ def check_git(tool_input, cwd):
     if label:
         respond("ask", f"OUTWARD-FACING: {label}. PostelMD is public; approve only if the "
                        "maintainer asked for exactly this in the conversation.")
-    why = unparsed(cmd) or wrapper(cmd)
+    why = unparsed(cmd)
+    if why and trust.trusted("unparsed-local") and stays_local(cmd, cwd):
+        why = None  # the opt-in: on to the remaining checks
+    why = why or wrapper(cmd)
     if why:
         respond("ask", f"CAN'T PARSE: {why}. The guard's checks can't see this command as "
                        "bash will run it.")
@@ -241,9 +253,25 @@ def check_git(tool_input, cwd):
                        "as one simple command with allowlisted arguments (outward.py).")
 
 
+def stays_local(cmd, cwd):
+    try:
+        return local_only(cmd, cwd)
+    except Exception:  # pylint: disable=broad-except  # fail closed: ask as without the opt-in
+        return False
+
+
 def check_bash_writes(tool_input, cwd):
-    targets = repo_write_targets(normalize(tool_input.get("command") or ""), cwd)
-    if targets:
+    cmd = normalize(tool_input.get("command") or "")
+    found = trust.writes_opt_in(cmd, cwd)
+    if found:
+        respond("ask", f"SHELL WRITE to {found}, the maintainer's opt-in that stops some guard "
+                       "prompts (trust.py). Only the maintainer turns it on.")
+    targets = repo_write_targets(cmd, cwd)
+    try:
+        allowed = trust.trusted("shell-writes") and trust.shell_writes_ok(targets, cwd)
+    except Exception:  # pylint: disable=broad-except  # fail closed: ask as without the opt-in
+        allowed = False
+    if targets and not allowed:
         respond("ask", "SHELL WRITE to repository file(s) " + ", ".join(targets[:5]) + ". Use "
                        "Write/Edit so the guard hook sees the change (secrets, public-repo and ADR "
                        "checks); approve only for generated output that Write/Edit can't produce.")
