@@ -171,6 +171,7 @@ never seen, or whose tombstone has expired, returns `404 {"code": "unknown-file"
   | Same inode | Other inode | Not applied; the destination appeared externally (the no-clobber rename failed or never ran): drop the intent |
   | Absent | Same inode | Applied: roll forward with the recorded ID mapping (IDs preserved even for identical files) |
   | Other inode | Same inode | Applied, then the source was recreated externally: roll forward; the new source is reconciled as **new** |
+  | Same inode | Same inode | A power loss kept both entries (the destination's folder is synced first). A **file**: unlink the source name, then as "Applied". A folder: interference ([ADR-0033](0033-v02-intents.md)) |
 
   **Two-step fallback** (`link-unlink`, files only, where `renameat2` isn't available):
   | Source | Destination | Action |

@@ -236,17 +236,18 @@ func TestRunbookRollbackToAVersion1Build(t *testing.T) {
 			t.Fatal(err)
 		}
 		openWith(t, dir, version1(t))
-		openWith(t, dir, embeddedFS(t)) // the upgrade: 1 → 2
+		last := len(embeddedFS(t))
+		openWith(t, dir, embeddedFS(t)) // the upgrade: 1 → last
 		aside := filepath.Join(filepath.Dir(dir), "rolled-back")
 		if err := os.Mkdir(aside, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		move := []string{AppDB, AppDB + "-wal", AppDB + "-shm"}
 		if c.moveMarker {
-			move = append(move, markerName(1, 2))
+			move = append(move, markerName(1, last))
 		}
 		if moveSnapshot {
-			move = append(move, snapshotName(1, 2))
+			move = append(move, snapshotName(1, last))
 		}
 		for _, name := range move {
 			if err := os.Rename(filepath.Join(dir, name), filepath.Join(aside, name)); err != nil && !errors.Is(err, os.ErrNotExist) {

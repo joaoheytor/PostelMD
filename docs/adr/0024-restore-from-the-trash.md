@@ -1,6 +1,6 @@
 # ADR-0024: Restore from the trash
 
-- **Status:** Accepted
+- **Status:** Accepted; its "No intent" bullet, and what its Listing reads, are superseded by [ADR-0033](0033-v02-intents.md) (a restore has an intent; the list reads the trash records)
 - **Date:** 2026-11-10
 
 ## Context
